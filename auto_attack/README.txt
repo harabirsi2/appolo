@@ -42,10 +42,10 @@ HOW TO START (GUI)
 
 
 GUI TABS
-  Setup       Scan / Quick Start / Resolve Names / Select all/none /
-              toggle IP forwarding / How To Use (built-in guide);
-              device list with checkboxes; mode dropdown;
-              START / STOP & REPAIR
+  Setup       Scan / Quick Start / Resolve Names / Fingerprint /
+              Select all/none / toggle IP forwarding / How To Use;
+              device list with checkboxes (IP, MAC, hostname, open ports,
+              OS guess); mode dropdown; START / STOP & REPAIR
   Tracking    per-host activity table (DNS / SNI / HTTP counters + age +
               event count), Top 10, Watch Selected (streams a host's recent
               events into the log), Show Track Log, List Track Logs, plus a
@@ -124,6 +124,18 @@ DEVICE NAMES
   nothing may stay as the vendor name.
 
 
+DEVICE FINGERPRINTING
+  "Fingerprint" (or the console command "fingerprint [ip|*]") runs a quick
+  TCP connect scan of ~30 common ports against each device and shows the
+  results in the Ports and OS columns of the device list. It also grabs a
+  short banner where it can (SSH/HTTP) and makes a coarse OS/type guess,
+  for example:
+    192.168.0.1    53,80,443      Router/embedded
+    192.168.0.179  8008,8009,8443 Google Cast / Android TV
+  Devices with a firewall (most phones) usually show no open ports. Scans
+  run in the background per device, so the list updates as they finish.
+
+
 LIVE PROOF IT'S WORKING
   status bar (refreshed ~every 800 ms):
     [ ATTACKING ] | 1 / 5 targets | mode: intercept | fwd: on |
@@ -148,7 +160,8 @@ FILES WRITTEN (under atk\)
 CONSOLE (optional — auto_attack.exe can also be run by hand)
   1 scan | t <spec> | m <1-6> | g start | x stop | i status | h help
   extras: users, top, tracks, watch <ip>, showtrack <ip> <n>,
-           detail <ip> [n], stats [ip], _focus <ip|none>, pcap [on|off],
+           detail <ip> [n], stats [ip], fingerprint [ip|*],
+           _focus <ip|none>, pcap [on|off],
           block <dom> [ip|*], redirect <dom> <ip> [ip|*], unblock <dom>,
           rules, save, load, blockapp <app> [ip|*], unblockapp <app>,
           apps, appsigs, msgall <text>, msg <ip> <text>, msgstop,

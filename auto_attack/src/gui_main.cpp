@@ -44,7 +44,8 @@
 #define COL_ORANGE   RGB(255, 170, 60)
 #define COL_RED      RGB(255, 90, 90)
 
-struct Victim   { std::string ip, mac, name; bool sel = false; };
+struct Victim   { std::string ip, mac, name; bool sel = false;
+                  std::string ports, os, banner; };
 struct Activity { std::string ip, name; long dns = 0, sni = 0, http = 0; unsigned long age = 0;
                   unsigned long long capBytes = 0, events = 0; bool capFull = false; };
 struct Rule     { std::string pattern, action, target, victim; };
@@ -132,7 +133,7 @@ std::string g_stageStatsIp, g_stageStatsText;
 enum {
     ID_TAB = 1000, ID_ADAPTER_COMBO, ID_STATUS_TEXT,
     ID_HDR_START, ID_HDR_STOP, ID_HDR_RESTORE,
-    ID_SCAN, ID_QUICK, ID_SELECT_ALL, ID_SELECT_NONE, ID_NAMES,
+    ID_SCAN, ID_QUICK, ID_SELECT_ALL, ID_SELECT_NONE, ID_NAMES, ID_FINGERPRINT,
     ID_MODE_COMBO, ID_START, ID_STOP, ID_RESTORE, ID_FWD,
     ID_VICTIM_LV,
     ID_ACTIVITY_LV, ID_REFRESH_ACT, ID_TOP, ID_SHOWTRACK, ID_TRACKS, ID_NAMES2, ID_WATCH,
@@ -270,7 +271,8 @@ static void beginFrameLocked() {
 }
 
 static bool sameVictim(const Victim& a, const Victim& b) {
-    return a.ip == b.ip && a.mac == b.mac && a.name == b.name && a.sel == b.sel;
+    return a.ip == b.ip && a.mac == b.mac && a.name == b.name && a.sel == b.sel &&
+           a.ports == b.ports && a.os == b.os && a.banner == b.banner;
 }
 static bool sameActivity(const Activity& a, const Activity& b) {
     // age changes every second; don't refresh just for that
@@ -575,10 +577,16 @@ void handleDumpLine(const std::string& line) {
         for (auto& v : g_stageVictims) if (v.ip == p[0]) {
             v.mac = p[1]; v.name = p[2];
             v.sel = atoi(p[3].c_str()) != 0;
+            if (p.size() > 4) v.ports  = p[4];
+            if (p.size() > 5) v.os     = p[5];
+            if (p.size() > 6) v.banner = p[6];
             return;
         }
         Victim v; v.ip = p[0]; v.mac = p[1]; v.name = p[2];
         v.sel = atoi(p[3].c_str()) != 0;
+        if (p.size() > 4) v.ports  = p[4];
+        if (p.size() > 5) v.os     = p[5];
+        if (p.size() > 6) v.banner = p[6];
         g_stageVictims.push_back(v);
     } else if (line.rfind("STATUS ", 0) == 0) {
         std::string s = line.substr(7);
@@ -827,6 +835,12 @@ void refreshVictimsLV(HWND hLV) {
             ListView_SetItemText(hLV, (int)i, 2, wbuf);
             MultiByteToWideChar(CP_UTF8, 0, v.name.c_str(), -1, wbuf, 256);
             ListView_SetItemText(hLV, (int)i, 3, wbuf);
+            MultiByteToWideChar(CP_UTF8, 0, v.ports.c_str(), -1, wbuf, 256);
+            ListView_SetItemText(hLV, (int)i, 4, wbuf);
+            std::string ostext = v.os;
+            if (!v.banner.empty()) ostext += "  [" + v.banner + "]";
+            MultiByteToWideChar(CP_UTF8, 0, ostext.c_str(), -1, wbuf, 256);
+            ListView_SetItemText(hLV, (int)i, 5, wbuf);
             ListView_SetCheckState(hLV, (int)i, v.sel);
         }
     }
@@ -1344,13 +1358,14 @@ void setupLV(HWND hLV, const wchar_t** cols, const int* widths, int ncols) {
 
 void buildSetupPage(HWND page) {
     int y = 10;
-    makeButton(page, L"Scan Network",   ID_SCAN,       8,   y, 120, 30);
-    makeButton(page, L"Quick Start",    ID_QUICK,      134, y, 110, 30);
-    makeButton(page, L"Resolve Names",  ID_NAMES,      250, y, 120, 30);
-    makeButton(page, L"Select All",     ID_SELECT_ALL, 380, y, 100, 30);
-    makeButton(page, L"Select None",    ID_SELECT_NONE,486, y, 100, 30);
-    makeButton(page, L"Toggle Forward", ID_FWD,        600, y, 130, 30);
-    makeButton(page, L"How To Use",     ID_HELP,       736, y, 110, 30);
+    makeButton(page, L"Scan Network",   ID_SCAN,       8,   y, 110, 30);
+    makeButton(page, L"Quick Start",    ID_QUICK,      124, y, 100, 30);
+    makeButton(page, L"Resolve Names",  ID_NAMES,      230, y, 110, 30);
+    makeButton(page, L"Fingerprint",    ID_FINGERPRINT,346, y, 110, 30);
+    makeButton(page, L"Select All",     ID_SELECT_ALL, 462, y, 90, 30);
+    makeButton(page, L"Select None",    ID_SELECT_NONE,558, y, 90, 30);
+    makeButton(page, L"Toggle Forward", ID_FWD,        654, y, 120, 30);
+    makeButton(page, L"How To Use",     ID_HELP,       780, y, 110, 30);
 
     makeStatic(page, L"Devices on network", 8, 50, 400, 20, g_fontBold);
     g_hVictimLV = makeListView(page, ID_VICTIM_LV, 8, 74, 900, 340);
@@ -1369,9 +1384,9 @@ void buildSetupPage(HWND page) {
     SetWindowLongW(g_hEmptyState, GWL_STYLE,
         GetWindowLongW(g_hEmptyState, GWL_STYLE) | SS_CENTER);
 
-    const wchar_t* cols[] = {L"#", L"IP", L"MAC", L"Hostname"};
-    const int widths[] = {40, 130, 150, 250};
-    for (int i = 0; i < 4; ++i) {
+    const wchar_t* cols[] = {L"#", L"IP", L"MAC", L"Hostname", L"Ports", L"OS"};
+    const int widths[] = {36, 118, 132, 190, 190, 150};
+    for (int i = 0; i < 6; ++i) {
         LVCOLUMNW c = {0};
         c.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
         c.pszText = (LPWSTR)cols[i];
@@ -1719,6 +1734,7 @@ void onQuick()     { sendCmd("gg");   }
 void onRestore()   { sendCmd("restore"); }
 void onFwd()       { sendCmd("f"); }
 void onNames()     { sendCmd("names"); }
+void onFingerprint(){ sendCmd("fingerprint *"); appendLog("[*] fingerprinting all devices...\r\n"); }
 void onSelectAll() { sendCmd("t all"); }
 void onSelectNone(){ sendCmd("t none"); }
 void onTop()       { sendCmd("top 10"); }
@@ -2037,6 +2053,7 @@ LRESULT CALLBACK MainProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
                 case ID_SCAN:         onScan();      break;
                 case ID_QUICK:        onQuick();     break;
                 case ID_NAMES:        onNames();     break;
+                case ID_FINGERPRINT:  onFingerprint(); break;
                 case ID_NAMES2:       onNames();     break;
                 case ID_SELECT_ALL:   onSelectAll(); break;
                 case ID_SELECT_NONE:  onSelectNone();break;
@@ -2384,6 +2401,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow) {
     addTooltip(GetDlgItem(g_pages[0], ID_SCAN), L"Scan the LAN for devices.");
     addTooltip(GetDlgItem(g_pages[0], ID_QUICK), L"Scan + select all + intercept + arm in one click.");
     addTooltip(GetDlgItem(g_pages[0], ID_NAMES), L"Resolve hostnames for discovered devices.");
+    addTooltip(GetDlgItem(g_pages[0], ID_FINGERPRINT), L"TCP port scan + OS/banner guess for every discovered device.");
     addTooltip(GetDlgItem(g_pages[0], ID_SELECT_ALL), L"Select all devices.");
     addTooltip(GetDlgItem(g_pages[0], ID_SELECT_NONE), L"Deselect all devices.");
     addTooltip(GetDlgItem(g_pages[0], ID_FWD), L"Toggle IP forwarding on/off.");

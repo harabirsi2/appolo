@@ -247,6 +247,11 @@ struct Victim {
     int         namePrio = 0;
     bool        sel = false;
     DWORD       lastSeen = 0;
+    // service fingerprint
+    std::string ports;          // comma-separated open TCP ports
+    std::string osGuess;        // coarse device/OS guess
+    std::string banner;         // first banner line, if any
+    bool        fingerprinted = false;
 };
 static std::vector<Victim> g_victims;
 static std::mutex          g_vmutex;
@@ -575,6 +580,130 @@ static int victimNamePrio(const std::string& ip) {
     for (auto& v : g_victims)
         if (v.ip == ip) return v.namePrio;
     return -1;
+}
+
+// ---------------------------------------------------------------
+// service fingerprinting: TCP connect scan + light banner grab
+// ---------------------------------------------------------------
+static std::atomic<int> g_fpActive{0};
+
+static bool tcpPortOpen(const std::string& ip, int port, int timeoutMs) {
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) return false;
+    u_long nb = 1;
+    ioctlsocket(s, FIONBIO, &nb);
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_port   = htons((u_short)port);
+    a.sin_addr.s_addr = inet_addr(ip.c_str());
+    bool open = false;
+    if (connect(s, (sockaddr*)&a, sizeof(a)) == 0) {
+        open = true;
+    } else if (WSAGetLastError() == WSAEWOULDBLOCK) {
+        fd_set wf, ef;
+        FD_ZERO(&wf); FD_SET(s, &wf);
+        FD_ZERO(&ef); FD_SET(s, &ef);
+        timeval tv;
+        tv.tv_sec  = timeoutMs / 1000;
+        tv.tv_usec = (timeoutMs % 1000) * 1000;
+        if (select(0, nullptr, &wf, &ef, &tv) > 0) {
+            int err = 0, l = sizeof(err);
+            getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&err, &l);
+            open = (err == 0);
+        }
+    }
+    closesocket(s);
+    return open;
+}
+
+static std::string tcpBanner(const std::string& ip, int port,
+                             const std::string& probe, int timeoutMs) {
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) return "";
+    DWORD tv = (DWORD)timeoutMs;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&tv, sizeof(tv));
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_port   = htons((u_short)port);
+    a.sin_addr.s_addr = inet_addr(ip.c_str());
+    std::string out;
+    if (connect(s, (sockaddr*)&a, sizeof(a)) == 0) {
+        if (!probe.empty()) ::send(s, probe.data(), (int)probe.size(), 0);
+        char buf[256] = {0};
+        int n = recv(s, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+            for (int i = 0; i < n; ++i) {
+                char c = buf[i];
+                if (c == '\r' || c == '\n') break;
+                if (c >= 32 && c < 127) out += c;
+            }
+        }
+    }
+    closesocket(s);
+    return out;
+}
+
+static void fingerprintVictim(std::string ip) {
+    static const int ports[] = {
+        21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 445, 554, 587,
+        631, 993, 995, 1723, 3306, 3389, 5000, 5432, 5900, 6379, 8008,
+        8009, 8080, 8443, 9100, 5353
+    };
+    std::string openList;
+    bool p22 = false, p80 = false, p443 = false, p53 = false, p135 = false,
+         p139 = false, p445 = false, p3389 = false, p8008 = false,
+         p8009 = false, p631 = false, p9100 = false, p554 = false;
+    for (int port : ports) {
+        if (!tcpPortOpen(ip, port, 220)) continue;
+        if (!openList.empty()) openList += ",";
+        openList += std::to_string(port);
+        switch (port) {
+            case 22:   p22 = true;   break;
+            case 80:   p80 = true;   break;
+            case 443:  p443 = true;  break;
+            case 53:   p53 = true;   break;
+            case 135:  p135 = true;  break;
+            case 139:  p139 = true;  break;
+            case 445:  p445 = true;  break;
+            case 3389: p3389 = true; break;
+            case 8008: p8008 = true; break;
+            case 8009: p8009 = true; break;
+            case 631:  p631 = true;  break;
+            case 9100: p9100 = true; break;
+            case 554:  p554 = true;  break;
+        }
+    }
+
+    std::string banner;
+    if (p22)        banner = tcpBanner(ip, 22, "", 400);
+    else if (p80)   banner = tcpBanner(ip, 80, "HEAD / HTTP/1.0\r\n\r\n", 500);
+    else if (p8008) banner = tcpBanner(ip, 8008, "HEAD / HTTP/1.0\r\n\r\n", 500);
+
+    std::string os;
+    if (p8008 || p8009)          os = "Google Cast / Android TV";
+    else if (p9100 || p631)      os = "Printer";
+    else if (p3389 || p135 || p139 || p445) os = "Windows";
+    else if (p554)               os = "IP camera / RTSP";
+    else if (p22)                os = "Linux/Unix (SSH)";
+    else if (p53 || (p80 && p443)) os = "Router/embedded";
+    else if (!openList.empty())  os = "host";
+
+    {
+        std::lock_guard<std::mutex> lk(g_vmutex);
+        for (auto& v : g_victims) {
+            if (v.ip != ip) continue;
+            v.ports        = openList;
+            v.osGuess      = os;
+            v.banner       = banner;
+            v.fingerprinted = true;
+            break;
+        }
+    }
+    std::string extra = banner.empty() ? "" : (" banner=" + banner);
+    PF("[+] fingerprint %-15s open=%s os=%s%s\n", ip.c_str(),
+       openList.empty() ? "-" : openList.c_str(),
+       os.empty() ? "?" : os.c_str(), extra.c_str());
+    g_fpActive--;
 }
 
 struct Activity {
@@ -3485,6 +3614,7 @@ static void help() {
         "    users | top [n] | tracks | watch <ip> | showtrack <ip> [n]\n"
         "    detail <ip> [n]           live event timeline for one device\n"
         "    stats [ip]                traffic breakdown (bytes/protocols/peers)\n"
+        "    fingerprint [ip|*]        TCP port scan + OS/banner guess\n"
         "    _focus <ip|none>          focus a device for the GUI timeline\n"
         "    pcap [on|off]             record per-device atk\\captures\\<ip>.pcap\n"
         "  RULES / APPS\n"
@@ -3711,6 +3841,23 @@ int main(int argc, char** argv) {
             else PF("[-] usage: stats <ip>\n");
             continue;
         }
+        if (line == "fingerprint" || line.rfind("fingerprint ", 0) == 0) {
+            std::string who = line.size() > 12 ? trim(line.substr(12)) : "*";
+            std::vector<std::string> targets;
+            if (!who.empty() && who != "*") {
+                targets.push_back(who);          // allow any IP, victim or not
+            } else {
+                std::lock_guard<std::mutex> lk(g_vmutex);
+                for (auto& v : g_victims) targets.push_back(v.ip);
+            }
+            if (targets.empty()) { PF("[-] no matching device\n"); continue; }
+            PF("[*] fingerprinting %d device(s)...\n", (int)targets.size());
+            for (auto& ip : targets) {
+                g_fpActive++;
+                std::thread(fingerprintVictim, ip).detach();
+            }
+            continue;
+        }
         if (line.rfind("_focus ", 0) == 0) {
             std::string ip = trim(line.substr(7));
             if (ip == "-" || ip == "none") ip.clear();
@@ -3820,9 +3967,10 @@ int main(int argc, char** argv) {
             std::vector<Victim> vSnap;
             { std::lock_guard<std::mutex> lk(g_vmutex); vSnap = g_victims; }
             for (auto& v : vSnap)
-                PF("VICTIM %s|%s|%s|%d\n",
+                PF("VICTIM %s|%s|%s|%d|%s|%s|%s\n",
                    v.ip.c_str(), v.mac.c_str(), v.name.c_str(),
-                   v.sel ? 1 : 0);
+                   v.sel ? 1 : 0, v.ports.c_str(), v.osGuess.c_str(),
+                   v.banner.c_str());
             int sel = 0;
             for (auto& v : vSnap) if (v.sel) sel++;
             int tracked = 0, rules_n = 0;
@@ -3918,6 +4066,9 @@ int main(int argc, char** argv) {
     if (g_sweeper.joinable())   g_sweeper.join();
     if (g_portal.joinable())    g_portal.join();
     for (int i = 0; i < 40 && g_dosActive.load() > 0; ++i) Sleep(50);
+    // fingerprint threads are detached; give them a moment to finish so they
+    // do not touch g_victims after shutdown
+    for (int i = 0; i < 240 && g_fpActive.load() > 0; ++i) Sleep(50);
     Sleep(100);   // let any in-flight portal responder close its socket
 
     restoreAll();
