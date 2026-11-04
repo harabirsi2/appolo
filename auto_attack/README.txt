@@ -48,7 +48,8 @@ GUI TABS
               OS guess); mode dropdown; START / STOP & REPAIR
   Tracking    per-host activity table (DNS / SNI / HTTP counters + age +
               event count), Top 10, Watch Selected (streams a host's recent
-              events into the log), Show Track Log, List Track Logs, plus a
+              events into the log), Show Track Log, List Track Logs,
+              Save Report, plus a
               live per-device timeline: pick a device in the dropdown to
               stream its recent network events, tick "Record PCAP" to save
               that device's raw packets, then "Save Timeline" or
@@ -136,6 +137,19 @@ DEVICE FINGERPRINTING
   run in the background per device, so the list updates as they finish.
 
 
+SESSION REPORT
+  "Save Report" on the Tracking tab (or the console command "report")
+  writes a snapshot of everything learned this session and opens it:
+    atk\report.html   styled, readable report - this host + gateway,
+                      every device (IP, MAC, name, OS/type, open ports,
+                      banner), per-device traffic totals (DNS/SNI/HTTP,
+                      events, bytes up/down, top protocol and top peer)
+                      and the full DNS rule list
+    atk\report.json   the same data as machine-readable JSON, for
+                      scripting or copying into another tool
+  Re-run it any time; it overwrites both files with the latest state.
+
+
 LIVE PROOF IT'S WORKING
   status bar (refreshed ~every 800 ms):
     [ ATTACKING ] | 1 / 5 targets | mode: intercept | fwd: on |
@@ -160,7 +174,7 @@ FILES WRITTEN (under atk\)
 CONSOLE (optional — auto_attack.exe can also be run by hand)
   1 scan | t <spec> | m <1-6> | g start | x stop | i status | h help
   extras: users, top, tracks, watch <ip>, showtrack <ip> <n>,
-           detail <ip> [n], stats [ip], fingerprint [ip|*],
+           detail <ip> [n], stats [ip], fingerprint [ip|*], report,
            _focus <ip|none>, pcap [on|off],
           block <dom> [ip|*], redirect <dom> <ip> [ip|*], unblock <dom>,
           rules, save, load, blockapp <app> [ip|*], unblockapp <app>,

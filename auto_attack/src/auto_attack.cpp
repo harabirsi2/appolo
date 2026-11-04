@@ -3083,6 +3083,133 @@ static void cmdDetail(const std::string& ip, int lines) {
     cmdStats(ip);
 }
 
+// write atk\report.html and atk\report.json from the current session state
+static void cmdReport() {
+    std::vector<Victim> vs;
+    { std::lock_guard<std::mutex> lk(g_vmutex); vs = g_victims; }
+    std::vector<Activity> acts;
+    { std::lock_guard<std::mutex> lk(g_activityMutex); for (auto& kv : g_activity) acts.push_back(kv.second); }
+    std::vector<DnsRule> rules;
+    { std::lock_guard<std::mutex> lk(g_dnsRuleMutex); rules = g_dnsRules; }
+
+    std::string stamp = tsFull();
+    CreateDirectoryA("atk", nullptr);
+
+    auto topOf = [](const std::unordered_map<std::string, long>& m,
+                    std::string& key, long& val) {
+        val = 0; key.clear();
+        for (auto& kv : m) if (kv.second > val) { val = kv.second; key = kv.first; }
+    };
+
+    // ---- HTML ----
+    FILE* f = fopen("atk\\report.html", "wb");
+    if (!f) { PF("[-] cannot write atk\\report.html\n"); return; }
+    fprintf(f, "<!doctype html><html><head><meta charset=\"utf-8\">"
+               "<title>auto_attack report</title>"
+               "<style>body{font-family:Segoe UI,Arial,sans-serif;background:#14161a;color:#e6e6e6;margin:24px}"
+               "h1{font-size:20px}h2{font-size:15px;margin-top:26px;color:#ffaa3c}"
+               "table{border-collapse:collapse;width:100%%;margin-top:8px}"
+               "th,td{border:1px solid #333;padding:5px 8px;font-size:12px;text-align:left;vertical-align:top}"
+               "th{background:#20242c}.m{color:#8aa}</style></head><body>");
+    fprintf(f, "<h1>auto_attack &mdash; session report</h1>");
+    fprintf(f, "<div class=\"m\">generated %s &middot; this host %s &middot; gateway %s</div>",
+            htmlEscape(stamp).c_str(), g_myIp.c_str(), g_gatewayIp.c_str());
+
+    fprintf(f, "<h2>Devices (%d)</h2><table>"
+               "<tr><th>IP</th><th>MAC</th><th>Name</th><th>OS / type</th>"
+               "<th>Open ports</th><th>Banner</th></tr>", (int)vs.size());
+    for (auto& v : vs) {
+        fprintf(f, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
+                v.ip.c_str(), v.mac.c_str(), htmlEscape(v.name).c_str(),
+                htmlEscape(v.osGuess).c_str(), htmlEscape(v.ports).c_str(),
+                htmlEscape(v.banner).c_str());
+    }
+    fprintf(f, "</table>");
+
+    fprintf(f, "<h2>Traffic by device</h2><table>"
+               "<tr><th>IP</th><th>DNS</th><th>SNI</th><th>HTTP</th><th>Events</th>"
+               "<th>Up</th><th>Down</th><th>Top protocol</th><th>Top peer</th></tr>");
+    for (auto& a : acts) {
+        std::string pk, ek; long pv = 0, ev = 0;
+        topOf(a.proto, pk, pv);
+        topOf(a.peers, ek, ev);
+        fprintf(f, "<tr><td>%s</td><td>%ld</td><td>%ld</td><td>%ld</td><td>%llu</td>"
+                   "<td>%llu</td><td>%llu</td><td>%s</td><td>%s</td></tr>",
+                a.ip.c_str(), a.dnsCount, a.sniCount, a.httpCount, a.events,
+                a.byUp, a.byDown,
+                htmlEscape(pk.empty() ? "-" : pk + " x" + std::to_string(pv)).c_str(),
+                htmlEscape(ek.empty() ? "-" : ek + " x" + std::to_string(ev)).c_str());
+    }
+    fprintf(f, "</table>");
+
+    if (!rules.empty()) {
+        fprintf(f, "<h2>DNS rules (%d)</h2><table>"
+                   "<tr><th>Pattern</th><th>Action</th><th>Target</th><th>Victim</th></tr>",
+                (int)rules.size());
+        for (auto& r : rules)
+            fprintf(f, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
+                    htmlEscape(r.pattern).c_str(), htmlEscape(r.action).c_str(),
+                    htmlEscape(r.targetIp).c_str(), htmlEscape(r.victim).c_str());
+        fprintf(f, "</table>");
+    }
+    fprintf(f, "</body></html>");
+    fclose(f);
+
+    // ---- JSON ----
+    FILE* j = fopen("atk\\report.json", "wb");
+    if (j) {
+        auto jesc = [](const std::string& s) {
+            std::string o;
+            for (char c : s) {
+                if (c == '"' || c == '\\') { o += '\\'; o += c; }
+                else if (c == '\n') o += "\\n";
+                else if (c == '\r') o += "\\r";
+                else if (c == '\t') o += "\\t";
+                else o += c;
+            }
+            return o;
+        };
+        fprintf(j, "{\n  \"generated\": \"%s\",\n", jesc(stamp).c_str());
+        fprintf(j, "  \"myip\": \"%s\",\n  \"gateway\": \"%s\",\n",
+                jesc(g_myIp).c_str(), jesc(g_gatewayIp).c_str());
+        fprintf(j, "  \"devices\": [\n");
+        for (size_t i = 0; i < vs.size(); ++i) {
+            auto& v = vs[i];
+            fprintf(j, "    {\"ip\":\"%s\",\"mac\":\"%s\",\"name\":\"%s\","
+                       "\"os\":\"%s\",\"ports\":\"%s\",\"banner\":\"%s\"}%s\n",
+                    jesc(v.ip).c_str(), jesc(v.mac).c_str(), jesc(v.name).c_str(),
+                    jesc(v.osGuess).c_str(), jesc(v.ports).c_str(), jesc(v.banner).c_str(),
+                    i + 1 < vs.size() ? "," : "");
+        }
+        fprintf(j, "  ],\n  \"activity\": [\n");
+        for (size_t i = 0; i < acts.size(); ++i) {
+            auto& a = acts[i];
+            std::string pk, ek; long pv = 0, ev = 0;
+            topOf(a.proto, pk, pv);
+            topOf(a.peers, ek, ev);
+            fprintf(j, "    {\"ip\":\"%s\",\"dns\":%ld,\"sni\":%ld,\"http\":%ld,"
+                       "\"events\":%llu,\"up\":%llu,\"down\":%llu,"
+                       "\"topProto\":\"%s\",\"topPeer\":\"%s\"}%s\n",
+                    jesc(a.ip).c_str(), a.dnsCount, a.sniCount, a.httpCount,
+                    a.events, a.byUp, a.byDown,
+                    jesc(pk).c_str(), jesc(ek).c_str(), i + 1 < acts.size() ? "," : "");
+        }
+        fprintf(j, "  ],\n  \"rules\": [\n");
+        for (size_t i = 0; i < rules.size(); ++i) {
+            auto& r = rules[i];
+            fprintf(j, "    {\"pattern\":\"%s\",\"action\":\"%s\",\"target\":\"%s\","
+                       "\"victim\":\"%s\"}%s\n",
+                    jesc(r.pattern).c_str(), jesc(r.action).c_str(),
+                    jesc(r.targetIp).c_str(), jesc(r.victim).c_str(),
+                    i + 1 < rules.size() ? "," : "");
+        }
+        fprintf(j, "  ]\n}\n");
+        fclose(j);
+    }
+    PF("[+] report -> atk\\report.html (%d device(s), %d activity row(s))\n",
+       (int)vs.size(), (int)acts.size());
+}
+
 static void cmdTracks() {
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA("atk\\tracks\\track_*.log", &fd);
@@ -3615,6 +3742,7 @@ static void help() {
         "    detail <ip> [n]           live event timeline for one device\n"
         "    stats [ip]                traffic breakdown (bytes/protocols/peers)\n"
         "    fingerprint [ip|*]        TCP port scan + OS/banner guess\n"
+        "    report                    write atk\\report.html + report.json\n"
         "    _focus <ip|none>          focus a device for the GUI timeline\n"
         "    pcap [on|off]             record per-device atk\\captures\\<ip>.pcap\n"
         "  RULES / APPS\n"
@@ -3811,6 +3939,7 @@ int main(int argc, char** argv) {
         if (line == "8" || line == "h" || line == "help") { help(); continue; }
         if (line == "users") { cmdUsers(); continue; }
         if (line == "tracks") { cmdTracks(); continue; }
+        if (line == "report") { cmdReport(); continue; }
         if (line == "top" || line.rfind("top ", 0) == 0) {
             int n = 10;
             if (line.size() > 4) n = atoi(trim(line.substr(4)).c_str());

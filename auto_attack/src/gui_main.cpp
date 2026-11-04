@@ -136,7 +136,7 @@ enum {
     ID_SCAN, ID_QUICK, ID_SELECT_ALL, ID_SELECT_NONE, ID_NAMES, ID_FINGERPRINT,
     ID_MODE_COMBO, ID_START, ID_STOP, ID_RESTORE, ID_FWD,
     ID_VICTIM_LV,
-    ID_ACTIVITY_LV, ID_REFRESH_ACT, ID_TOP, ID_SHOWTRACK, ID_TRACKS, ID_NAMES2, ID_WATCH,
+    ID_ACTIVITY_LV, ID_REFRESH_ACT, ID_TOP, ID_SHOWTRACK, ID_TRACKS, ID_NAMES2, ID_WATCH, ID_REPORT,
     ID_TIMELINE_COMBO, ID_CAP_CHECK, ID_TIMELINE_SAVE, ID_CAPTURES,
     ID_BLOCK_DOMAIN, ID_BLOCK_VICTIM, ID_BLOCK_BTN,
     ID_REDIR_DOMAIN, ID_REDIR_IP, ID_REDIR_VICTIM, ID_REDIR_BTN,
@@ -147,7 +147,7 @@ enum {
     ID_APPS_LV, ID_APPS_REFRESH, ID_APPS_BLOCK, ID_APPS_UNBLOCK, ID_APPS_SIGS,
     ID_LOG_EDIT, ID_LOG_CLEAR, ID_LOG_COPY, ID_LOG_SAVE,
     ID_HELP,
-    ID_TIMER_DUMP, ID_TIMER_AUTOSCAN,
+    ID_TIMER_DUMP, ID_TIMER_AUTOSCAN, ID_TIMER_REPORT,
     WM_APP_LOGNEW = WM_APP + 1,
     WM_APP_REFRESH = WM_APP + 2,
 };
@@ -1422,6 +1422,7 @@ void buildTrackingPage(HWND page) {
     makeButton(page, L"Focus Device",    ID_WATCH,       346, y, 120, 30);
     makeButton(page, L"Show Track Log",  ID_SHOWTRACK,   472, y, 130, 30);
     makeButton(page, L"List Track Logs", ID_TRACKS,      608, y, 130, 30);
+    makeButton(page, L"Save Report",     ID_REPORT,      744, y, 130, 30);
 
     makeStatic(page, L"Activity (DNS / SNI / HTTP events per host)",
                8, 50, 500, 20, g_fontBold);
@@ -1858,6 +1859,13 @@ void onSaveTimeline() {
     }
 }
 
+void onReport() {
+    sendCmd("report");
+    appendLog("[*] writing atk\\report.html + report.json...\r\n");
+    // the engine writes the files on its own thread; open them shortly after
+    SetTimer(g_hMain, ID_TIMER_REPORT, 900, NULL);
+}
+
 void onOpenCaptures() {
     std::string dir = guiDir() + "atk\\captures";
     CreateDirectoryA(dir.c_str(), NULL);
@@ -2068,6 +2076,7 @@ LRESULT CALLBACK MainProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
                 case ID_TOP:          onTop();       break;
                 case ID_SHOWTRACK:    onShowTrack(); break;
                 case ID_TRACKS:       onTracks();    break;
+                case ID_REPORT:       onReport();    break;
                 case ID_WATCH:        onWatch();     break;
                 case ID_TIMELINE_COMBO:
                     if (HIWORD(wp) == CBN_SELCHANGE && !g_updatingTimelineCombo) {
@@ -2154,6 +2163,15 @@ LRESULT CALLBACK MainProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (g_hChildInW) {
                     appendLog("[*] auto-scan: searching for devices...\r\n");
                     sendCmd("scan");
+                }
+            } else if (wp == ID_TIMER_REPORT) {
+                KillTimer(hWnd, ID_TIMER_REPORT);
+                std::string html = guiDir() + "atk\\report.html";
+                if (GetFileAttributesA(html.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                    std::wstring w = toWide(html);
+                    ShellExecuteW(NULL, L"open", w.c_str(), NULL, NULL, SW_SHOWNORMAL);
+                } else {
+                    appendLog("[!] report not written yet - try again in a moment\r\n");
                 }
             }
             return 0;
@@ -2415,6 +2433,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow) {
     addTooltip(GetDlgItem(g_pages[1], ID_WATCH), L"Stream the selected host's events into the log.");
     addTooltip(GetDlgItem(g_pages[1], ID_SHOWTRACK), L"Show the saved track log for the selected host.");
     addTooltip(GetDlgItem(g_pages[1], ID_TRACKS), L"List every track log file on disk.");
+    addTooltip(GetDlgItem(g_pages[1], ID_REPORT), L"Write atk\\report.html + report.json and open the report.");
+    addTooltip(GetDlgItem(g_pages[1], ID_TIMELINE_SAVE), L"Save the visible timeline to a text file.");
     addTooltip(GetDlgItem(g_pages[2], ID_BLOCK_BTN), L"Block a domain for one device or all (*).");
     addTooltip(GetDlgItem(g_pages[2], ID_REDIR_BTN), L"Redirect a domain to an IP address.");
     addTooltip(GetDlgItem(g_pages[2], ID_UNBLOCK_BTN), L"Remove rules that match this domain.");
