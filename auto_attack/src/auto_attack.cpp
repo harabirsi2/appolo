@@ -1307,8 +1307,10 @@ static void classifyPacket(const unsigned char* p, int caplen) {
             }
         }
 
-        // DHCP requests: shows address refreshes in the timeline
-        if (dport == 67 && plen > 240)
+        // DHCP requests: shows address refreshes in the timeline.
+        // DISCOVER/early-REQUEST packets come from 0.0.0.0, so skip those
+        // (they cannot be attributed to a device by IP).
+        if (dport == 67 && plen > 240 && strcmp(src, "0.0.0.0") != 0)
             trackEvent(src, macbuf, "DHCP", "request");
 
         // ---- passive name learning (always on, attack or not) ----------
