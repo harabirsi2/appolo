@@ -26,6 +26,7 @@
 #include <atomic>
 #include <sstream>
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -111,7 +112,7 @@ void addTooltip(HWND hwnd, const wchar_t* text) {
 }
 HWND g_hActivityLV;
 HWND g_hTimelineEdit, g_hTimelineCombo, g_hCapCheck;
-HWND g_hVictimLV, g_hModeCombo;
+HWND g_hVictimLV, g_hModeCombo, g_hFilterEdit;
 HWND g_hModeLabel, g_hTipLabel;
 HWND g_hEmptyState;
 HWND g_hRulesLV;
@@ -130,12 +131,19 @@ bool g_updatingCapCheck = false;
 std::string g_statsIp, g_statsText;
 std::string g_stageStatsIp, g_stageStatsText;
 
+// device-list polish: live filter + click-to-sort (persists across refreshes)
+std::string g_filterText;
+int  g_victimSortCol   = -1;    // -1 = engine order
+bool g_victimSortAsc   = true;
+int  g_activitySortCol = -1;
+bool g_activitySortAsc = true;
+
 enum {
     ID_TAB = 1000, ID_ADAPTER_COMBO, ID_STATUS_TEXT,
     ID_HDR_START, ID_HDR_STOP, ID_HDR_RESTORE,
     ID_SCAN, ID_QUICK, ID_SELECT_ALL, ID_SELECT_NONE, ID_NAMES, ID_FINGERPRINT,
     ID_MODE_COMBO, ID_START, ID_STOP, ID_RESTORE, ID_FWD,
-    ID_VICTIM_LV,
+    ID_VICTIM_LV, ID_FILTER,
     ID_ACTIVITY_LV, ID_REFRESH_ACT, ID_TOP, ID_SHOWTRACK, ID_TRACKS, ID_NAMES2, ID_WATCH, ID_REPORT, ID_BYPASS,
     ID_TIMELINE_COMBO, ID_CAP_CHECK, ID_TIMELINE_SAVE, ID_CAPTURES,
     ID_BLOCK_DOMAIN, ID_BLOCK_VICTIM, ID_BLOCK_BTN,
@@ -813,6 +821,51 @@ std::string promptText(HWND parent, const std::wstring& title,
 }
 
 // ---------------------------------------------------------------
+// list polish helpers (live filter + click-to-sort)
+// ---------------------------------------------------------------
+static std::string lowerStr(std::string s) {
+    for (auto& c : s) c = (char)tolower((unsigned char)c);
+    return s;
+}
+
+static int cmpIpText(const std::string& a, const std::string& b) {
+    // compare octets numerically without pulling in winsock
+    unsigned x[4] = {0, 0, 0, 0}, y[4] = {0, 0, 0, 0};
+    sscanf(a.c_str(), "%u.%u.%u.%u", &x[0], &x[1], &x[2], &x[3]);
+    sscanf(b.c_str(), "%u.%u.%u.%u", &y[0], &y[1], &y[2], &y[3]);
+    for (int i = 0; i < 4; ++i)
+        if (x[i] != y[i]) return x[i] < y[i] ? -1 : 1;
+    return 0;
+}
+
+static bool victimMatchesFilter(const Victim& v, const std::string& f) {
+    if (f.empty()) return true;
+    std::string blob = v.ip + " " + v.mac + " " + v.name + " " + v.ports + " " + v.os;
+    return lowerStr(blob).find(f) != std::string::npos;
+}
+
+static void setSortIndicator(HWND hLV, int col, bool asc) {
+#ifdef HDF_SORTUP
+    HWND hdr = ListView_GetHeader(hLV);
+    if (!hdr) return;
+    int n = Header_GetItemCount(hdr);
+    for (int i = 0; i < n; ++i) {
+        HDITEMW hi = {0};
+        wchar_t buf[128] = {0};
+        hi.mask = HDI_TEXT | HDI_FORMAT;
+        hi.pszText = buf;
+        hi.cchTextMax = 128;
+        if (!Header_GetItem(hdr, i, &hi)) continue;
+        hi.fmt &= ~(HDF_SORTUP | HDF_SORTDOWN);
+        if (i == col) hi.fmt |= (asc ? HDF_SORTUP : HDF_SORTDOWN);
+        Header_SetItem(hdr, i, &hi);
+    }
+#else
+    (void)hLV; (void)col; (void)asc;
+#endif
+}
+
+// ---------------------------------------------------------------
 // listview refresh
 // ---------------------------------------------------------------
 void refreshVictimsLV(HWND hLV) {
@@ -824,17 +877,43 @@ void refreshVictimsLV(HWND hLV) {
         std::lock_guard<std::mutex> lk(g_stateMutex);
         snap = g_victims;
     }
+
+    struct Row { size_t idx; Victim v; };
+    std::vector<Row> rows;
+    rows.reserve(snap.size());
+    for (size_t i = 0; i < snap.size(); ++i) {
+        if (!victimMatchesFilter(snap[i], g_filterText)) continue;
+        rows.push_back(Row{ i, snap[i] });
+    }
+    if (g_victimSortCol >= 0) {
+        int c = g_victimSortCol;
+        bool asc = g_victimSortAsc;
+        std::stable_sort(rows.begin(), rows.end(),
+            [&](const Row& a, const Row& b) {
+                int r = 0;
+                switch (c) {
+                    case 0: r = (a.idx < b.idx) ? -1 : (a.idx > b.idx ? 1 : 0); break;
+                    case 1: r = cmpIpText(a.v.ip, b.v.ip); break;
+                    case 2: r = _stricmp(a.v.mac.c_str(), b.v.mac.c_str()); break;
+                    case 3: r = _stricmp(a.v.name.c_str(), b.v.name.c_str()); break;
+                    case 4: r = _stricmp(a.v.ports.c_str(), b.v.ports.c_str()); break;
+                    case 5: r = _stricmp(a.v.os.c_str(), b.v.os.c_str()); break;
+                }
+                return asc ? (r < 0) : (r > 0);
+            });
+    }
+
     int top = ListView_GetTopIndex(hLV);
     g_updatingVictimsLV = true;
     ListView_DeleteAllItems(hLV);
     {
-        for (size_t i = 0; i < snap.size(); ++i) {
-            auto& v = snap[i];
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const Victim& v = rows[i].v;
             wchar_t wbuf[256];
             LVITEMW item = {0};
             item.mask = LVIF_TEXT;
             item.iItem = (int)i;
-            swprintf_s(wbuf, L"%zu", i + 1);
+            swprintf_s(wbuf, L"%zu", rows[i].idx + 1);
             item.pszText = wbuf;
             ListView_InsertItem(hLV, &item);
             MultiByteToWideChar(CP_UTF8, 0, v.ip.c_str(), -1, wbuf, 256);
@@ -867,6 +946,24 @@ void refreshActivityLV(HWND hLV) {
     {
         std::lock_guard<std::mutex> lk(g_stateMutex);
         snap = g_activity;
+    }
+    if (g_activitySortCol >= 0) {
+        int c = g_activitySortCol;
+        bool asc = g_activitySortAsc;
+        std::stable_sort(snap.begin(), snap.end(),
+            [&](const Activity& a, const Activity& b) {
+                int r = 0;
+                switch (c) {
+                    case 0: r = cmpIpText(a.ip, b.ip); break;
+                    case 1: r = _stricmp(a.name.c_str(), b.name.c_str()); break;
+                    case 2: r = (a.dns < b.dns) ? -1 : (a.dns > b.dns ? 1 : 0); break;
+                    case 3: r = (a.sni < b.sni) ? -1 : (a.sni > b.sni ? 1 : 0); break;
+                    case 4: r = (a.http < b.http) ? -1 : (a.http > b.http ? 1 : 0); break;
+                    case 5: r = (a.age < b.age) ? -1 : (a.age > b.age ? 1 : 0); break;
+                    case 6: r = (a.events < b.events) ? -1 : (a.events > b.events ? 1 : 0); break;
+                }
+                return asc ? (r < 0) : (r > 0);
+            });
     }
     int top = ListView_GetTopIndex(hLV);
     ListView_DeleteAllItems(hLV);
@@ -1381,6 +1478,8 @@ void buildSetupPage(HWND page) {
     makeButton(page, L"How To Use",     ID_HELP,       780, y, 110, 30);
 
     makeStatic(page, L"Devices on network", 8, 50, 400, 20, g_fontBold);
+    makeStatic(page, L"Filter:", 552, 52, 52, 20, g_fontBold);
+    g_hFilterEdit = makeEdit(page, ID_FILTER, 610, 50, 290, 24);
     g_hVictimLV = makeListView(page, ID_VICTIM_LV, 8, 74, 900, 340);
     ListView_SetExtendedListViewStyle(g_hVictimLV,
         LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_GRIDLINES |
@@ -1444,14 +1543,7 @@ void buildTrackingPage(HWND page) {
     g_hActivityLV = makeListView(page, ID_ACTIVITY_LV, 8, 74, 900, 240);
     const wchar_t* cols[] = {L"IP", L"Hostname", L"DNS", L"SNI", L"HTTP", L"Age", L"Events"};
     const int widths[] = {130, 220, 70, 70, 70, 80, 70};
-    for (int i = 0; i < 7; ++i) {
-        LVCOLUMNW c = {0};
-        c.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
-        c.pszText = (LPWSTR)cols[i];
-        c.cx = widths[i];
-        c.iSubItem = i;
-        ListView_InsertColumn(g_hActivityLV, i, &c);
-    }
+    // setupLV also inserts the columns - do not insert them here as well
     setupLV(g_hActivityLV, cols, widths, 7);
 
     // ---- per-device detailed timeline --------------------------------
@@ -1503,14 +1595,6 @@ void buildControlPage(HWND page) {
     g_hRulesLV = makeListView(page, ID_RULES_LV, 8, 158, 880, 320);
     const wchar_t* cols[] = {L"Pattern", L"Action", L"Target", L"Victim"};
     const int widths[] = {340, 100, 160, 160};
-    for (int i = 0; i < 4; ++i) {
-        LVCOLUMNW c = {0};
-        c.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
-        c.pszText = (LPWSTR)cols[i];
-        c.cx = widths[i];
-        c.iSubItem = i;
-        ListView_InsertColumn(g_hRulesLV, i, &c);
-    }
     setupLV(g_hRulesLV, cols, widths, 4);
 }
 
@@ -1554,14 +1638,6 @@ void buildAppsPage(HWND page) {
     g_hAppsLV = makeListView(page, ID_APPS_LV, 8, 74, 880, 420);
     const wchar_t* cols[] = {L"Victim", L"App", L"Status"};
     const int widths[] = {200, 200, 120};
-    for (int i = 0; i < 3; ++i) {
-        LVCOLUMNW c = {0};
-        c.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
-        c.pszText = (LPWSTR)cols[i];
-        c.cx = widths[i];
-        c.iSubItem = i;
-        ListView_InsertColumn(g_hAppsLV, i, &c);
-    }
     setupLV(g_hAppsLV, cols, widths, 3);
 }
 
@@ -2075,6 +2151,12 @@ LRESULT CALLBACK MainProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
                 case ID_HDR_STOP:     onStop();      break;
                 case ID_HDR_RESTORE:  onRestore();   break;
                 case ID_SCAN:         onScan();      break;
+                case ID_FILTER:
+                    if (HIWORD(wp) == EN_CHANGE) {
+                        g_filterText = lowerStr(getEditUTF8(g_hFilterEdit));
+                        refreshVictimsLV(g_hVictimLV);
+                    }
+                    break;
                 case ID_QUICK:        onQuick();     break;
                 case ID_NAMES:        onNames();     break;
                 case ID_FINGERPRINT:  onFingerprint(); break;
@@ -2162,6 +2244,33 @@ LRESULT CALLBACK MainProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
                     }
                     if (csv.empty()) sendCmd("t none");
                     else             sendCmd("_select " + csv);
+                }
+                return 0;
+            }
+            if (hdr->idFrom == ID_VICTIM_LV && hdr->code == LVN_COLUMNCLICK) {
+                NMLISTVIEW* pnm = (NMLISTVIEW*)lp;
+                if (g_victimSortCol == pnm->iSubItem) g_victimSortAsc = !g_victimSortAsc;
+                else { g_victimSortCol = pnm->iSubItem; g_victimSortAsc = true; }
+                setSortIndicator(g_hVictimLV, g_victimSortCol, g_victimSortAsc);
+                refreshVictimsLV(g_hVictimLV);
+                return 0;
+            }
+            if (hdr->idFrom == ID_ACTIVITY_LV && hdr->code == LVN_COLUMNCLICK) {
+                NMLISTVIEW* pnm = (NMLISTVIEW*)lp;
+                if (g_activitySortCol == pnm->iSubItem) g_activitySortAsc = !g_activitySortAsc;
+                else { g_activitySortCol = pnm->iSubItem; g_activitySortAsc = true; }
+                setSortIndicator(g_hActivityLV, g_activitySortCol, g_activitySortAsc);
+                refreshActivityLV(g_hActivityLV);
+                return 0;
+            }
+            if (hdr->idFrom == ID_VICTIM_LV && hdr->code == NM_DBLCLK) {
+                NMLISTVIEW* pnm = (NMLISTVIEW*)lp;
+                if (pnm->iItem >= 0) {
+                    wchar_t wip[64] = {0};
+                    ListView_GetItemText(g_hVictimLV, pnm->iItem, 1, wip, 64);
+                    char ip[64] = {0};
+                    WideCharToMultiByte(CP_UTF8, 0, wip, -1, ip, 64, NULL, NULL);
+                    if (ip[0]) setTimelineFocus(ip);
                 }
                 return 0;
             }
@@ -2434,6 +2543,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow) {
 
     // tooltips for setup page controls
     addTooltip(GetDlgItem(g_pages[0], ID_SCAN), L"Scan the LAN for devices.");
+    addTooltip(GetDlgItem(g_pages[0], ID_FILTER), L"Filter the device list by IP, MAC, hostname, port or OS. Click a column header to sort; double-click a device to focus it.");
     addTooltip(GetDlgItem(g_pages[0], ID_QUICK), L"Scan + select all + intercept + arm in one click.");
     addTooltip(GetDlgItem(g_pages[0], ID_NAMES), L"Resolve hostnames for discovered devices.");
     addTooltip(GetDlgItem(g_pages[0], ID_FINGERPRINT), L"TCP port scan + OS/banner guess for every discovered device.");

@@ -45,7 +45,11 @@ GUI TABS
   Setup       Scan / Quick Start / Resolve Names / Fingerprint /
               Select all/none / toggle IP forwarding / How To Use;
               device list with checkboxes (IP, MAC, hostname, open ports,
-              OS guess); mode dropdown; START / STOP & REPAIR
+              OS guess); mode dropdown; START / STOP & REPAIR.
+              The Filter box narrows the device list live (matches IP, MAC,
+              hostname, port or OS); clicking a column header sorts the
+              list, clicking it again reverses the order; double-clicking a
+              device focuses its live timeline on the Tracking tab
   Tracking    per-host activity table (DNS / SNI / HTTP counters + age +
               event count), Top 10, Watch Selected (streams a host's recent
               events into the log), Show Track Log, List Track Logs,
