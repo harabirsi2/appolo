@@ -1,0 +1,11 @@
+# build output / runtime artifacts
+auto_attack/dist/
+auto_attack/atk/
+auto_attack/Npcap/
+auto_attack/*.exe
+auto_attack/src/*.o
+*.zip
+
+# stray build logs
+build_out.txt
+build_err.txt
