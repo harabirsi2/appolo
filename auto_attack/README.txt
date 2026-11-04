@@ -86,6 +86,9 @@ DETAILED TRAFFIC VIEW (per device)
   see what a target is actually doing on the network, packet by packet:
     - choose the device in the dropdown (it also helps to focus a device
       first: double-click its row, or press "Focus Device")
+    - a live traffic summary sits above the timeline: bytes up/down,
+      packet counts, the protocol mix (DNS / TLS / QUIC / HTTP / mDNS /
+      SSDP / DHCP ...), and the device's busiest peers
     - the timeline shows a time-stamped line per observed event, e.g.
         [12:04:31] mDNS   Smart-TV._googlecast._tcp.local
         [12:04:35] SSDP-SEARCH M-SEARCH * HTTP/1.1
@@ -102,7 +105,9 @@ DETAILED TRAFFIC VIEW (per device)
       opens the captures folder
   The same data is available without the GUI:
     detail <ip> [n]      print a device's recent timeline (default 20 rows)
-    _focus <ip|none>     focus a device (drives the GUI timeline)
+    stats [ip]           traffic breakdown: bytes up/down, packet counts,
+                         protocol mix and the busiest peers
+    _focus <ip|none>     focus a device (drives the GUI timeline/summary)
     pcap on | pcap off   start/stop per-device capture
 
 
@@ -143,7 +148,7 @@ FILES WRITTEN (under atk\)
 CONSOLE (optional — auto_attack.exe can also be run by hand)
   1 scan | t <spec> | m <1-6> | g start | x stop | i status | h help
   extras: users, top, tracks, watch <ip>, showtrack <ip> <n>,
-           detail <ip> [n], _focus <ip|none>, pcap [on|off],
+           detail <ip> [n], stats [ip], _focus <ip|none>, pcap [on|off],
           block <dom> [ip|*], redirect <dom> <ip> [ip|*], unblock <dom>,
           rules, save, load, blockapp <app> [ip|*], unblockapp <app>,
           apps, appsigs, msgall <text>, msg <ip> <text>, msgstop,

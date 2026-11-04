@@ -125,6 +125,10 @@ std::string g_timelineText;
 bool g_updatingTimelineCombo = false;
 bool g_updatingCapCheck = false;
 
+// per-device traffic analytics (engine emits STATS lines for the focused IP)
+std::string g_statsIp, g_statsText;
+std::string g_stageStatsIp, g_stageStatsText;
+
 enum {
     ID_TAB = 1000, ID_ADAPTER_COMBO, ID_STATUS_TEXT,
     ID_HDR_START, ID_HDR_STOP, ID_HDR_RESTORE,
@@ -301,19 +305,24 @@ static void commitDump() {
         !sameList(g_activity, g_stageActivity, sameActivity) ||
         !sameList(g_rules,    g_stageRules,    sameRule)     ||
         !sameList(g_apps,     g_stageApps,     sameApp)      ||
-        g_events != g_stageEvents;
+        g_events != g_stageEvents                             ||
+        g_stageStatsText != g_statsText;
     if (dirty) {
         g_victims.swap(g_stageVictims);
         g_activity.swap(g_stageActivity);
         g_rules.swap(g_stageRules);
         g_apps.swap(g_stageApps);
         g_events.swap(g_stageEvents);
+        g_statsIp = g_stageStatsIp;
+        g_statsText = g_stageStatsText;
     }
     g_stageVictims.clear();
     g_stageActivity.clear();
     g_stageRules.clear();
     g_stageApps.clear();
     g_stageEvents.clear();
+    g_stageStatsIp.clear();
+    g_stageStatsText.clear();
     g_frameOpen = false;
     g_dumpDirty = dirty;
 }
@@ -334,6 +343,10 @@ void startChild() {
         g_timelineIp.clear();
         g_comboIps.clear();
         g_timelineText.clear();
+        g_statsIp.clear();
+        g_statsText.clear();
+        g_stageStatsIp.clear();
+        g_stageStatsText.clear();
     }
     SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
     if (!CreatePipe(&g_hChildOutR, &g_hChildOutW, &sa, 0)) return;
@@ -508,6 +521,51 @@ std::vector<std::string> splitPipe(const std::string& s) {
     return out;
 }
 
+static std::string fmtBytes(unsigned long long n) {
+    char b[64];
+    if (n < 1024ULL) snprintf(b, sizeof(b), "%llu B", n);
+    else if (n < 1024ULL * 1024) snprintf(b, sizeof(b), "%.1f KB", n / 1024.0);
+    else if (n < 1024ULL * 1024 * 1024) snprintf(b, sizeof(b), "%.1f MB", n / (1024.0 * 1024));
+    else snprintf(b, sizeof(b), "%.2f GB", n / (1024.0 * 1024 * 1024));
+    return b;
+}
+
+// turn a STATS line's fields into a short, human-readable header
+static std::string buildStatsText(unsigned long long up, unsigned long long down,
+                                  unsigned long long pu, unsigned long long pd,
+                                  const std::string& protos, const std::string& peers) {
+    std::string t;
+    t += "up " + fmtBytes(up) + " / " + std::to_string(pu) + " pkts    ";
+    t += "down " + fmtBytes(down) + " / " + std::to_string(pd) + " pkts";
+    if (!protos.empty()) {
+        t += "\r\n";
+        bool first = true; int n = 0;
+        std::stringstream ss(protos); std::string tok;
+        while (std::getline(ss, tok, ',') && n < 8) {
+            size_t c = tok.rfind(':');
+            if (c == std::string::npos) continue;
+            if (!first) t += "   ";
+            first = false;
+            t += tok.substr(0, c) + " " + tok.substr(c + 1);
+            n++;
+        }
+    }
+    if (!peers.empty()) {
+        t += "\r\n";
+        bool first = true; int n = 0;
+        std::stringstream ss(peers); std::string tok;
+        while (std::getline(ss, tok, ',') && n < 6) {
+            size_t c = tok.rfind(':');
+            if (c == std::string::npos) continue;
+            if (!first) t += "   ";
+            first = false;
+            t += tok.substr(0, c) + " (" + tok.substr(c + 1) + ")";
+            n++;
+        }
+    }
+    return t;
+}
+
 void handleDumpLine(const std::string& line) {
     if (line.rfind("VICTIM ", 0) == 0) {
         auto p = splitPipe(line.substr(7));
@@ -579,6 +637,23 @@ void handleDumpLine(const std::string& line) {
         if (p.size() > 8) a.events = _strtoui64(p[8].c_str(), NULL, 10);
         for (auto& x : g_stageActivity) if (x.ip == a.ip) { x = a; return; }
         g_stageActivity.push_back(a);
+    } else if (line.rfind("STATS ", 0) == 0) {
+        auto p = splitPipe(line.substr(6));
+        if (p.size() < 6) return;
+        auto val = [](const std::string& s) {
+            size_t eq = s.find('=');
+            return eq == std::string::npos ? std::string() : s.substr(eq + 1);
+        };
+        unsigned long long up = _strtoui64(val(p[1]).c_str(), NULL, 10);
+        unsigned long long down = _strtoui64(val(p[2]).c_str(), NULL, 10);
+        unsigned long long pu = _strtoui64(val(p[3]).c_str(), NULL, 10);
+        unsigned long long pd = _strtoui64(val(p[4]).c_str(), NULL, 10);
+        std::string protos = val(p[5]);
+        std::string peers = p.size() > 6 ? val(p[6]) : "";
+        std::lock_guard<std::mutex> lk(g_stateMutex);
+        beginFrameLocked();
+        g_stageStatsIp = p[0];
+        g_stageStatsText = buildStatsText(up, down, pu, pd, protos, peers);
     } else if (line.rfind("EVENT ", 0) == 0) {
         std::string rest = line.substr(6);
         size_t bar = rest.find('|');
@@ -843,6 +918,7 @@ void refreshTimeline() {
     std::vector<Activity> acts;
     std::vector<std::pair<std::string, std::string>> evs;
     std::string engineFocus;
+    std::string statsIp, statsText;
     bool cap = false;
     {
         std::lock_guard<std::mutex> lk(g_stateMutex);
@@ -850,6 +926,8 @@ void refreshTimeline() {
         evs = g_events;
         engineFocus = g_status.focus;
         cap = g_status.cap;
+        statsIp = g_statsIp;
+        statsText = g_statsText;
     }
 
     // if the user has not picked a device yet, adopt the engine's focus or
@@ -897,6 +975,11 @@ void refreshTimeline() {
     }
 
     std::string txt;
+    if (!statsText.empty() && statsIp == g_timelineIp) {
+        txt += "-- " + g_timelineIp + " -------------------------\r\n";
+        txt += statsText + "\r\n";
+        txt += "---------------------------------------------\r\n";
+    }
     for (auto& e : evs) {
         if (!g_timelineIp.empty() && e.first != g_timelineIp) continue;
         if (!txt.empty()) txt += "\r\n";

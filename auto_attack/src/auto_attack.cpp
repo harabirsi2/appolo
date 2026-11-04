@@ -591,6 +591,13 @@ struct Activity {
     FILE*                           capFile   = nullptr;
     unsigned long long              capBytes  = 0;
     bool                            capFull   = false;
+    // traffic analytics
+    unsigned long long              byUp      = 0;   // bytes this device sent
+    unsigned long long              byDown    = 0;   // bytes sent to this device
+    unsigned long long              pktUp     = 0;
+    unsigned long long              pktDown   = 0;
+    std::unordered_map<std::string, long> proto;      // label -> packets
+    std::unordered_map<std::string, long> peers;      // peer ip -> packets
 };
 
 static std::unordered_map<std::string, Activity> g_activity;
@@ -1228,6 +1235,73 @@ static void controlDnsFor(const std::string& victimIp, bool force) {
            victimIp.c_str(), dnsIp.c_str());
 }
 
+// ---------------------------------------------------------------
+// per-device traffic analytics (bytes, packets, protocol mix, peers)
+// ---------------------------------------------------------------
+static bool isVictimIp(const std::string& ip) {
+    std::lock_guard<std::mutex> lk(g_vmutex);
+    for (auto& v : g_victims) if (v.ip == ip) return true;
+    return false;
+}
+
+static std::string protoLabel(int proto, int sport, int dport) {
+    int p = (dport > 0) ? dport : sport;
+    if (proto == 17) {
+        switch (p) {
+            case 53:   return "DNS";
+            case 5353: return "mDNS";
+            case 5355: return "LLMNR";
+            case 1900: return "SSDP";
+            case 67: case 68: return "DHCP";
+            case 443: case 80: case 8443: case 8080: return "QUIC";
+            default:   return "UDP";
+        }
+    }
+    if (proto == 6) {
+        switch (p) {
+            case 443: case 8443: return "TLS";
+            case 80: case 8080: case 8000: return "HTTP";
+            case 22:   return "SSH";
+            case 23:   return "TELNET";
+            case 21:   return "FTP";
+            case 25: case 587: return "SMTP";
+            case 110:  return "POP3";
+            case 143:  return "IMAP";
+            case 445: case 139: return "SMB";
+            case 3389: return "RDP";
+            default:   return "TCP";
+        }
+    }
+    if (proto == 1) return "ICMP";
+    return "OTHER";
+}
+
+// attribute one IPv4 packet to the device(s) it belongs to. Only devices that
+// are already tracked (or scanned targets) get an entry, so the table does not
+// fill with hosts we never selected.
+static void accountPacket(const std::string& src, const std::string& dst,
+                          unsigned len, const std::string& label) {
+    bool sKnown = isVictimIp(src);
+    bool dKnown = isVictimIp(dst);
+    std::lock_guard<std::mutex> lk(g_activityMutex);
+    auto touch = [&](const std::string& ip, bool known, bool up,
+                     const std::string& peer) {
+        auto it = g_activity.find(ip);
+        if (it == g_activity.end()) {
+            if (!known) return;
+            Activity a; a.ip = ip; a.lastSeen = GetTickCount();
+            it = g_activity.emplace(ip, std::move(a)).first;
+        }
+        Activity& a = it->second;
+        a.lastSeen = GetTickCount();
+        if (up) { a.byUp += len; a.pktUp++; } else { a.byDown += len; a.pktDown++; }
+        a.proto[label]++;
+        if (!peer.empty()) a.peers[peer]++;
+    };
+    touch(src, sKnown, true,  dst);
+    touch(dst, dKnown, false, src);
+}
+
 static void classifyPacket(const unsigned char* p, int caplen) {
     if (caplen < 34) return;
     if (p[12] != 0x08 || p[13] != 0x00) return;
@@ -1248,6 +1322,21 @@ static void classifyPacket(const unsigned char* p, int caplen) {
 
     // never treat our own machine as a tracked device
     if (!g_myIp.empty() && g_myIp == src) return;
+
+    // ---- per-device traffic analytics --------------------------------
+    {
+        int sport = -1, dport = -1;
+        if (proto == 17 && ihl + 8 <= (int)tot) {
+            const unsigned char* u = ip + ihl;
+            sport = (u[0] << 8) | u[1];
+            dport = (u[2] << 8) | u[3];
+        } else if (proto == 6 && ihl + 20 <= (int)tot) {
+            const unsigned char* t = ip + ihl;
+            sport = (t[0] << 8) | t[1];
+            dport = (t[2] << 8) | t[3];
+        }
+        accountPacket(src, dst, tot, protoLabel(proto, sport, dport));
+    }
 
     if (proto == 17 && ihl + 8 <= (int)tot) {
         const unsigned char* udp = ip + ihl;
@@ -2791,6 +2880,53 @@ static void cmdShowTrack(const std::string& ip, int lines) {
     for (auto& s : tail) PF("  %s\n", s.c_str());
 }
 
+static void cmdStats(const std::string& ip) {
+    unsigned long long up = 0, down = 0, pu = 0, pd = 0;
+    std::unordered_map<std::string, long> proto, peers;
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lk(g_activityMutex);
+        auto it = g_activity.find(ip);
+        if (it != g_activity.end()) {
+            Activity& a = it->second;
+            up = a.byUp; down = a.byDown; pu = a.pktUp; pd = a.pktDown;
+            proto = a.proto; peers = a.peers;
+            found = true;
+        }
+    }
+    if (!found) { PF("[-] no traffic for %s yet\n", ip.c_str()); return; }
+    PF("  === stats %s ===\n", ip.c_str());
+    PF("  up=%llu bytes (%llu pkts)   down=%llu bytes (%llu pkts)\n",
+       up, pu, down, pd);
+
+    std::vector<std::pair<long, std::string>> pv;
+    for (auto& kv : proto)
+        if (kv.second > 0) pv.push_back(std::make_pair(kv.second, kv.first));
+    std::sort(pv.begin(), pv.end(),
+              [](const std::pair<long, std::string>& x,
+                 const std::pair<long, std::string>& y) { return x.first > y.first; });
+    std::string line;
+    for (auto& x : pv) {
+        if (!line.empty()) line += "  ";
+        line += x.second + " " + std::to_string(x.first);
+    }
+    PF("  protocols: %s\n", line.empty() ? "-" : line.c_str());
+
+    std::vector<std::pair<long, std::string>> ev;
+    for (auto& kv : peers) ev.push_back(std::make_pair(kv.second, kv.first));
+    std::sort(ev.begin(), ev.end(),
+              [](const std::pair<long, std::string>& x,
+                 const std::pair<long, std::string>& y) { return x.first > y.first; });
+    line.clear();
+    int shown = 0;
+    for (auto& x : ev) {
+        if (shown++ >= 8) break;
+        if (!line.empty()) line += "  ";
+        line += x.second + " (" + std::to_string(x.first) + ")";
+    }
+    PF("  top peers: %s\n", line.empty() ? "-" : line.c_str());
+}
+
 static void cmdDetail(const std::string& ip, int lines) {
     std::deque<std::string> tail;
     long dns = 0, sni = 0, http = 0;
@@ -2815,6 +2951,7 @@ static void cmdDetail(const std::string& ip, int lines) {
     PF("  dns=%ld sni=%ld http=%ld events=%d pcap=%llu%s\n",
        dns, sni, http, (int)tail.size(), cap, full ? " (full)" : "");
     for (auto& s : tail) PF("  %s\n", s.c_str());
+    cmdStats(ip);
 }
 
 static void cmdTracks() {
@@ -3347,6 +3484,7 @@ static void help() {
         "  TRACKING\n"
         "    users | top [n] | tracks | watch <ip> | showtrack <ip> [n]\n"
         "    detail <ip> [n]           live event timeline for one device\n"
+        "    stats [ip]                traffic breakdown (bytes/protocols/peers)\n"
         "    _focus <ip|none>          focus a device for the GUI timeline\n"
         "    pcap [on|off]             record per-device atk\\captures\\<ip>.pcap\n"
         "  RULES / APPS\n"
@@ -3566,6 +3704,13 @@ int main(int argc, char** argv) {
             if (!ip.empty()) cmdDetail(ip, n);
             continue;
         }
+        if (line == "stats" || line.rfind("stats ", 0) == 0) {
+            std::string ip = line.size() > 6 ? trim(line.substr(6)) : "";
+            if (ip.empty()) { std::lock_guard<std::mutex> lk(g_focusMutex); ip = g_focusIp; }
+            if (!ip.empty()) cmdStats(ip);
+            else PF("[-] usage: stats <ip>\n");
+            continue;
+        }
         if (line.rfind("_focus ", 0) == 0) {
             std::string ip = trim(line.substr(7));
             if (ip == "-" || ip == "none") ip.clear();
@@ -3723,9 +3868,32 @@ int main(int argc, char** argv) {
                         PF("APP %s|%s|%d\n",
                            a.ip.c_str(), app.c_str(),
                            appBlocked(app, a.ip) ? 1 : 0);
-                    if (!focusIp2.empty() && a.ip == focusIp2)
+                    if (!focusIp2.empty() && a.ip == focusIp2) {
                         for (auto& ev : a.recent)
                             PF("EVENT %s|%s\n", a.ip.c_str(), ev.c_str());
+                        std::string pr;
+                        for (auto& kv : a.proto) {
+                            if (kv.second <= 0) continue;
+                            if (!pr.empty()) pr += ',';
+                            pr += kv.first + ":" + std::to_string(kv.second);
+                        }
+                        std::vector<std::pair<long, std::string>> pe;
+                        pe.reserve(a.peers.size());
+                        for (auto& kv : a.peers) pe.push_back(std::make_pair(kv.second, kv.first));
+                        std::sort(pe.begin(), pe.end(),
+                                  [](const std::pair<long, std::string>& x,
+                                     const std::pair<long, std::string>& y) {
+                                      return x.first > y.first;
+                                  });
+                        std::string ps;
+                        for (size_t k = 0; k < pe.size() && k < 8; ++k) {
+                            if (!ps.empty()) ps += ',';
+                            ps += pe[k].second + ":" + std::to_string(pe[k].first);
+                        }
+                        PF("STATS %s|up=%llu|down=%llu|pktup=%llu|pktdown=%llu|proto=%s|peer=%s\n",
+                           a.ip.c_str(), a.byUp, a.byDown, a.pktUp, a.pktDown,
+                           pr.c_str(), ps.c_str());
+                    }
                 }
             }
             PF("END\n");
