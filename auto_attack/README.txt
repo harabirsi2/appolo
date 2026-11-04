@@ -30,7 +30,10 @@ HOW TO START (GUI)
       the engine)
   3. the network is scanned automatically ~1.5 s after launch —
      press "Scan Network" any time to rescan, or "How To Use" for the
-     built-in quick guide
+     built-in quick guide. A scan is quick: devices already in the OS ARP
+     cache are loaded instantly and the /24 sweep runs in parallel over
+     several send handles, so a typical LAN is listed in about a second
+     and the name phase then fills in hostnames.
   4. tick the checkbox next to your target device(s)
      (hostnames appear after the scan and keep filling in passively;
       "Resolve Names" also probes actively)
@@ -143,8 +146,16 @@ DEVICE NAMES
                          node status, DHCP option 12/81 (mapped by MAC),
                          WS-Discovery "Computer" names
     active (scan/Resolve Names)
-                         NetBIOS, LLMNR, mDNS, reverse DNS, plus SSDP/UPnP
-                         discovery and each device's <friendlyName>
+                         NetBIOS, LLMNR, mDNS, reverse DNS, DNS-SD service
+                         discovery, plus SSDP/UPnP discovery and each
+                         device's <friendlyName>
+  Active probes ask the DNS-SD service types that name real hardware:
+  _googlecast, _airplay, _raop, _spotify-connect, _sonos, _amzn-wplay,
+  _ipp, _printer, _http, _workstation, _smb, _device-info and _hap. The
+  PTR/SRV/A records that come back carry the friendly instance name
+  ("Living Room TV", "REDMI-15C"), which is applied to the device IP.
+  Reverse names that are really service or interface labels are filtered
+  out, so a name column never fills with "_ipp._tcp" style noise.
   A MAC-vendor name (Apple, Samsung, ...) is the fallback when a device
   advertises no name at all. Phones that randomise their MAC and publish
   nothing may stay as the vendor name.
@@ -191,10 +202,19 @@ SESSION REPORT
                       every device (IP, MAC, name, OS/type, open ports,
                       banner), per-device traffic totals (DNS/SNI/HTTP,
                       events, bytes up/down, top protocol and top peer),
-                      a bypass-indicator section and the full DNS rule list
-    atk\report.json   the same data as machine-readable JSON, for
-                      scripting or copying into another tool
-  Re-run it any time; it overwrites both files with the latest state.
+                      a bypass-indicator section, the full DNS rule list,
+                      a "Recent activity" timeline per device (the last
+                      events it generated) and a "Captures & logs" table
+                      that links straight to every atk\captures\*.pcap and
+                      atk\tracks\track_*.log of the session
+    atk\report.json   the same data as machine-readable JSON, including
+                      each device's recent events and an "artifacts" list
+                      of the capture and track files, for scripting or
+                      copying into another tool
+  Re-run it any time; it overwrites both files with the latest state. If
+  the report is not on disk the instant you click (the engine writes it
+  on its own thread), the GUI keeps polling for a few seconds and then
+  opens it instead of giving up.
 
 
 LIVE PROOF IT'S WORKING
@@ -213,6 +233,8 @@ FILES WRITTEN (under atk\)
   atk\rules.txt              saved DNS rules (tab separated)
   atk\tracks\track_<ip>.log  per-device event log (DNS/SNI/HTTP lines)
   atk\captures\<ip>.pcap     per-device raw packet capture (Record PCAP)
+  atk\report.html            session report ("Save Report")
+  atk\report.json            the same report as machine-readable JSON
   atk\session_*.json         summary written when the engine exits
   (v4 no longer writes mitm_capture.pcap / credentials.txt —
    Record mode tracks activity through the same tables)

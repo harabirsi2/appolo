@@ -232,6 +232,10 @@ static std::string guiDir() {
 
 static std::string iniPath() { return guiDir() + "atk\\gui.ini"; }
 
+// report-open polling: the engine writes atk\report.html on its own thread,
+// so the GUI retries for a while instead of assuming it is instant
+static int g_reportTries = 0;
+
 static std::string loadIniValue(const char* key) {
     std::string out;
     FILE* f = fopen(iniPath().c_str(), "rb");
@@ -1954,8 +1958,9 @@ void onBypass()  { sendCmd("bypass"); }
 void onReport() {
     sendCmd("report");
     appendLog("[*] writing atk\\report.html + report.json...\r\n");
-    // the engine writes the files on its own thread; open them shortly after
-    SetTimer(g_hMain, ID_TIMER_REPORT, 900, NULL);
+    // the engine writes the files on its own thread; poll until they appear
+    g_reportTries = 0;
+    SetTimer(g_hMain, ID_TIMER_REPORT, 400, NULL);
 }
 
 void onOpenCaptures() {
@@ -2291,12 +2296,16 @@ LRESULT CALLBACK MainProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
                     sendCmd("scan");
                 }
             } else if (wp == ID_TIMER_REPORT) {
-                KillTimer(hWnd, ID_TIMER_REPORT);
                 std::string html = guiDir() + "atk\\report.html";
                 if (GetFileAttributesA(html.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                    KillTimer(hWnd, ID_TIMER_REPORT);
                     std::wstring w = toWide(html);
                     ShellExecuteW(NULL, L"open", w.c_str(), NULL, NULL, SW_SHOWNORMAL);
+                } else if (++g_reportTries < 20) {
+                    // report not on disk yet - keep polling instead of giving up
+                    SetTimer(hWnd, ID_TIMER_REPORT, 400, NULL);
                 } else {
+                    KillTimer(hWnd, ID_TIMER_REPORT);
                     appendLog("[!] report not written yet - try again in a moment\r\n");
                 }
             }
