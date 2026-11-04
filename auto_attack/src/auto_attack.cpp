@@ -753,6 +753,12 @@ struct Activity {
     unsigned long long              pktDown   = 0;
     std::unordered_map<std::string, long> proto;      // label -> packets
     std::unordered_map<std::string, long> peers;      // peer ip -> packets
+    // bypass detection: how this device dodges plain interception
+    long                            quic      = 0;    // UDP 443/8443 flows
+    long                            doh       = 0;    // DoH provider endpoints
+    long                            dot       = 0;    // DNS-over-TLS (853)
+    long                            vpn       = 0;    // VPN-ish ports / ip-proto
+    long                            dnsDirect = 0;    // DNS to a non-LAN resolver
 };
 
 static std::unordered_map<std::string, Activity> g_activity;
@@ -1431,11 +1437,76 @@ static std::string protoLabel(int proto, int sport, int dport) {
     return "OTHER";
 }
 
+// ---------------------------------------------------------------
+// bypass detection: QUIC, DoH/DoT and VPN traffic that dodges a plain
+// DNS/HTTP MITM. Everything here is a passive, best-effort signal.
+// ---------------------------------------------------------------
+static bool isLanIp(const std::string& ip) {
+    if (g_myIp.empty() || ip.empty()) return false;
+    size_t d = g_myIp.find_last_of('.');
+    if (d == std::string::npos) return false;
+    return ip.compare(0, d, g_myIp, 0, d) == 0;
+}
+
+// well-known DoH / encrypted-DNS endpoint hostnames (substring, lower-case)
+static bool isDohHost(const std::string& host) {
+    static const char* names[] = {
+        "cloudflare-dns.com", "one.one.one.one", "mozilla.cloudflare",
+        "dns.google", "dns.quad9.net", "doh.opendns.com", "doh.dnssb.com",
+        "dns.adguard.com", "dns.nextdns.io", "doh.cleanbrowsing.org",
+        "dns.opendns.com", "doh.pub", "dnscrypt", "doh.li",
+        "doh.centraleu.pi-dns.com", "doh.applied-privacy.net", nullptr
+    };
+    std::string h = toLower(host);
+    for (int i = 0; names[i]; ++i)
+        if (h.find(names[i]) != std::string::npos) return true;
+    return false;
+}
+
+static void noteBypass(Activity& a, int proto, int serverPort,
+                       const std::string& peer) {
+    if (proto == 17) {
+        if (serverPort == 443 || serverPort == 8443) a.quic++;
+        else if (serverPort == 853) a.dot++;
+        else if (serverPort == 53) {
+            // DNS straight to a non-LAN resolver skips the router (and us)
+            if (!peer.empty() && peer != g_gatewayIp && !isLanIp(peer))
+                a.dnsDirect++;
+        }
+        else if (serverPort == 500 || serverPort == 4500 || serverPort == 1194 ||
+                 serverPort == 1701 || serverPort == 51820 ||
+                 serverPort == 51821) a.vpn++;
+    } else if (proto == 6) {
+        if (serverPort == 853) a.dot++;
+        else if (serverPort == 1194 || serverPort == 1723 ||
+                 serverPort == 1701 || serverPort == 5555) a.vpn++;
+    } else if (proto == 47 || proto == 50 || proto == 51) {
+        a.vpn++;   // GRE / ESP / AH
+    }
+}
+
+// one-line summary of a device's bypass indicators with a coarse confidence
+static std::string bypassText(const Activity& a) {
+    std::string s;
+    auto add = [&](const char* name, long n, const char* conf) {
+        if (n <= 0) return;
+        if (!s.empty()) s += "  ";
+        s += std::string(name) + "(" + conf + "," + std::to_string(n) + ")";
+    };
+    add("QUIC", a.quic, a.quic >= 20 ? "high" : "low");
+    add("DoH",  a.doh,  "high");
+    add("DoT",  a.dot,  "high");
+    add("VPN",  a.vpn,  a.vpn >= 20 ? "medium" : "low");
+    add("directDNS", a.dnsDirect, "medium");
+    return s;
+}
+
 // attribute one IPv4 packet to the device(s) it belongs to. Only devices that
 // are already tracked (or scanned targets) get an entry, so the table does not
 // fill with hosts we never selected.
 static void accountPacket(const std::string& src, const std::string& dst,
-                          unsigned len, const std::string& label) {
+                          unsigned len, int proto, int sport, int dport) {
+    std::string label = protoLabel(proto, sport, dport);
     bool sKnown = isVictimIp(src);
     bool dKnown = isVictimIp(dst);
     std::lock_guard<std::mutex> lk(g_activityMutex);
@@ -1452,6 +1523,9 @@ static void accountPacket(const std::string& src, const std::string& dst,
         if (up) { a.byUp += len; a.pktUp++; } else { a.byDown += len; a.pktDown++; }
         a.proto[label]++;
         if (!peer.empty()) a.peers[peer]++;
+        // the client's view of the flow: when this device is the sender the
+        // remote port is dport, otherwise it is sport
+        noteBypass(a, proto, up ? dport : sport, peer);
     };
     touch(src, sKnown, true,  dst);
     touch(dst, dKnown, false, src);
@@ -1490,7 +1564,7 @@ static void classifyPacket(const unsigned char* p, int caplen) {
             sport = (t[0] << 8) | t[1];
             dport = (t[2] << 8) | t[3];
         }
-        accountPacket(src, dst, tot, protoLabel(proto, sport, dport));
+        accountPacket(src, dst, tot, proto, sport, dport);
     }
 
     if (proto == 17 && ihl + 8 <= (int)tot) {
@@ -1610,7 +1684,10 @@ static void classifyPacket(const unsigned char* p, int caplen) {
                 {
                     std::lock_guard<std::mutex> lk(g_activityMutex);
                     g_activity[src].sniCount++;
+                    if (isDohHost(sni)) g_activity[src].doh++;
                 }
+                if (isDohHost(sni))
+                    trackEvent(src, macbuf, "DoH", sni + "  (encrypted DNS)");
                 trackEvent(src, macbuf, "SNI", sni);
                 std::string app = appForHost(sni);
                 if (!app.empty() && inActivity(src)) {
@@ -1656,6 +1733,9 @@ static void classifyPacket(const unsigned char* p, int caplen) {
                     {
                         std::lock_guard<std::mutex> lk(g_activityMutex);
                         g_activity[src].httpCount++;
+                        if (url.find("/dns-query") != std::string::npos ||
+                            isDohHost(host))
+                            g_activity[src].doh++;
                     }
                     trackEvent(src, macbuf, "HTTP", method + " " + host + url);
                     // in Record mode, also capture POST body (potential credentials)
@@ -3116,6 +3196,35 @@ static void cmdStats(const std::string& ip) {
         line += x.second + " (" + std::to_string(x.first) + ")";
     }
     PF("  top peers: %s\n", line.empty() ? "-" : line.c_str());
+
+    std::string bt;
+    {
+        std::lock_guard<std::mutex> lk(g_activityMutex);
+        auto it = g_activity.find(ip);
+        if (it != g_activity.end()) bt = bypassText(it->second);
+    }
+    if (!bt.empty()) PF("  bypass: %s\n", bt.c_str());
+}
+
+static void cmdBypass() {
+    std::vector<Activity> acts;
+    {
+        std::lock_guard<std::mutex> lk(g_activityMutex);
+        for (auto& kv : g_activity) acts.push_back(kv.second);
+    }
+    std::sort(acts.begin(), acts.end(),
+              [](const Activity& x, const Activity& y) { return x.ip < y.ip; });
+    if (acts.empty()) { PF("[-] no activity yet\n"); return; }
+    PF("  %-16s %-20s %s\n", "IP", "NAME", "bypass indicators");
+    bool any = false;
+    for (auto& a : acts) {
+        std::string bt = bypassText(a);
+        if (bt.empty()) continue;
+        any = true;
+        PF("  %-16s %-20s %s\n", a.ip.c_str(), victimName(a.ip).c_str(), bt.c_str());
+    }
+    if (!any)
+        PF("  (no bypass indicators - tracked devices appear to use plain DNS)\n");
 }
 
 static void cmdDetail(const std::string& ip, int lines) {
@@ -3208,6 +3317,26 @@ static void cmdReport() {
     }
     fprintf(f, "</table>");
 
+    // bypass indicators: what each device uses to dodge plain interception
+    {
+        bool any = false;
+        for (auto& a : acts) if (!bypassText(a).empty()) { any = true; break; }
+        if (any) {
+            fprintf(f, "<h2>Bypass indicators</h2><table>"
+                       "<tr><th>IP</th><th>Indicator (confidence, packets)</th></tr>");
+            for (auto& a : acts) {
+                std::string bt = bypassText(a);
+                if (bt.empty()) continue;
+                fprintf(f, "<tr><td>%s</td><td>%s</td></tr>",
+                        a.ip.c_str(), htmlEscape(bt).c_str());
+            }
+            fprintf(f, "</table>");
+            fprintf(f, "<div class=\"m\">QUIC/DoH/DoT are encrypted; when a device uses "
+                       "them the DNS names and TLS hostnames above will be missing "
+                       "for that traffic.</div>");
+        }
+    }
+
     if (!rules.empty()) {
         fprintf(f, "<h2>DNS rules (%d)</h2><table>"
                    "<tr><th>Pattern</th><th>Action</th><th>Target</th><th>Victim</th></tr>",
@@ -3259,10 +3388,13 @@ static void cmdReport() {
             topOf(a.peers, ek, ev);
             fprintf(j, "    {\"ip\":\"%s\",\"dns\":%ld,\"sni\":%ld,\"http\":%ld,"
                        "\"events\":%llu,\"up\":%llu,\"down\":%llu,"
-                       "\"topProto\":\"%s\",\"topPeer\":\"%s\"}%s\n",
+                       "\"topProto\":\"%s\",\"topPeer\":\"%s\","
+                       "\"quic\":%ld,\"doh\":%ld,\"dot\":%ld,\"vpn\":%ld,\"dnsDirect\":%ld}%s\n",
                     jesc(a.ip).c_str(), a.dnsCount, a.sniCount, a.httpCount,
                     a.events, a.byUp, a.byDown,
-                    jesc(pk).c_str(), jesc(ek).c_str(), i + 1 < acts.size() ? "," : "");
+                    jesc(pk).c_str(), jesc(ek).c_str(),
+                    a.quic, a.doh, a.dot, a.vpn, a.dnsDirect,
+                    i + 1 < acts.size() ? "," : "");
         }
         fprintf(j, "  ],\n  \"rules\": [\n");
         for (size_t i = 0; i < rules.size(); ++i) {
@@ -3818,6 +3950,7 @@ static void help() {
         "    users | top [n] | tracks | watch <ip> | showtrack <ip> [n]\n"
         "    detail <ip> [n]           live event timeline for one device\n"
         "    stats [ip]                traffic breakdown (bytes/protocols/peers)\n"
+        "    bypass                    per-device QUIC / DoH / DoT / VPN use\n"
         "    fingerprint [ip|*]        TCP port scan + OS/banner guess\n"
         "    report                    write atk\\report.html + report.json\n"
         "    _focus <ip|none>          focus a device for the GUI timeline\n"
@@ -4048,6 +4181,7 @@ int main(int argc, char** argv) {
             else PF("[-] usage: stats <ip>\n");
             continue;
         }
+        if (line == "bypass") { cmdBypass(); continue; }
         if (line == "fingerprint" || line.rfind("fingerprint ", 0) == 0) {
             std::string who = line.size() > 12 ? trim(line.substr(12)) : "*";
             std::vector<std::string> targets;
@@ -4258,9 +4392,10 @@ int main(int argc, char** argv) {
                             if (!ps.empty()) ps += ',';
                             ps += pe[k].second + ":" + std::to_string(pe[k].first);
                         }
-                        PF("STATS %s|up=%llu|down=%llu|pktup=%llu|pktdown=%llu|proto=%s|peer=%s\n",
+                        std::string bs = bypassText(a);
+                        PF("STATS %s|up=%llu|down=%llu|pktup=%llu|pktdown=%llu|proto=%s|peer=%s|bypass=%s\n",
                            a.ip.c_str(), a.byUp, a.byDown, a.pktUp, a.pktDown,
-                           pr.c_str(), ps.c_str());
+                           pr.c_str(), ps.c_str(), bs.c_str());
                     }
                 }
             }

@@ -49,7 +49,7 @@ GUI TABS
   Tracking    per-host activity table (DNS / SNI / HTTP counters + age +
               event count), Top 10, Watch Selected (streams a host's recent
               events into the log), Show Track Log, List Track Logs,
-              Save Report, plus a
+              Save Report, Bypass Check, plus a
               live per-device timeline: pick a device in the dropdown to
               stream its recent network events, tick "Record PCAP" to save
               that device's raw packets, then "Save Timeline" or
@@ -109,7 +109,8 @@ DETAILED TRAFFIC VIEW (per device)
       first: double-click its row, or press "Focus Device")
     - a live traffic summary sits above the timeline: bytes up/down,
       packet counts, the protocol mix (DNS / TLS / QUIC / HTTP / mDNS /
-      SSDP / DHCP ...), and the device's busiest peers
+      SSDP / DHCP ...), the device's busiest peers, and any bypass
+      indicators (QUIC / DoH / DoT / VPN)
     - the timeline shows a time-stamped line per observed event, e.g.
         [12:04:31] mDNS   Smart-TV._googlecast._tcp.local
         [12:04:35] SSDP-SEARCH M-SEARCH * HTTP/1.1
@@ -157,14 +158,36 @@ DEVICE FINGERPRINTING
   run in the background per device, so the list updates as they finish.
 
 
+BYPASS DETECTION (QUIC / DoH / DoT / VPN)
+  Plain interception only sees plaintext DNS and HTTP. When a device encrypts
+  or tunnels its traffic, the timeline goes quiet for that device - this
+  shows you why. "Bypass Check" (or the console command "bypass") lists every
+  device that shows a bypass indicator, with a coarse confidence and a packet
+  count, e.g.:
+    192.168.0.179   DoT(high,4)   directDNS(medium,2)
+  Indicators, all passive (nothing is injected):
+    QUIC       UDP 443/8443 - modern HTTP/3 apps (YouTube, Chrome, most
+               Google traffic); high confidence once it is more than a blip
+    DoH        a DNS-over-HTTPS endpoint (dns.google, cloudflare-dns.com,
+               ...) seen in the TLS SNI or a /dns-query request
+    DoT        DNS-over-TLS on port 853
+    VPN        VPN-ish ports (IKE 500/4500, OpenVPN 1194, L2TP 1701,
+               WireGuard 51820, PPTP 1723) or a bare GRE/ESP/AH IP protocol
+    directDNS  DNS sent straight to a non-LAN resolver instead of the router
+  The same line is appended to the per-device traffic summary in the timeline
+  ("bypass: ...") and appears as its own section in the session report. A
+  clean network shows nothing here - that means DNS/HTTP interception should
+  work for every tracked device.
+
+
 SESSION REPORT
   "Save Report" on the Tracking tab (or the console command "report")
   writes a snapshot of everything learned this session and opens it:
     atk\report.html   styled, readable report - this host + gateway,
                       every device (IP, MAC, name, OS/type, open ports,
                       banner), per-device traffic totals (DNS/SNI/HTTP,
-                      events, bytes up/down, top protocol and top peer)
-                      and the full DNS rule list
+                      events, bytes up/down, top protocol and top peer),
+                      a bypass-indicator section and the full DNS rule list
     atk\report.json   the same data as machine-readable JSON, for
                       scripting or copying into another tool
   Re-run it any time; it overwrites both files with the latest state.
@@ -194,7 +217,7 @@ FILES WRITTEN (under atk\)
 CONSOLE (optional — auto_attack.exe can also be run by hand)
   1 scan | t <spec> | m <1-6> | g start | x stop | i status | h help
   extras: users, top, tracks, watch <ip>, showtrack <ip> <n>,
-           detail <ip> [n], stats [ip], fingerprint [ip|*], report,
+           detail <ip> [n], stats [ip], bypass, fingerprint [ip|*], report,
            _focus <ip|none>, pcap [on|off],
           block <dom> [ip|*], redirect <dom> <ip> [ip|*], unblock <dom>,
           rules, save, load, blockapp <app> [ip|*], unblockapp <app>,

@@ -136,7 +136,7 @@ enum {
     ID_SCAN, ID_QUICK, ID_SELECT_ALL, ID_SELECT_NONE, ID_NAMES, ID_FINGERPRINT,
     ID_MODE_COMBO, ID_START, ID_STOP, ID_RESTORE, ID_FWD,
     ID_VICTIM_LV,
-    ID_ACTIVITY_LV, ID_REFRESH_ACT, ID_TOP, ID_SHOWTRACK, ID_TRACKS, ID_NAMES2, ID_WATCH, ID_REPORT,
+    ID_ACTIVITY_LV, ID_REFRESH_ACT, ID_TOP, ID_SHOWTRACK, ID_TRACKS, ID_NAMES2, ID_WATCH, ID_REPORT, ID_BYPASS,
     ID_TIMELINE_COMBO, ID_CAP_CHECK, ID_TIMELINE_SAVE, ID_CAPTURES,
     ID_BLOCK_DOMAIN, ID_BLOCK_VICTIM, ID_BLOCK_BTN,
     ID_REDIR_DOMAIN, ID_REDIR_IP, ID_REDIR_VICTIM, ID_REDIR_BTN,
@@ -535,7 +535,8 @@ static std::string fmtBytes(unsigned long long n) {
 // turn a STATS line's fields into a short, human-readable header
 static std::string buildStatsText(unsigned long long up, unsigned long long down,
                                   unsigned long long pu, unsigned long long pd,
-                                  const std::string& protos, const std::string& peers) {
+                                  const std::string& protos, const std::string& peers,
+                                  const std::string& bypass) {
     std::string t;
     t += "up " + fmtBytes(up) + " / " + std::to_string(pu) + " pkts    ";
     t += "down " + fmtBytes(down) + " / " + std::to_string(pd) + " pkts";
@@ -564,6 +565,10 @@ static std::string buildStatsText(unsigned long long up, unsigned long long down
             t += tok.substr(0, c) + " (" + tok.substr(c + 1) + ")";
             n++;
         }
+    }
+    if (!bypass.empty()) {
+        t += "\r\n";
+        t += "bypass: " + bypass;
     }
     return t;
 }
@@ -660,10 +665,11 @@ void handleDumpLine(const std::string& line) {
         unsigned long long pd = _strtoui64(val(p[4]).c_str(), NULL, 10);
         std::string protos = val(p[5]);
         std::string peers = p.size() > 6 ? val(p[6]) : "";
+        std::string bypass = p.size() > 7 ? val(p[7]) : "";
         std::lock_guard<std::mutex> lk(g_stateMutex);
         beginFrameLocked();
         g_stageStatsIp = p[0];
-        g_stageStatsText = buildStatsText(up, down, pu, pd, protos, peers);
+        g_stageStatsText = buildStatsText(up, down, pu, pd, protos, peers, bypass);
     } else if (line.rfind("EVENT ", 0) == 0) {
         std::string rest = line.substr(6);
         size_t bar = rest.find('|');
@@ -1423,13 +1429,14 @@ void buildSetupPage(HWND page) {
 
 void buildTrackingPage(HWND page) {
     int y = 10;
-    makeButton(page, L"Refresh",         ID_REFRESH_ACT, 8,   y, 100, 30);
-    makeButton(page, L"Top 10",          ID_TOP,         114, y, 100, 30);
-    makeButton(page, L"Resolve Names",   ID_NAMES2,      220, y, 120, 30);
-    makeButton(page, L"Focus Device",    ID_WATCH,       346, y, 120, 30);
-    makeButton(page, L"Show Track Log",  ID_SHOWTRACK,   472, y, 130, 30);
-    makeButton(page, L"List Track Logs", ID_TRACKS,      608, y, 130, 30);
-    makeButton(page, L"Save Report",     ID_REPORT,      744, y, 130, 30);
+    makeButton(page, L"Refresh",         ID_REFRESH_ACT, 8,   y, 90, 30);
+    makeButton(page, L"Top 10",          ID_TOP,         104, y, 90, 30);
+    makeButton(page, L"Resolve Names",   ID_NAMES2,      200, y, 110, 30);
+    makeButton(page, L"Focus Device",    ID_WATCH,       314, y, 110, 30);
+    makeButton(page, L"Show Track Log",  ID_SHOWTRACK,   428, y, 120, 30);
+    makeButton(page, L"List Track Logs", ID_TRACKS,      552, y, 120, 30);
+    makeButton(page, L"Save Report",     ID_REPORT,      676, y, 110, 30);
+    makeButton(page, L"Bypass Check",    ID_BYPASS,      790, y, 110, 30);
 
     makeStatic(page, L"Activity (DNS / SNI / HTTP events per host)",
                8, 50, 500, 20, g_fontBold);
@@ -1866,6 +1873,8 @@ void onSaveTimeline() {
     }
 }
 
+void onBypass()  { sendCmd("bypass"); }
+
 void onReport() {
     sendCmd("report");
     appendLog("[*] writing atk\\report.html + report.json...\r\n");
@@ -2084,6 +2093,7 @@ LRESULT CALLBACK MainProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
                 case ID_SHOWTRACK:    onShowTrack(); break;
                 case ID_TRACKS:       onTracks();    break;
                 case ID_REPORT:       onReport();    break;
+                case ID_BYPASS:       onBypass();    break;
                 case ID_WATCH:        onWatch();     break;
                 case ID_TIMELINE_COMBO:
                     if (HIWORD(wp) == CBN_SELCHANGE && !g_updatingTimelineCombo) {
@@ -2441,6 +2451,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow) {
     addTooltip(GetDlgItem(g_pages[1], ID_SHOWTRACK), L"Show the saved track log for the selected host.");
     addTooltip(GetDlgItem(g_pages[1], ID_TRACKS), L"List every track log file on disk.");
     addTooltip(GetDlgItem(g_pages[1], ID_REPORT), L"Write atk\\report.html + report.json and open the report.");
+    addTooltip(GetDlgItem(g_pages[1], ID_BYPASS), L"List devices using QUIC / DoH / DoT / VPN (why interception may miss traffic).");
     addTooltip(GetDlgItem(g_pages[1], ID_TIMELINE_SAVE), L"Save the visible timeline to a text file.");
     addTooltip(GetDlgItem(g_pages[2], ID_BLOCK_BTN), L"Block a domain for one device or all (*).");
     addTooltip(GetDlgItem(g_pages[2], ID_REDIR_BTN), L"Redirect a domain to an IP address.");
