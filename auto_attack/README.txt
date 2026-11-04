@@ -82,6 +82,26 @@ ATTACK MODES
   rule over IPv6.
 
 
+ATTACK RELIABILITY
+  The MITM is kept stuck instead of being set up once and forgotten:
+    - re-poisoning runs continuously (every ~4 s) so entries that time out
+      are refreshed before the victim notices
+    - "sticky" re-poison: when a selected target sends its own ARP, the
+      poison is re-sent within ~0.5 s, before the real mapping can take hold
+    - gateway move detection: if the router's MAC changes (reboot, failover,
+      router swap) the tool logs a warning and re-poisons against the new
+      MAC instead of black-holing every victim
+    - target move detection: if a target's IP reappears on a different MAC
+      (device reconnected / new DHCP lease) the record is updated and the
+      poison re-sent automatically
+    - counters: "rep" (re-poison rounds) and "gwm" (gateway MAC changes)
+      are shown in the status command, the status bar and the report
+  DoS rate control: "dosrate <pkts/s>" sets the SYN-flood rate per target
+  (200 - 200000, default 12000); "dosrate" alone prints the current value.
+  STOP always repairs every ARP cache and puts IP forwarding back the way
+  it was found.
+
+
 DETAILED TRAFFIC VIEW (per device)
   The Tracking tab has a live timeline for one device at a time, so you can
   see what a target is actually doing on the network, packet by packet:
@@ -179,7 +199,7 @@ CONSOLE (optional — auto_attack.exe can also be run by hand)
           block <dom> [ip|*], redirect <dom> <ip> [ip|*], unblock <dom>,
           rules, save, load, blockapp <app> [ip|*], unblockapp <app>,
           apps, appsigs, msgall <text>, msg <ip> <text>, msgstop,
-          msgtest, kick <ip>, unkick, restore, names, hosts
+          msgtest, kick <ip>, unkick, dosrate <pkts/s>, restore, names, hosts
   run with --adapter=N or --adapter-guid={GUID} to skip the adapter prompt
   (the GUI always passes the GUID so a NIC appearing/disappearing cannot
    make it pick the wrong adapter)

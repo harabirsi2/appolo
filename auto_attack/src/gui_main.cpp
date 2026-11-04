@@ -54,7 +54,7 @@ struct AppEntry { std::string victim, app; int blocked = 0; };
 struct Status {
     int mode = 0;
     bool attack = false, fwd = false, portal = false;
-    long seen = 0, arp = 0, dns = 0, kills = 0, sent = 0;
+    long seen = 0, arp = 0, dns = 0, kills = 0, sent = 0, rep = 0, gwm = 0;
     int tracked = 0, rules = 0, victims = 0, selected = 0;
     bool scanning = false;
     bool cap = false;
@@ -608,6 +608,8 @@ void handleDumpLine(const std::string& line) {
             else if (k == "dns") g_status.dns = atol(v.c_str());
             else if (k == "kills") g_status.kills = atol(v.c_str());
             else if (k == "sent") g_status.sent = atol(v.c_str());
+            else if (k == "rep") g_status.rep = atol(v.c_str());
+            else if (k == "gwm") g_status.gwm = atol(v.c_str());
             else if (k == "tracked") g_status.tracked = atoi(v.c_str());
             else if (k == "rules") g_status.rules = atoi(v.c_str());
             else if (k == "victims") g_status.victims = atoi(v.c_str());
@@ -1093,13 +1095,18 @@ void updateStatusText() {
                         ? modeNames[g_status.mode] : L"-";
     swprintf_s(buf, 1200,
         L"  %s  |  %d / %d targets  |  mode: %s  |  fwd: %s  |  portal: %s  "
-        L"|  seen: %ld  dns: %ld  kills: %ld  sent: %ld%s",
+        L"|  seen: %ld  dns: %ld  kills: %ld  sent: %ld  rep: %ld%s",
         g_status.attack ? L"[ ATTACKING ]" : (g_status.scanning ? L"[ SCANNING ]" : L"[ idle ]"),
         g_status.selected, g_status.victims, mn,
         g_status.fwd ? L"on" : L"off",
         g_status.portal ? L"on" : L"off",
-        g_status.seen, g_status.dns, g_status.kills, g_status.sent,
+        g_status.seen, g_status.dns, g_status.kills, g_status.sent, g_status.rep,
         g_status.scanning ? L"  (scanning network...)" : L"");
+    if (g_status.gwm > 0) {
+        wchar_t warn[96];
+        swprintf_s(warn, L"   [gateway MAC changed %ldx]", g_status.gwm);
+        wcscat_s(buf, 1200, warn);
+    }
     if (!g_status.myip.empty()) {
         wchar_t wip[64] = {0}, wgw[64] = {0};
         MultiByteToWideChar(CP_UTF8, 0, g_status.myip.c_str(), -1, wip, 64);
