@@ -587,6 +587,7 @@ struct Activity {
     std::deque<std::string>         recent;
     std::unordered_set<std::string> apps;
     DWORD                           lastPoison = 0;
+    unsigned long long              events    = 0;
     FILE*                           capFile   = nullptr;
     unsigned long long              capBytes  = 0;
     bool                            capFull   = false;
@@ -614,6 +615,7 @@ static void trackEvent(const std::string& ip, const std::string& mac,
         a.ip = ip;
         if (!mac.empty() && mac != "00:00:00:00:00:00") a.mac = mac;
         a.lastSeen = GetTickCount();
+        a.events++;
         a.recent.push_back(line);
         if (a.recent.size() > RECENT_CAP) a.recent.pop_front();
     }
@@ -1273,6 +1275,41 @@ static void classifyPacket(const unsigned char* p, int caplen) {
                 handleDnsQuery(src, dst, sport, payload, plen);
             }
         }
+
+        // mDNS / LLMNR queries are common even when a device uses encrypted
+        // DNS for the internet, so they make the timeline useful in practice
+        if ((dport == 5353 || dport == 5355) && plen > 12) {
+            std::string q; uint16_t qtype = 0;
+            if (dnsExtractQuery(payload, plen, q, qtype)) {
+                {
+                    std::lock_guard<std::mutex> lk(g_activityMutex);
+                    g_activity[src].dnsCount++;
+                }
+                trackEvent(src, macbuf, dport == 5353 ? "mDNS" : "LLMNR", q);
+            }
+        }
+
+        // SSDP discovery/notify (UDP 1900): devices broadcast services here
+        // every few seconds, which is very visible in the timeline
+        if ((sport == 1900 || dport == 1900) && plen > 0) {
+            char line[160] = {0};
+            int k = 0;
+            for (; k < plen && k < (int)sizeof(line) - 1; ++k) {
+                char c = (char)payload[k];
+                if (c == '\r' || c == '\n') break;
+                line[k] = c;
+            }
+            line[k] = 0;
+            if (k > 0 && dport == 1900) {
+                const char* kind = (strncmp(line, "M-SEARCH", 8) == 0)
+                                 ? "SSDP-SEARCH" : "SSDP";
+                trackEvent(src, macbuf, kind, line);
+            }
+        }
+
+        // DHCP requests: shows address refreshes in the timeline
+        if (dport == 67 && plen > 240)
+            trackEvent(src, macbuf, "DHCP", "request");
 
         // ---- passive name learning (always on, attack or not) ----------
         if (plen > 12) {
@@ -3676,10 +3713,10 @@ int main(int argc, char** argv) {
                         for (auto& v : g_victims)
                             if (v.ip == a.ip && !v.name.empty()) { nm = v.name; break; }
                     }
-                    PF("ACTIVITY %s|%s|%ld|%ld|%ld|%lu|%llu|%d\n",
+                    PF("ACTIVITY %s|%s|%ld|%ld|%ld|%lu|%llu|%d|%llu\n",
                        a.ip.c_str(), nm.c_str(),
                        a.dnsCount, a.sniCount, a.httpCount, (unsigned long)age,
-                       a.capBytes, a.capFull ? 1 : 0);
+                       a.capBytes, a.capFull ? 1 : 0, a.events);
                     for (auto& app : a.apps)
                         PF("APP %s|%s|%d\n",
                            a.ip.c_str(), app.c_str(),

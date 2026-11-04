@@ -46,9 +46,13 @@ GUI TABS
               toggle IP forwarding / How To Use (built-in guide);
               device list with checkboxes; mode dropdown;
               START / STOP & REPAIR
-  Tracking    per-host activity table (DNS / SNI / HTTP counters + age),
-              Top 10, Watch Selected (streams a host's recent events into
-              the log), Show Track Log, List Track Logs
+  Tracking    per-host activity table (DNS / SNI / HTTP counters + age +
+              event count), Top 10, Watch Selected (streams a host's recent
+              events into the log), Show Track Log, List Track Logs, plus a
+              live per-device timeline: pick a device in the dropdown to
+              stream its recent network events, tick "Record PCAP" to save
+              that device's raw packets, then "Save Timeline" or
+              "Open Captures" (see DETAILED TRAFFIC VIEW below)
   Control     DNS rules: block domain / redirect domain→IP / unblock,
               rule list, Save Rules / Load Rules, Kick (SYN flood) /
               Unkick
@@ -75,6 +79,31 @@ ATTACK MODES
   DNS rules answer both A and AAAA queries: blocked/redirected domains get
   a real A answer plus an empty AAAA answer, so clients can't slip past the
   rule over IPv6.
+
+
+DETAILED TRAFFIC VIEW (per device)
+  The Tracking tab has a live timeline for one device at a time, so you can
+  see what a target is actually doing on the network, packet by packet:
+    - choose the device in the dropdown (it also helps to focus a device
+      first: double-click its row, or press "Focus Device")
+    - the timeline shows a time-stamped line per observed event, e.g.
+        [12:04:31] mDNS   Smart-TV._googlecast._tcp.local
+        [12:04:35] SSDP-SEARCH M-SEARCH * HTTP/1.1
+        [12:04:41] DNS    www.example.com
+        [12:04:41] HTTP   www.example.com GET /index.html
+    - event kinds: DNS, mDNS, LLMNR, SSDP / SSDP-SEARCH, DHCP, SNI (TLS
+      handshake hostnames) and HTTP requests. Most devices use encrypted
+      DNS/QUIC for the internet, so the local-discovery rows (mDNS/LLMNR/
+      SSDP/DHCP) are usually what fills the timeline.
+    - "Record PCAP" saves that device's raw packets to
+      atk\captures\<ip>.pcap (openable in Wireshark); it grows until you
+      untick the box or the device hits 32 MB
+    - "Save Timeline" writes the visible text to a file; "Open Captures"
+      opens the captures folder
+  The same data is available without the GUI:
+    detail <ip> [n]      print a device's recent timeline (default 20 rows)
+    _focus <ip|none>     focus a device (drives the GUI timeline)
+    pcap on | pcap off   start/stop per-device capture
 
 
 DEVICE NAMES
@@ -105,6 +134,7 @@ FILES WRITTEN (under atk\)
   atk\gui.ini                GUI settings (last adapter used)
   atk\rules.txt              saved DNS rules (tab separated)
   atk\tracks\track_<ip>.log  per-device event log (DNS/SNI/HTTP lines)
+  atk\captures\<ip>.pcap     per-device raw packet capture (Record PCAP)
   atk\session_*.json         summary written when the engine exits
   (v4 no longer writes mitm_capture.pcap / credentials.txt —
    Record mode tracks activity through the same tables)

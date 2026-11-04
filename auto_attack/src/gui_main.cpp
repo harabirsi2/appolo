@@ -46,7 +46,7 @@
 
 struct Victim   { std::string ip, mac, name; bool sel = false; };
 struct Activity { std::string ip, name; long dns = 0, sni = 0, http = 0; unsigned long age = 0;
-                  unsigned long long capBytes = 0; bool capFull = false; };
+                  unsigned long long capBytes = 0, events = 0; bool capFull = false; };
 struct Rule     { std::string pattern, action, target, victim; };
 struct AppEntry { std::string victim, app; int blocked = 0; };
 
@@ -271,7 +271,8 @@ static bool sameVictim(const Victim& a, const Victim& b) {
 static bool sameActivity(const Activity& a, const Activity& b) {
     // age changes every second; don't refresh just for that
     return a.ip == b.ip && a.name == b.name &&
-           a.dns == b.dns && a.sni == b.sni && a.http == b.http;
+           a.dns == b.dns && a.sni == b.sni && a.http == b.http &&
+           a.events == b.events;
 }
 static bool sameRule(const Rule& a, const Rule& b) {
     return a.pattern == b.pattern && a.action == b.action &&
@@ -575,6 +576,7 @@ void handleDumpLine(const std::string& line) {
         a.http = atol(p[4].c_str()); a.age = (unsigned long)atol(p[5].c_str());
         if (p.size() > 6) a.capBytes = _strtoui64(p[6].c_str(), NULL, 10);
         if (p.size() > 7) a.capFull = atoi(p[7].c_str()) != 0;
+        if (p.size() > 8) a.events = _strtoui64(p[8].c_str(), NULL, 10);
         for (auto& x : g_stageActivity) if (x.ip == a.ip) { x = a; return; }
         g_stageActivity.push_back(a);
     } else if (line.rfind("EVENT ", 0) == 0) {
@@ -790,6 +792,8 @@ void refreshActivityLV(HWND hLV) {
         ListView_SetItemText(hLV, (int)i, 4, wbuf);
         swprintf_s(wbuf, L"%lus", a.age);
         ListView_SetItemText(hLV, (int)i, 5, wbuf);
+        swprintf_s(wbuf, L"%llu", a.events);
+        ListView_SetItemText(hLV, (int)i, 6, wbuf);
     }
     if (top > 0 && top < ListView_GetItemCount(hLV))
         ListView_EnsureVisible(hLV, top, FALSE);
@@ -818,6 +822,8 @@ void updateActivityAges(HWND hLV) {
             wchar_t wbuf[32];
             swprintf_s(wbuf, L"%lus", a.age);
             ListView_SetItemText(hLV, i, 5, wbuf);
+            swprintf_s(wbuf, L"%llu", a.events);
+            ListView_SetItemText(hLV, i, 6, wbuf);
             break;
         }
     }
@@ -1323,9 +1329,9 @@ void buildTrackingPage(HWND page) {
                8, 50, 500, 20, g_fontBold);
 
     g_hActivityLV = makeListView(page, ID_ACTIVITY_LV, 8, 74, 900, 240);
-    const wchar_t* cols[] = {L"IP", L"Hostname", L"DNS", L"SNI", L"HTTP", L"Age"};
-    const int widths[] = {130, 220, 70, 70, 70, 80};
-    for (int i = 0; i < 6; ++i) {
+    const wchar_t* cols[] = {L"IP", L"Hostname", L"DNS", L"SNI", L"HTTP", L"Age", L"Events"};
+    const int widths[] = {130, 220, 70, 70, 70, 80, 70};
+    for (int i = 0; i < 7; ++i) {
         LVCOLUMNW c = {0};
         c.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
         c.pszText = (LPWSTR)cols[i];
@@ -1333,7 +1339,7 @@ void buildTrackingPage(HWND page) {
         c.iSubItem = i;
         ListView_InsertColumn(g_hActivityLV, i, &c);
     }
-    setupLV(g_hActivityLV, cols, widths, 6);
+    setupLV(g_hActivityLV, cols, widths, 7);
 
     // ---- per-device detailed timeline --------------------------------
     makeStatic(page, L"Live timeline for selected device", 8, 322, 400, 20, g_fontBold);
