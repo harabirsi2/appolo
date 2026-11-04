@@ -44,7 +44,7 @@ echo [*] building GUI: auto_attack_gui.exe ...
 rem -O1 for the GUI: GCC 16 -O2 merges long string literals in .rdata in a way
 rem that can corrupt UI text; the GUI has no perf-critical code, so -O1 is safer
 "%MSYS%\g++.exe" -O1 -s -std=c++17 -mwindows -municode "src\gui_main.cpp" "src\gui_res.o" -o "auto_attack_gui.exe" ^
-    -lcomctl32 -luxtheme -lcomdlg32 -lgdi32 -luser32 -ladvapi32 -liphlpapi -static -static-libgcc -static-libstdc++
+    -lcomctl32 -luxtheme -lcomdlg32 -lgdi32 -luser32 -ladvapi32 -liphlpapi -lshell32 -static -static-libgcc -static-libstdc++
 if errorlevel 1 (
     echo [-] GUI build failed
     pause & exit /b 1

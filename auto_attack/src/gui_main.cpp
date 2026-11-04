@@ -18,6 +18,7 @@
 #include <iphlpapi.h>
 #include <ipifcons.h>
 #include <uxtheme.h>
+#include <shellapi.h>
 #include <string>
 #include <vector>
 #include <mutex>
@@ -44,7 +45,8 @@
 #define COL_RED      RGB(255, 90, 90)
 
 struct Victim   { std::string ip, mac, name; bool sel = false; };
-struct Activity { std::string ip, name; long dns = 0, sni = 0, http = 0; unsigned long age = 0; };
+struct Activity { std::string ip, name; long dns = 0, sni = 0, http = 0; unsigned long age = 0;
+                  unsigned long long capBytes = 0; bool capFull = false; };
 struct Rule     { std::string pattern, action, target, victim; };
 struct AppEntry { std::string victim, app; int blocked = 0; };
 
@@ -54,7 +56,8 @@ struct Status {
     long seen = 0, arp = 0, dns = 0, kills = 0, sent = 0;
     int tracked = 0, rules = 0, victims = 0, selected = 0;
     bool scanning = false;
-    std::string myip, gw, ifname;
+    bool cap = false;
+    std::string myip, gw, ifname, focus;
 } g_status;
 
 std::mutex   g_stateMutex;
@@ -106,12 +109,21 @@ void addTooltip(HWND hwnd, const wchar_t* text) {
     SendMessageW(g_hTooltip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
 }
 HWND g_hActivityLV;
+HWND g_hTimelineEdit, g_hTimelineCombo, g_hCapCheck;
 HWND g_hVictimLV, g_hModeCombo;
 HWND g_hModeLabel, g_hTipLabel;
 HWND g_hEmptyState;
 HWND g_hRulesLV;
 HWND g_hAppsLV;
 HWND g_hMsgEdit, g_hMsgTarget, g_hMsgNote1, g_hMsgNote2;
+
+// detailed per-device timeline (engine emits EVENT lines for the focused IP)
+std::vector<std::pair<std::string, std::string>> g_events, g_stageEvents;
+std::string g_timelineIp;
+std::vector<std::string> g_comboIps;
+std::string g_timelineText;
+bool g_updatingTimelineCombo = false;
+bool g_updatingCapCheck = false;
 
 enum {
     ID_TAB = 1000, ID_ADAPTER_COMBO, ID_STATUS_TEXT,
@@ -120,6 +132,7 @@ enum {
     ID_MODE_COMBO, ID_START, ID_STOP, ID_RESTORE, ID_FWD,
     ID_VICTIM_LV,
     ID_ACTIVITY_LV, ID_REFRESH_ACT, ID_TOP, ID_SHOWTRACK, ID_TRACKS, ID_NAMES2, ID_WATCH,
+    ID_TIMELINE_COMBO, ID_CAP_CHECK, ID_TIMELINE_SAVE, ID_CAPTURES,
     ID_BLOCK_DOMAIN, ID_BLOCK_VICTIM, ID_BLOCK_BTN,
     ID_REDIR_DOMAIN, ID_REDIR_IP, ID_REDIR_VICTIM, ID_REDIR_BTN,
     ID_UNBLOCK_DOMAIN, ID_UNBLOCK_BTN,
@@ -248,6 +261,7 @@ static void beginFrameLocked() {
     g_stageActivity.clear();
     g_stageRules.clear();
     g_stageApps.clear();
+    g_stageEvents.clear();
     g_frameOpen = true;
 }
 
@@ -285,17 +299,20 @@ static void commitDump() {
         !sameList(g_victims,  g_stageVictims,  sameVictim)  ||
         !sameList(g_activity, g_stageActivity, sameActivity) ||
         !sameList(g_rules,    g_stageRules,    sameRule)     ||
-        !sameList(g_apps,     g_stageApps,     sameApp);
+        !sameList(g_apps,     g_stageApps,     sameApp)      ||
+        g_events != g_stageEvents;
     if (dirty) {
         g_victims.swap(g_stageVictims);
         g_activity.swap(g_stageActivity);
         g_rules.swap(g_stageRules);
         g_apps.swap(g_stageApps);
+        g_events.swap(g_stageEvents);
     }
     g_stageVictims.clear();
     g_stageActivity.clear();
     g_stageRules.clear();
     g_stageApps.clear();
+    g_stageEvents.clear();
     g_frameOpen = false;
     g_dumpDirty = dirty;
 }
@@ -311,6 +328,11 @@ void startChild() {
         g_stageActivity.clear();
         g_stageRules.clear();
         g_stageApps.clear();
+        g_stageEvents.clear();
+        g_events.clear();
+        g_timelineIp.clear();
+        g_comboIps.clear();
+        g_timelineText.clear();
     }
     SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
     if (!CreatePipe(&g_hChildOutR, &g_hChildOutW, &sa, 0)) return;
@@ -524,6 +546,8 @@ void handleDumpLine(const std::string& line) {
             else if (k == "victims") g_status.victims = atoi(v.c_str());
             else if (k == "selected") g_status.selected = atoi(v.c_str());
             else if (k == "scanning") g_status.scanning = atoi(v.c_str()) != 0;
+            else if (k == "cap") g_status.cap = atoi(v.c_str()) != 0;
+            else if (k == "focus") { g_status.focus = v; if (v == "-") g_status.focus.clear(); }
             else if (k == "myip") g_status.myip = v;
             else if (k == "gw") g_status.gw = v;
             else if (k == "ifname") {
@@ -549,8 +573,17 @@ void handleDumpLine(const std::string& line) {
         Activity a; a.ip = p[0]; a.name = p[1];
         a.dns = atol(p[2].c_str()); a.sni = atol(p[3].c_str());
         a.http = atol(p[4].c_str()); a.age = (unsigned long)atol(p[5].c_str());
+        if (p.size() > 6) a.capBytes = _strtoui64(p[6].c_str(), NULL, 10);
+        if (p.size() > 7) a.capFull = atoi(p[7].c_str()) != 0;
         for (auto& x : g_stageActivity) if (x.ip == a.ip) { x = a; return; }
         g_stageActivity.push_back(a);
+    } else if (line.rfind("EVENT ", 0) == 0) {
+        std::string rest = line.substr(6);
+        size_t bar = rest.find('|');
+        if (bar == std::string::npos) return;
+        std::lock_guard<std::mutex> lk(g_stateMutex);
+        beginFrameLocked();
+        g_stageEvents.push_back(std::make_pair(rest.substr(0, bar), rest.substr(bar + 1)));
     } else if (line.rfind("APP ", 0) == 0) {
         auto p = splitPipe(line.substr(4));
         if (p.size() < 3) return;
@@ -788,6 +821,105 @@ void updateActivityAges(HWND hLV) {
             break;
         }
     }
+}
+
+static std::wstring toWide(const std::string& s) {
+    if (s.empty()) return std::wstring();
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, NULL, 0);
+    if (n <= 1) return std::wstring();
+    std::wstring w((size_t)n - 1, 0);
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], n);
+    return w;
+}
+
+// rebuild the device picker + event view for the focused device
+void refreshTimeline() {
+    std::vector<Activity> acts;
+    std::vector<std::pair<std::string, std::string>> evs;
+    std::string engineFocus;
+    bool cap = false;
+    {
+        std::lock_guard<std::mutex> lk(g_stateMutex);
+        acts = g_activity;
+        evs = g_events;
+        engineFocus = g_status.focus;
+        cap = g_status.cap;
+    }
+
+    // if the user has not picked a device yet, adopt the engine's focus or
+    // auto-focus the first device that produced activity
+    if (g_timelineIp.empty()) {
+        if (!engineFocus.empty()) {
+            g_timelineIp = engineFocus;
+        } else if (!acts.empty()) {
+            g_timelineIp = acts[0].ip;
+            sendCmd("_focus " + g_timelineIp);
+        }
+    }
+
+    if (g_hTimelineCombo) {
+        bool changed = (acts.size() != g_comboIps.size());
+        if (!changed)
+            for (size_t i = 0; i < acts.size(); ++i)
+                if (acts[i].ip != g_comboIps[i]) { changed = true; break; }
+        if (changed) {
+            g_updatingTimelineCombo = true;
+            SendMessageW(g_hTimelineCombo, CB_RESETCONTENT, 0, 0);
+            g_comboIps.clear();
+            int sel = -1;
+            for (size_t i = 0; i < acts.size(); ++i) {
+                std::string label = acts[i].ip;
+                if (!acts[i].name.empty() && acts[i].name != "-")
+                    label += "  " + acts[i].name;
+                std::wstring w = toWide(label);
+                int idx = (int)SendMessageW(g_hTimelineCombo, CB_ADDSTRING, 0, (LPARAM)w.c_str());
+                if (idx >= 0) {
+                    SendMessageW(g_hTimelineCombo, CB_SETITEMDATA, idx, (LPARAM)i);
+                    g_comboIps.push_back(acts[i].ip);
+                    if (acts[i].ip == g_timelineIp) sel = idx;
+                }
+            }
+            if (sel >= 0) SendMessageW(g_hTimelineCombo, CB_SETCURSEL, sel, 0);
+            g_updatingTimelineCombo = false;
+        } else {
+            for (size_t i = 0; i < g_comboIps.size(); ++i)
+                if (g_comboIps[i] == g_timelineIp) {
+                    SendMessageW(g_hTimelineCombo, CB_SETCURSEL, (WPARAM)i, 0);
+                    break;
+                }
+        }
+    }
+
+    std::string txt;
+    for (auto& e : evs) {
+        if (!g_timelineIp.empty() && e.first != g_timelineIp) continue;
+        if (!txt.empty()) txt += "\r\n";
+        txt += e.second;
+    }
+    if (g_hTimelineEdit && txt != g_timelineText) {
+        g_timelineText = txt;
+        std::wstring w = toWide(txt);
+        SetWindowTextW(g_hTimelineEdit, w.c_str());
+        SendMessageW(g_hTimelineEdit, EM_SETSEL, (WPARAM)-1, (LPARAM)-1);
+        SendMessageW(g_hTimelineEdit, EM_SCROLLCARET, 0, 0);
+    }
+
+    if (g_hCapCheck && !g_updatingCapCheck) {
+        bool checked = SendMessageW(g_hCapCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+        if (checked != cap) {
+            g_updatingCapCheck = true;
+            SendMessageW(g_hCapCheck, BM_SETCHECK, cap ? BST_CHECKED : BST_UNCHECKED, 0);
+            g_updatingCapCheck = false;
+        }
+    }
+}
+
+void setTimelineFocus(const std::string& ip) {
+    if (ip.empty()) return;
+    g_timelineIp = ip;
+    g_timelineText.clear();
+    sendCmd("_focus " + ip);
+    refreshTimeline();
 }
 
 void refreshRulesLV(HWND hLV) {
@@ -1183,14 +1315,14 @@ void buildTrackingPage(HWND page) {
     makeButton(page, L"Refresh",         ID_REFRESH_ACT, 8,   y, 100, 30);
     makeButton(page, L"Top 10",          ID_TOP,         114, y, 100, 30);
     makeButton(page, L"Resolve Names",   ID_NAMES2,      220, y, 120, 30);
-    makeButton(page, L"Watch Selected",  ID_WATCH,       346, y, 130, 30);
-    makeButton(page, L"Show Track Log",  ID_SHOWTRACK,   482, y, 130, 30);
-    makeButton(page, L"List Track Logs", ID_TRACKS,      618, y, 130, 30);
+    makeButton(page, L"Focus Device",    ID_WATCH,       346, y, 120, 30);
+    makeButton(page, L"Show Track Log",  ID_SHOWTRACK,   472, y, 130, 30);
+    makeButton(page, L"List Track Logs", ID_TRACKS,      608, y, 130, 30);
 
     makeStatic(page, L"Activity (DNS / SNI / HTTP events per host)",
                8, 50, 500, 20, g_fontBold);
 
-    g_hActivityLV = makeListView(page, ID_ACTIVITY_LV, 8, 74, 900, 400);
+    g_hActivityLV = makeListView(page, ID_ACTIVITY_LV, 8, 74, 900, 240);
     const wchar_t* cols[] = {L"IP", L"Hostname", L"DNS", L"SNI", L"HTTP", L"Age"};
     const int widths[] = {130, 220, 70, 70, 70, 80};
     for (int i = 0; i < 6; ++i) {
@@ -1202,6 +1334,21 @@ void buildTrackingPage(HWND page) {
         ListView_InsertColumn(g_hActivityLV, i, &c);
     }
     setupLV(g_hActivityLV, cols, widths, 6);
+
+    // ---- per-device detailed timeline --------------------------------
+    makeStatic(page, L"Live timeline for selected device", 8, 322, 400, 20, g_fontBold);
+    g_hTimelineCombo = makeCombo(page, ID_TIMELINE_COMBO, 8, 344, 280);
+    g_hCapCheck = CreateWindowW(L"BUTTON", L"Record PCAP",
+        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        296, 346, 130, 24, page, (HMENU)(INT_PTR)ID_CAP_CHECK, g_hInst, NULL);
+    SendMessage(g_hCapCheck, WM_SETFONT, (WPARAM)g_fontUI, TRUE);
+    SetWindowTheme(g_hCapCheck, L"DarkMode_Explorer", NULL);
+    makeButton(page, L"Save Timeline", ID_TIMELINE_SAVE, 432, 342, 130, 28);
+    makeButton(page, L"Open Captures", ID_CAPTURES,      570, 342, 130, 28);
+
+    g_hTimelineEdit = makeEdit(page, 0, 8, 376, 900, 240, true);
+    SendMessage(g_hTimelineEdit, EM_SETREADONLY, TRUE, 0);
+    SetWindowTheme(g_hTimelineEdit, L"DarkMode_Explorer", NULL);
 }
 
 void buildControlPage(HWND page) {
@@ -1398,7 +1545,25 @@ void layoutAll(int cx, int cy) {
         h = GetDlgItem(g_pages[0], ID_STOP);  if (h) MoveWindow(h, 616, pageH - 92, 160, 36, TRUE);
         if (g_hTipLabel) MoveWindow(g_hTipLabel, 8, pageH - 24, 780, 20, TRUE);
     }
-    if (g_hActivityLV) MoveWindow(g_hActivityLV, 8, 74,  cx - 40, pageH - 90,  TRUE);
+    if (g_hActivityLV) {
+        int actH = (pageH - 74) * 42 / 100;
+        if (actH < 110) actH = 110;
+        MoveWindow(g_hActivityLV, 8, 74, cx - 40, actH, TRUE);
+        int ty = 74 + actH + 34;
+        HWND h;
+        h = GetDlgItem(g_pages[1], ID_TIMELINE_COMBO);
+        if (h) MoveWindow(h, 8, ty, 280, 220, TRUE);
+        if (g_hCapCheck) MoveWindow(g_hCapCheck, 296, ty + 2, 130, 24, TRUE);
+        h = GetDlgItem(g_pages[1], ID_TIMELINE_SAVE);
+        if (h) MoveWindow(h, 432, ty - 2, 130, 28, TRUE);
+        h = GetDlgItem(g_pages[1], ID_CAPTURES);
+        if (h) MoveWindow(h, 570, ty - 2, 130, 28, TRUE);
+        if (g_hTimelineEdit) {
+            int eh = pageH - (ty + 30) - 8;
+            if (eh < 60) eh = 60;
+            MoveWindow(g_hTimelineEdit, 8, ty + 30, cx - 40, eh, TRUE);
+        }
+    }
     if (g_hRulesLV)    MoveWindow(g_hRulesLV,    8, 158, cx - 40, pageH - 175, TRUE);
     if (g_hAppsLV)     MoveWindow(g_hAppsLV,     8, 74,  cx - 40, pageH - 90,  TRUE);
     if (g_hMsgEdit) {
@@ -1555,10 +1720,44 @@ void onShowTrack() {
 void onWatch() {
     std::string ip = lvText(g_hActivityLV, 0);
     if (ip.empty()) {
-        ip = promptText(g_hMain, L"Watch Device", L"Enter victim IP:");
+        ip = promptText(g_hMain, L"Focus Device", L"Enter victim IP:");
         if (ip.empty()) return;
     }
-    sendCmd("watch " + ip);
+    setTimelineFocus(ip);
+}
+
+void onSaveTimeline() {
+    wchar_t path[MAX_PATH];
+    swprintf_s(path, L"%hs\\timeline.txt", guiDir().c_str());
+    OPENFILENAMEW ofn = {sizeof(ofn)};
+    ofn.hwndOwner = g_hMain;
+    ofn.lpstrFilter = L"Text\0*.txt\0All\0*.*\0";
+    ofn.lpstrFile = path;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_OVERWRITEPROMPT;
+    if (!GetSaveFileNameW(&ofn)) return;
+    int len = GetWindowTextLengthW(g_hTimelineEdit);
+    wchar_t* p = (wchar_t*)malloc((len + 1) * sizeof(wchar_t));
+    if (!p) return;
+    GetWindowTextW(g_hTimelineEdit, p, len + 1);
+    int u8len = WideCharToMultiByte(CP_UTF8, 0, p, -1, NULL, 0, NULL, NULL);
+    std::string u8(u8len > 1 ? u8len - 1 : 0, 0);
+    if (u8len > 1) WideCharToMultiByte(CP_UTF8, 0, p, -1, &u8[0], u8len, NULL, NULL);
+    free(p);
+    HANDLE hf = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                          FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hf != INVALID_HANDLE_VALUE) {
+        DWORD wr = 0;
+        WriteFile(hf, u8.c_str(), (DWORD)u8.size(), &wr, NULL);
+        CloseHandle(hf);
+    }
+}
+
+void onOpenCaptures() {
+    std::string dir = guiDir() + "atk\\captures";
+    CreateDirectoryA(dir.c_str(), NULL);
+    std::wstring w = toWide(dir);
+    ShellExecuteW(NULL, L"open", w.c_str(), NULL, NULL, SW_SHOWNORMAL);
 }
 
 void onBlock() {
@@ -1764,6 +1963,24 @@ LRESULT CALLBACK MainProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
                 case ID_SHOWTRACK:    onShowTrack(); break;
                 case ID_TRACKS:       onTracks();    break;
                 case ID_WATCH:        onWatch();     break;
+                case ID_TIMELINE_COMBO:
+                    if (HIWORD(wp) == CBN_SELCHANGE && !g_updatingTimelineCombo) {
+                        int idx = (int)SendMessageW(g_hTimelineCombo, CB_GETCURSEL, 0, 0);
+                        if (idx >= 0 && idx < (int)g_comboIps.size())
+                            setTimelineFocus(g_comboIps[idx]);
+                    }
+                    break;
+                case ID_CAP_CHECK:
+                    if (HIWORD(wp) == BN_CLICKED) {
+                        bool on = SendMessageW(g_hCapCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                        sendCmd(on ? "pcap on" : "pcap off");
+                        appendLog(on ? "[*] recording per-device PCAP\r\n"
+                                   : "[*] PCAP recording stopped\r\n");
+                        PostMessage(g_hMain, WM_APP_LOGNEW, 0, 0);
+                    }
+                    break;
+                case ID_TIMELINE_SAVE: onSaveTimeline(); break;
+                case ID_CAPTURES:     onOpenCaptures();  break;
                 case ID_BLOCK_BTN:    onBlock();     break;
                 case ID_REDIR_BTN:    onRedirect();  break;
                 case ID_UNBLOCK_BTN:  onUnblock();   break;
@@ -1853,10 +2070,12 @@ LRESULT CALLBACK MainProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (dirty) {
                 refreshVictimsLV(g_hVictimLV);
                 refreshActivityLV(g_hActivityLV);
+                refreshTimeline();
                 refreshRulesLV(g_hRulesLV);
                 refreshAppsLV(g_hAppsLV);
             } else {
                 updateActivityAges(g_hActivityLV);
+                refreshTimeline();
             }
             updateStatusText();
             return 0;
