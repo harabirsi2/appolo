@@ -45,10 +45,13 @@ HOW TO START (GUI)
 
 
 GUI TABS
-  Setup       Scan / Quick Start / Resolve Names / Fingerprint /
+  Setup       Scan / Quick Start / Resolve Names / Fingerprint / Rename /
               Select all/none / toggle IP forwarding / How To Use;
               device list with checkboxes (IP, MAC, hostname, open ports,
               OS guess); mode dropdown; START / STOP & REPAIR.
+              Rename gives the selected device a manual name (type "clear"
+              to remove it); the name is saved in atk\names.txt and always
+              wins over discovered names.
               The Filter box narrows the device list live (matches IP, MAC,
               hostname, port or OS); clicking a column header sorts the
               list, clicking it again reverses the order; double-clicking a
@@ -105,8 +108,38 @@ ATTACK RELIABILITY
       are shown in the status command, the status bar and the report
   DoS rate control: "dosrate <pkts/s>" sets the SYN-flood rate per target
   (200 - 200000, default 12000); "dosrate" alone prints the current value.
+  "flood <ip> [pps]" starts a one-target flood immediately at the given rate
+  without starting a full intercept; stop it with "unkick" (or x/stop).
+  Re-poison interval: "sweep [ms]" shows or sets it (500 - 60000, default
+  4000). A shorter interval recovers faster; a longer one is quieter.
   STOP always repairs every ARP cache and puts IP forwarding back the way
   it was found.
+
+
+PERFORMANCE (why the LAN used to slow down)
+  The engine captures and forwards packets in the same process, so any work
+  added to the capture path is felt on the whole link. The hot path was
+  cleaned up:
+    - capture snaplen is 2048 bytes and promiscuous mode is OFF. The tool
+      only needs frames addressed to this machine (unicast MITM traffic plus
+      broadcast), so the driver no longer copies every 64 KB frame of every
+      other device's traffic into user space - the main cause of the WiFi
+      slowdown while the tool ran.
+    - the per-packet "is this IP a target?" check is now one O(1) hash
+      lookup behind a small mutex instead of a full scan of the device list
+      under the main victim lock on every packet.
+    - per-device event logs use one buffered append handle per device
+      instead of an fopen/fprintf/fclose per DNS/SNI/HTTP event.
+    - pcap files are written through a 256 KB buffer and flushed every
+      ~4 MB instead of hitting the disk for every packet.
+    - the ~1 s "_dump" no longer takes the victim lock inside the activity
+      lock (that lock inversion caused visible stalls), and it copies rows
+      out before printing.
+  "perf" (console) prints pcap recv/drop/ifdrop counters plus the current
+  options. If "drop" keeps climbing, the machine cannot keep up: raise the
+  sweep interval, stop recording PCAP for devices you do not need, or close
+  other capture tools (Wireshark) on the same adapter.
+  "pcapmax [mb]" sets the per-device capture cap (1 - 4096, default 32).
 
 
 DETAILED TRAFFIC VIEW (per device)
@@ -129,7 +162,8 @@ DETAILED TRAFFIC VIEW (per device)
       SSDP/DHCP) are usually what fills the timeline.
     - "Record PCAP" saves that device's raw packets to
       atk\captures\<ip>.pcap (openable in Wireshark); it grows until you
-      untick the box or the device hits 32 MB
+      untick the box or the device hits the pcapmax cap (default 32 MB,
+      change with "pcapmax <mb>")
     - "Save Timeline" writes the visible text to a file; "Open Captures"
       opens the captures folder
   The same data is available without the GUI:
@@ -141,24 +175,38 @@ DETAILED TRAFFIC VIEW (per device)
 
 
 DEVICE NAMES
-  Names are learned two ways and the best one wins:
+  Names are learned several ways and the best source wins:
+    manual (priority 9)  a name you typed: "name <ip> <text>" in the
+                         console. It is saved to atk\names.txt, survives
+                         restarts, and is never replaced by a discovered
+                         name. "name <ip> clear" removes it.
     passive (always on)  mDNS/LLMNR/DNS answers (PTR, A, SRV), NetBIOS
                          node status, DHCP option 12/81 (mapped by MAC),
                          WS-Discovery "Computer" names
     active (scan/Resolve Names)
-                         NetBIOS, LLMNR, mDNS, reverse DNS, DNS-SD service
-                         discovery, plus SSDP/UPnP discovery and each
-                         device's <friendlyName>
+                         NetBIOS (unicast + subnet broadcast), LLMNR, mDNS,
+                         reverse DNS, DNS-SD service discovery, plus
+                         SSDP/UPnP discovery and each device's
+                         <friendlyName>
+  The console "hosts" table has a SOURCE column (manual / upnp / dhcp /
+  netbios / llmnr / mdns / dns / vendor), so you can see where each name
+  came from instead of guessing.
   Active probes ask the DNS-SD service types that name real hardware:
   _googlecast, _airplay, _raop, _spotify-connect, _sonos, _amzn-wplay,
-  _ipp, _printer, _http, _workstation, _smb, _device-info and _hap. The
-  PTR/SRV/A records that come back carry the friendly instance name
-  ("Living Room TV", "REDMI-15C"), which is applied to the device IP.
+  _androidtvremote2, _companion-link, _sleep-proxy, _afpovertcp,
+  _sftp-ssh, _ssh, _rfb, _ipp, _printer, _http, _workstation, _smb,
+  _device-info, _hap and _googlezone. The PTR/SRV/A records that come back
+  carry the friendly instance name ("Living Room TV", "REDMI-15C"), which
+  is applied to the device IP.
   Reverse names that are really service or interface labels are filtered
   out, so a name column never fills with "_ipp._tcp" style noise.
   A MAC-vendor name (Apple, Samsung, ...) is the fallback when a device
   advertises no name at all. Phones that randomise their MAC and publish
   nothing may stay as the vendor name.
+  "autonames on|off" (default on) retries the still-unnamed devices in the
+  background every ~90 s while the engine runs, so the list keeps filling
+  in without clicking Resolve Names. A background retry never runs two
+  probes at once and skips the retry while a scan is in progress.
 
 
 DEVICE FINGERPRINTING
@@ -231,6 +279,8 @@ LIVE PROOF IT'S WORKING
 FILES WRITTEN (under atk\)
   atk\gui.ini                GUI settings (last adapter used)
   atk\rules.txt              saved DNS rules (tab separated)
+  atk\names.txt              manual device names (tab separated, survives
+                             restarts; highest priority)
   atk\tracks\track_<ip>.log  per-device event log (DNS/SNI/HTTP lines)
   atk\captures\<ip>.pcap     per-device raw packet capture (Record PCAP)
   atk\report.html            session report ("Save Report")
@@ -244,11 +294,13 @@ CONSOLE (optional — auto_attack.exe can also be run by hand)
   1 scan | t <spec> | m <1-6> | g start | x stop | i status | h help
   extras: users, top, tracks, watch <ip>, showtrack <ip> <n>,
            detail <ip> [n], stats [ip], bypass, fingerprint [ip|*], report,
-           _focus <ip|none>, pcap [on|off],
+           _focus <ip|none>, pcap [on|off], pcapmax [mb], perf,
+           name <ip> <text|clear>, autonames [on|off],
           block <dom> [ip|*], redirect <dom> <ip> [ip|*], unblock <dom>,
           rules, save, load, blockapp <app> [ip|*], unblockapp <app>,
           apps, appsigs, msgall <text>, msg <ip> <text>, msgstop,
-          msgtest, kick <ip>, unkick, dosrate <pkts/s>, restore, names, hosts
+          msgtest, kick <ip>, unkick, dosrate <pkts/s>, flood <ip> [pps],
+          sweep [ms], restore, names, hosts
   run with --adapter=N or --adapter-guid={GUID} to skip the adapter prompt
   (the GUI always passes the GUID so a NIC appearing/disappearing cannot
    make it pick the wrong adapter)
@@ -271,6 +323,15 @@ TROUBLESHOOTING
                           press Resolve Names for active mDNS/NetBIOS/SSDP
                           probes. Some phones publish nothing, so the MAC
                           vendor (Apple, Samsung, ...) stays as fallback.
+                          Type "name <ip> <text>" in the console to label a
+                          device yourself; it is saved in atk\names.txt and
+                          always wins. "autonames on" (default) retries the
+                          unnamed ones in the background.
+  LAN feels slow        → run "perf" and look at drop=; stop unneeded PCAP
+                          recording and close other capture tools on the
+                          same adapter. The capture path no longer uses a
+                          64 KB snaplen or promiscuous mode, so normal
+                          browsing should not slow down.
   counters don't move   → attack not started? status bar must say
                           [ ATTACKING ]; also check fwd: on for modes 1/4/5
   portal message fails  → a message needs a running attack. The log names
