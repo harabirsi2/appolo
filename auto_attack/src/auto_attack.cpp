@@ -3529,26 +3529,32 @@ static void watchVictim(const std::string& ip) {
     DWORD mode = 0;
     bool isConsole = GetConsoleMode(h, &mode) != 0;
     if (!isConsole) {
-        std::lock_guard<std::mutex> lk(g_activityMutex);
-        auto it = g_activity.find(ip);
-        if (it != g_activity.end()) {
-            for (auto& line : it->second.recent) PF("  %s\n", line.c_str());
-        } else PF("  (no events yet for %s)\n", ip.c_str());
+        std::vector<std::string> lines;
+        {
+            std::lock_guard<std::mutex> lk(g_activityMutex);
+            auto it = g_activity.find(ip);
+            if (it != g_activity.end()) lines.assign(it->second.recent.begin(),
+                                                     it->second.recent.end());
+        }
+        if (!lines.empty()) for (auto& line : lines) PF("  %s\n", line.c_str());
+        else PF("  (no events yet for %s)\n", ip.c_str());
         return;
     }
 
     for (int i = 0; i < 500 && !attackOn; ++i) Sleep(10);
     while (true) {
         {
+            std::vector<std::string> fresh;
             std::lock_guard<std::mutex> lk(g_activityMutex);
             auto it = g_activity.find(ip);
             if (it != g_activity.end()) {
                 auto& r = it->second.recent;
                 if (shown > r.size()) shown = 0;
                 for (size_t k = shown; k < r.size(); ++k)
-                    PF("  %s\n", r[k].c_str());
+                    fresh.push_back(r[k]);
                 shown = r.size();
             }
+            for (auto& s : fresh) PF("  %s\n", s.c_str());
         }
         if (GetConsoleMode(h, &mode)) {
             DWORD ne = 0;
@@ -3991,10 +3997,14 @@ static void cmdUnblock(const std::string& domain) {
 }
 
 static void cmdRules() {
-    std::lock_guard<std::mutex> lk(g_dnsRuleMutex);
-    if (g_dnsRules.empty()) { PF("  (no rules)\n"); return; }
+    std::vector<DnsRule> rules;
+    {
+        std::lock_guard<std::mutex> lk(g_dnsRuleMutex);
+        rules = g_dnsRules;
+    }
+    if (rules.empty()) { PF("  (no rules)\n"); return; }
     PF("  %-40s %-10s %-16s %s\n", "PATTERN", "ACTION", "TARGET", "VICTIM");
-    for (auto& r : g_dnsRules)
+    for (auto& r : rules)
         PF("  %-40s %-10s %-16s %s\n", r.pattern.c_str(), r.action.c_str(),
            r.targetIp.empty() ? "-" : r.targetIp.c_str(), r.victim.c_str());
 }
