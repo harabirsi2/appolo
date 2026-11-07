@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Badge, Button } from "@appolo/ui";
+import { Button } from "@appolo/ui";
 import { NAV_ITEMS } from "@/lib/constants";
 import { requireSession } from "@/lib/session";
 import { logoutAction } from "@/lib/actions";
@@ -33,11 +33,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="rounded-lg border border-border bg-surface-2 p-3">
             <p className="truncate text-sm font-medium">{session.org.name}</p>
             <p className="mt-0.5 text-xs text-muted-2">/{session.org.slug}</p>
-            <div className="mt-2">
-              <Badge tone="brand">{session.org.planTier}</Badge>
-            </div>
+            <p className="mt-2 text-[11px] text-muted-2">Your taste profile</p>
           </div>
-          <p className="px-1 text-[11px] text-muted-2">Phase 4 · AI employee preview</p>
+          <p className="px-1 text-[11px] text-muted-2">Rate · rank · discover</p>
         </div>
       </aside>
 

@@ -64,8 +64,8 @@ curl.exe -s -c $jar -H "Content-Type: application/json" --data "@$bodyFile" "$Ba
 $dashStatus = (curl.exe -s -b $jar -o $dashHtml -w "%{http_code}" "$Base/app").Trim()
 $dashContent = Get-Content -Raw $dashHtml -ErrorAction SilentlyContinue
 T "dashboard renders" ($dashStatus -eq "200")
-T "dashboard shows Overview" ($dashContent -match "Overview")
-T "dashboard shows the org name" ($dashContent -match "Demo Business")
+T "dashboard shows the media home" ($dashContent -match "Your taste")
+T "dashboard shows the profile name" ($dashContent -match "Demo Profile")
 Remove-Item $jar, $bodyFile, $dashHtml -Force -ErrorAction SilentlyContinue
 
 # --- new org signup is isolated ---
@@ -325,7 +325,7 @@ $reviewToken = ($sentReview.json.reviewUrl -split "/r/")[-1]
 
 # 4. public token resolves without a session
 $resolve = P2-Get "$Base/api/public/reviews/$reviewToken"
-T "public review token resolves" ($resolve.code -eq 200 -and $resolve.json.businessName -eq "Demo Business")
+T "public review token resolves" ($resolve.code -eq 200 -and $resolve.json.businessName -eq "Demo Profile")
 T "landing exposes a public platform link" (@($resolve.json.platforms | Where-Object { $_.url }).Count -ge 1)
 
 $landingHtml = Join-Path $env:TEMP "appolo_smoke_landing.html"
@@ -696,6 +696,71 @@ T "ai agent restored to disabled" ($aiDisable.code -eq 200 -and $aiDisable.json.
 
 Remove-Item $p3jar, $p3resp, $p3body, $embedHtml, $csvPath, $auditHtml, $timelineHtml -Force -ErrorAction SilentlyContinue
 
+# --- media: catalog, head-to-head rating, rankings ---
+$catMovies = Invoke-RestMethod "$Base/api/catalog?kind=movie&limit=5" -WebSession $session -TimeoutSec 30
+$movieOnly = @($catMovies.items | Where-Object { $_.kind -ne "movie" }).Count -eq 0
+T "catalog returns movies" (@($catMovies.items).Count -eq 5 -and $movieOnly)
+
+$catSearch = Invoke-RestMethod "$Base/api/catalog?q=Radiohead" -WebSession $session -TimeoutSec 30
+T "catalog search finds a creator" (@($catSearch.items).Count -ge 1)
+
+$rankBefore = Invoke-RestMethod "$Base/api/rankings" -WebSession $session -TimeoutSec 30
+T "demo taste profile is seeded" (@($rankBefore.rankings).Count -ge 10 -and $rankBefore.stats.matchups -gt 0)
+T "top five has five entries" (@($rankBefore.topFive).Count -eq 5)
+$matchupsBefore = $rankBefore.stats.matchups
+
+$musicItems = Invoke-RestMethod "$Base/api/catalog?kind=music&limit=50" -WebSession $session -TimeoutSec 30
+$unratedMusic = @($musicItems.items | Where-Object { -not $_.rated })
+T "catalog exposes unrated items" ($unratedMusic.Count -ge 2)
+$mediaTarget = if ($unratedMusic.Count -ge 2) { $unratedMusic[0] } else { $null }
+$mediaOpponent = if ($unratedMusic.Count -ge 2) { $unratedMusic[1] } else { $null }
+
+$mediaMatchup = Invoke-RestMethod "$Base/api/rankings/$($mediaTarget.id)/matchup" -WebSession $session -TimeoutSec 30
+T "matchup pairs two different items of the same kind" (
+    $mediaMatchup.item.kind -eq $mediaMatchup.opponent.kind -and
+    $mediaMatchup.item.id -ne $mediaMatchup.opponent.id
+)
+
+$voteBody = @{ opponentId = $mediaOpponent.id; result = "win" } | ConvertTo-Json
+$mediaVote = Invoke-RestMethod "$Base/api/rankings/$($mediaTarget.id)/vote" -Method Post -Body $voteBody -ContentType "application/json" -WebSession $session -TimeoutSec 30
+T "vote records a win and raises the score" ($mediaVote.result -eq "win" -and $mediaVote.itemDelta -gt 0 -and $mediaVote.item.score -gt 5)
+
+$rankAfter = Invoke-RestMethod "$Base/api/rankings" -WebSession $session -TimeoutSec 30
+$targetRanked = @($rankAfter.rankings | Where-Object { $_.id -eq $mediaTarget.id }).Count -eq 1
+T "voted item appears in rankings" $targetRanked
+T "matchup count increments for both items" ($rankAfter.stats.matchups -eq ($matchupsBefore + 2))
+
+$mediaDetail = Invoke-RestMethod "$Base/api/rankings/$($mediaTarget.id)" -WebSession $session -TimeoutSec 30
+T "rating detail returns the matchup history" ($null -ne $mediaDetail.rating -and @($mediaDetail.history).Count -ge 1)
+
+# A fresh cookie jar for the HTML page checks (the earlier one was removed).
+$mediaJar = Join-Path $env:TEMP "appolo_smoke_media_cookies.txt"
+$mediaBodyFile = Join-Path $env:TEMP "appolo_media_login.json"
+[IO.File]::WriteAllText($mediaBodyFile, (@{ email = "owner@appolo.test"; password = "appolo-demo-1234" } | ConvertTo-Json -Compress))
+curl.exe -s -c $mediaJar -H "Content-Type: application/json" --data "@$mediaBodyFile" "$Base/api/auth/login" | Out-Null
+
+$mediaHome = Join-Path $env:TEMP "appolo_media_home.html"
+$mediaHomeStatus = (curl.exe -s -b $mediaJar -o $mediaHome -w "%{http_code}" "$Base/app").Trim()
+$mediaHomeContent = Get-Content -Raw $mediaHome -ErrorAction SilentlyContinue
+T "media home renders" ($mediaHomeStatus -eq "200" -and $mediaHomeContent -match "Your taste")
+
+$mediaRate = Join-Path $env:TEMP "appolo_media_rate.html"
+$mediaRateStatus = (curl.exe -s -b $mediaJar -o $mediaRate -w "%{http_code}" "$Base/app/rate").Trim()
+$mediaRateContent = Get-Content -Raw $mediaRate -ErrorAction SilentlyContinue
+T "rate page renders the catalog" ($mediaRateStatus -eq "200" -and $mediaRateContent -match "Rate something")
+
+$mediaGame = Join-Path $env:TEMP "appolo_media_game.html"
+$mediaGameStatus = (curl.exe -s -b $mediaJar -o $mediaGame -w "%{http_code}" "$Base/app/rate/$($mediaTarget.id)").Trim()
+$mediaGameContent = Get-Content -Raw $mediaGame -ErrorAction SilentlyContinue
+T "mini-game page renders" ($mediaGameStatus -eq "200" -and $mediaGameContent -match "Which is better")
+
+$mediaRankings = Join-Path $env:TEMP "appolo_media_rankings.html"
+$mediaRankingsStatus = (curl.exe -s -b $mediaJar -o $mediaRankings -w "%{http_code}" "$Base/app/rankings").Trim()
+$mediaRankingsContent = Get-Content -Raw $mediaRankings -ErrorAction SilentlyContinue
+T "rankings page renders" ($mediaRankingsStatus -eq "200" -and $mediaRankingsContent -match "Rankings")
+
+Remove-Item $mediaHome, $mediaRate, $mediaGame, $mediaRankings, $mediaJar, $mediaBodyFile -Force -ErrorAction SilentlyContinue
+
 # --- logout clears the session ---
 Invoke-RestMethod "$Base/api/auth/logout" -Method Post -WebSession $session -TimeoutSec 20 | Out-Null
 $afterLogout = $false
@@ -744,6 +809,20 @@ update reviews set reply_status = 'draft', assigned_to = null, flagged = false w
 "@
         }
 
+        $mediaReset = ""
+        $mediaIds = @($mediaTarget.id, $mediaOpponent.id) |
+            Where-Object { $_ -and $_ -match '^[0-9a-fA-F-]{36}$' } |
+            Select-Object -Unique
+        if ($mediaIds.Count -gt 0) {
+            $mediaList = ($mediaIds | ForEach-Object { "'$_'" }) -join ","
+            $mediaReset = @"
+delete from item_matchups where org_id = (select id from orgs where slug = 'demo')
+  and (item_id in ($mediaList) or opponent_id in ($mediaList));
+delete from item_ratings where org_id = (select id from orgs where slug = 'demo')
+  and item_id in ($mediaList);
+"@
+        }
+
         $cleanupSql = @"
 delete from orgs where slug like 'smoke-co-%';
 delete from locations where name = 'Smoke Test Site'
@@ -759,6 +838,7 @@ update ai_agents set enabled = false,
   voice_profile = jsonb_set(voice_profile, '{enabled}', 'false'::jsonb);
 $reviewReset
 $contactDelete
+$mediaReset
 "@
         $cleanupSql | & $psqlExe -d $dbUrl -v ON_ERROR_STOP=1 -f - | Out-Null
         Write-Host "cleanup: removed smoke test rows"

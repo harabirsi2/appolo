@@ -1,25 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Button, Card, Field, Input, Select } from "@appolo/ui";
+import { Button, Card, Field, Input } from "@appolo/ui";
 import { signupAction } from "@/lib/actions";
 import { getSession } from "@/lib/session";
 
-export const metadata = { title: "Create a workspace" };
-
-const TIMEZONES = [
-  "UTC",
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "Europe/London",
-  "Europe/Berlin",
-  "Asia/Dubai",
-  "Asia/Karachi",
-  "Asia/Kolkata",
-  "Asia/Singapore",
-  "Australia/Sydney",
-];
+export const metadata = { title: "Create your profile" };
 
 export default async function SignupPage({
   searchParams,
@@ -39,9 +24,9 @@ export default async function SignupPage({
       </Link>
 
       <Card>
-        <h1 className="text-xl font-semibold tracking-tight">Create your workspace</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Create your profile</h1>
         <p className="mt-1 text-sm text-muted">
-          One business, one location, and you as the owner. You can add more later.
+          Your ratings, rankings, and top five live here.
         </p>
 
         {error ? (
@@ -51,31 +36,19 @@ export default async function SignupPage({
         ) : null}
 
         <form action={signupAction} className="mt-6 space-y-4">
-          <Field label="Business name">
-            <Input name="orgName" required placeholder="Northside Dental" />
+          <Field label="Profile name" hint="Shown on your rankings, e.g. “Alex’s podium”.">
+            <Input name="orgName" required placeholder="Alex’s podium" />
           </Field>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Your name">
-              <Input name="name" required autoComplete="name" placeholder="Alex Morgan" />
-            </Field>
-            <Field label="First location">
-              <Input name="locationName" placeholder="Main Street" />
-            </Field>
-          </div>
-          <Field label="Work email">
-            <Input name="email" type="email" required autoComplete="email" placeholder="you@business.com" />
+          <Field label="Your name">
+            <Input name="name" required autoComplete="name" placeholder="Alex Morgan" />
+          </Field>
+          <Field label="Email">
+            <Input name="email" type="email" required autoComplete="email" placeholder="you@example.com" />
           </Field>
           <Field label="Password" hint="At least 10 characters, with a letter and a number.">
             <Input name="password" type="password" required autoComplete="new-password" placeholder="••••••••••" />
           </Field>
-          <Field label="Timezone">
-            <Select name="timezone" defaultValue="America/Denver">
-              {TIMEZONES.map((tz) => (
-                <option key={tz} value={tz}>{tz}</option>
-              ))}
-            </Select>
-          </Field>
-          <Button type="submit" className="w-full">Create workspace</Button>
+          <Button type="submit" className="w-full">Create profile</Button>
         </form>
 
         <p className="mt-5 text-sm text-muted">

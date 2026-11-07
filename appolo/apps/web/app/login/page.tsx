@@ -25,7 +25,7 @@ export default async function LoginPage({
 
       <Card>
         <h1 className="text-xl font-semibold tracking-tight">Welcome back</h1>
-        <p className="mt-1 text-sm text-muted">Sign in to your workspace.</p>
+        <p className="mt-1 text-sm text-muted">Sign in to your profile.</p>
 
         {error ? (
           <p className="mt-4 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -35,8 +35,8 @@ export default async function LoginPage({
 
         <form action={loginAction} className="mt-6 space-y-4">
           <input type="hidden" name="next" value={next ?? "/app"} />
-          <Field label="Work email">
-            <Input name="email" type="email" autoComplete="email" required placeholder="you@business.com" />
+          <Field label="Email">
+            <Input name="email" type="email" autoComplete="email" required placeholder="you@example.com" />
           </Field>
           <Field label="Password">
             <Input name="password" type="password" autoComplete="current-password" required placeholder="••••••••••" />
@@ -47,7 +47,7 @@ export default async function LoginPage({
         <p className="mt-5 text-sm text-muted">
           No account?{" "}
           <Link href="/signup" className="text-brand-soft hover:underline">
-            Create a workspace
+            Create an account
           </Link>
         </p>
       </Card>

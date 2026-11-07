@@ -1024,3 +1024,75 @@ export const jobLocks = pgTable("job_locks", {
   owner: text("owner").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
+
+/* ------------------------------------------------------------------ */
+/* media catalog & head-to-head rankings                               */
+/* ------------------------------------------------------------------ */
+
+export const mediaKindEnum = pgEnum("media_kind", ["movie", "tv", "music", "podcast", "book"]);
+
+/**
+ * The shared catalog. It is intentionally NOT tenant-scoped: everyone browses
+ * the same titles, while each org keeps its own rankings against them.
+ */
+export const catalogItems = pgTable(
+  "catalog_items",
+  {
+    id: pk(),
+    kind: mediaKindEnum("kind").notNull(),
+    title: text("title").notNull(),
+    subtitle: text("subtitle").notNull().default(""),
+    year: integer("year"),
+    imageUrl: text("image_url"),
+    externalRef: text("external_ref"),
+    tags: text("tags").array().notNull().default(emptyTextArray()),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    kindTitleUq: uniqueIndex("catalog_items_kind_title_uq").on(t.kind, t.title, t.subtitle),
+    externalRefUq: uniqueIndex("catalog_items_external_ref_uq").on(t.externalRef),
+    kindIdx: index("catalog_items_kind_idx").on(t.kind, t.title),
+  }),
+);
+
+/** One taste-profile ranking per org per catalog item. */
+export const itemRatings = pgTable(
+  "item_ratings",
+  {
+    id: pk(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").notNull().references(() => catalogItems.id, { onDelete: "cascade" }),
+    elo: integer("elo").notNull().default(1500),
+    matches: integer("matches").notNull().default(0),
+    wins: integer("wins").notNull().default(0),
+    losses: integer("losses").notNull().default(0),
+    skips: integer("skips").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    orgItemUq: uniqueIndex("item_ratings_org_item_uq").on(t.orgId, t.itemId),
+    orgEloIdx: index("item_ratings_org_elo_idx").on(t.orgId, t.elo),
+  }),
+);
+
+/** Immutable log of every head-to-head vote, for history and stats. */
+export const itemMatchups = pgTable(
+  "item_matchups",
+  {
+    id: pk(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").notNull().references(() => catalogItems.id, { onDelete: "cascade" }),
+    opponentId: uuid("opponent_id").notNull().references(() => catalogItems.id, { onDelete: "cascade" }),
+    /** Result from the item's perspective: win | loss | skip. */
+    result: text("result").notNull(),
+    itemEloBefore: integer("item_elo_before").notNull(),
+    itemEloAfter: integer("item_elo_after").notNull(),
+    opponentEloBefore: integer("opponent_elo_before").notNull(),
+    opponentEloAfter: integer("opponent_elo_after").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    orgItemIdx: index("item_matchups_org_item_idx").on(t.orgId, t.itemId, t.createdAt),
+  }),
+);
