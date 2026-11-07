@@ -45,7 +45,8 @@
 #define COL_ORANGE   RGB(255, 170, 60)
 #define COL_RED      RGB(255, 90, 90)
 
-struct Victim   { std::string ip, mac, name; bool sel = false;
+struct Victim   { std::string ip, mac, name, source; bool sel = false;
+                  unsigned long age = 0;
                   std::string ports, os, banner; };
 struct Activity { std::string ip, name; long dns = 0, sni = 0, http = 0; unsigned long age = 0;
                   unsigned long long capBytes = 0, events = 0; bool capFull = false; };
@@ -92,6 +93,7 @@ HWND g_hHeader, g_hAdapterCombo, g_hTab;
 HWND g_hAccent;
 HWND g_pages[5];
 HWND g_hLogEdit, g_hStatusText;
+HWND g_hCmdEdit, g_hCmdRun;
 HWND g_hBtnStartHdr, g_hBtnStopHdr, g_hBtnRestoreHdr;
 HFONT g_fontUI, g_fontBold, g_fontBig, g_fontMono;
 HBRUSH g_bgBrush, g_panelBrush, g_inputBrush, g_accentBrush;
@@ -138,6 +140,10 @@ bool g_victimSortAsc   = true;
 int  g_activitySortCol = -1;
 bool g_activitySortAsc = true;
 
+// command box history (Up/Down), newest last
+std::vector<std::string> g_cmdHistory;
+int g_cmdHistPos = -1;
+
 enum {
     ID_TAB = 1000, ID_ADAPTER_COMBO, ID_STATUS_TEXT,
     ID_HDR_START, ID_HDR_STOP, ID_HDR_RESTORE,
@@ -156,6 +162,9 @@ enum {
     ID_LOG_EDIT, ID_LOG_CLEAR, ID_LOG_COPY, ID_LOG_SAVE,
     ID_HELP, ID_RENAME_DEVICE,
     ID_TIMER_DUMP, ID_TIMER_AUTOSCAN, ID_TIMER_REPORT,
+    // keep existing IDs stable for tests/hosted tooling: new controls use
+    // explicit high numbers instead of shifting the sequence above
+    ID_CMD_EDIT = 1070, ID_CMD_RUN = 1071, ID_EXPORT_CSV = 1072, ID_KILLALL = 1073,
     WM_APP_LOGNEW = WM_APP + 1,
     WM_APP_REFRESH = WM_APP + 2,
 };
@@ -174,6 +183,8 @@ void updateStatusText();
 void populateAdapters();
 void buildPages();
 std::string promptText(HWND parent, const std::wstring& title, const std::wstring& label);
+void onCmdRun();
+void onExportCsv();
 
 std::mutex g_logMutex;
 std::string g_logBuf;
@@ -283,8 +294,11 @@ static void beginFrameLocked() {
 }
 
 static bool sameVictim(const Victim& a, const Victim& b) {
+    // age is bucketed so a purely time-based change does not force a full list
+    // rebuild every second; the value still refreshes at least every 5s
     return a.ip == b.ip && a.mac == b.mac && a.name == b.name && a.sel == b.sel &&
-           a.ports == b.ports && a.os == b.os && a.banner == b.banner;
+           a.ports == b.ports && a.os == b.os && a.banner == b.banner &&
+           a.source == b.source && (a.age / 5) == (b.age / 5);
 }
 static bool sameActivity(const Activity& a, const Activity& b) {
     // age changes every second; don't refresh just for that
@@ -585,6 +599,20 @@ static std::string buildStatsText(unsigned long long up, unsigned long long down
     return t;
 }
 
+static const char* sourceLabel(int prio) {
+    switch (prio) {
+        case 9:  return "manual";
+        case 6:  return "upnp";
+        case 5:  return "dhcp";
+        case 4:  return "netbios";
+        case 3:  return "llmnr";
+        case 2:  return "mdns";
+        case 1:  return "dns";
+        case 0:  return "vendor";
+        default: return "-";
+    }
+}
+
 void handleDumpLine(const std::string& line) {
     if (line.rfind("VICTIM ", 0) == 0) {
         auto p = splitPipe(line.substr(7));
@@ -597,6 +625,8 @@ void handleDumpLine(const std::string& line) {
             if (p.size() > 4) v.ports  = p[4];
             if (p.size() > 5) v.os     = p[5];
             if (p.size() > 6) v.banner = p[6];
+            if (p.size() > 7) v.source = sourceLabel(atoi(p[7].c_str()));
+            if (p.size() > 8) v.age    = (unsigned long)atol(p[8].c_str());
             return;
         }
         Victim v; v.ip = p[0]; v.mac = p[1]; v.name = p[2];
@@ -604,6 +634,8 @@ void handleDumpLine(const std::string& line) {
         if (p.size() > 4) v.ports  = p[4];
         if (p.size() > 5) v.os     = p[5];
         if (p.size() > 6) v.banner = p[6];
+        if (p.size() > 7) v.source = sourceLabel(atoi(p[7].c_str()));
+        if (p.size() > 8) v.age    = (unsigned long)atol(p[8].c_str());
         g_stageVictims.push_back(v);
     } else if (line.rfind("STATUS ", 0) == 0) {
         std::string s = line.substr(7);
@@ -900,8 +932,10 @@ void refreshVictimsLV(HWND hLV) {
                     case 1: r = cmpIpText(a.v.ip, b.v.ip); break;
                     case 2: r = _stricmp(a.v.mac.c_str(), b.v.mac.c_str()); break;
                     case 3: r = _stricmp(a.v.name.c_str(), b.v.name.c_str()); break;
-                    case 4: r = _stricmp(a.v.ports.c_str(), b.v.ports.c_str()); break;
-                    case 5: r = _stricmp(a.v.os.c_str(), b.v.os.c_str()); break;
+                    case 4: r = _stricmp(a.v.source.c_str(), b.v.source.c_str()); break;
+                    case 5: r = _stricmp(a.v.ports.c_str(), b.v.ports.c_str()); break;
+                    case 6: r = _stricmp(a.v.os.c_str(), b.v.os.c_str()); break;
+                    case 7: r = (a.v.age < b.v.age) ? -1 : (a.v.age > b.v.age ? 1 : 0); break;
                 }
                 return asc ? (r < 0) : (r > 0);
             });
@@ -926,12 +960,16 @@ void refreshVictimsLV(HWND hLV) {
             ListView_SetItemText(hLV, (int)i, 2, wbuf);
             MultiByteToWideChar(CP_UTF8, 0, v.name.c_str(), -1, wbuf, 256);
             ListView_SetItemText(hLV, (int)i, 3, wbuf);
-            MultiByteToWideChar(CP_UTF8, 0, v.ports.c_str(), -1, wbuf, 256);
+            MultiByteToWideChar(CP_UTF8, 0, v.source.c_str(), -1, wbuf, 256);
             ListView_SetItemText(hLV, (int)i, 4, wbuf);
+            MultiByteToWideChar(CP_UTF8, 0, v.ports.c_str(), -1, wbuf, 256);
+            ListView_SetItemText(hLV, (int)i, 5, wbuf);
             std::string ostext = v.os;
             if (!v.banner.empty()) ostext += "  [" + v.banner + "]";
             MultiByteToWideChar(CP_UTF8, 0, ostext.c_str(), -1, wbuf, 256);
-            ListView_SetItemText(hLV, (int)i, 5, wbuf);
+            ListView_SetItemText(hLV, (int)i, 6, wbuf);
+            swprintf_s(wbuf, L"%lus", v.age);
+            ListView_SetItemText(hLV, (int)i, 7, wbuf);
             ListView_SetCheckState(hLV, (int)i, v.sel);
         }
     }
@@ -1501,9 +1539,9 @@ void buildSetupPage(HWND page) {
     SetWindowLongW(g_hEmptyState, GWL_STYLE,
         GetWindowLongW(g_hEmptyState, GWL_STYLE) | SS_CENTER);
 
-    const wchar_t* cols[] = {L"#", L"IP", L"MAC", L"Hostname", L"Ports", L"OS"};
-    const int widths[] = {36, 118, 132, 190, 190, 150};
-    for (int i = 0; i < 6; ++i) {
+    const wchar_t* cols[] = {L"#", L"IP", L"MAC", L"Hostname", L"Source", L"Ports", L"OS", L"Age"};
+    const int widths[] = {34, 112, 128, 168, 74, 168, 128, 54};
+    for (int i = 0; i < 8; ++i) {
         LVCOLUMNW c = {0};
         c.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
         c.pszText = (LPWSTR)cols[i];
@@ -1596,6 +1634,7 @@ void buildControlPage(HWND page) {
     makeButton(page, L"Load Rules",    ID_LOAD_RULES,    340, y - 4, 100, 28);
     makeButton(page, L"Kick Selected", ID_KICK,          450, y - 4, 110, 28);
     makeButton(page, L"Unkick All",    ID_UNKICK,        570, y - 4, 100, 28);
+    makeButton(page, L"Kill All Conns",ID_KILLALL,       680, y - 4, 110, 28);
 
     g_hRulesLV = makeListView(page, ID_RULES_LV, 8, 158, 880, 320);
     const wchar_t* cols[] = {L"Pattern", L"Action", L"Target", L"Victim"};
@@ -1785,6 +1824,13 @@ void layoutAll(int cx, int cy) {
     HWND c = GetDlgItem(g_hMain, ID_LOG_CLEAR); if (c) MoveWindow(c, 10,  btnsY, 100, 26, TRUE);
     HWND p = GetDlgItem(g_hMain, ID_LOG_COPY);  if (p) MoveWindow(p, 114, btnsY, 100, 26, TRUE);
     HWND s = GetDlgItem(g_hMain, ID_LOG_SAVE);  if (s) MoveWindow(s, 218, btnsY, 100, 26, TRUE);
+    HWND e = GetDlgItem(g_hMain, ID_EXPORT_CSV);if (e) MoveWindow(e, 322, btnsY, 100, 26, TRUE);
+    if (g_hCmdEdit) {
+        int w = cx - 426 - 124;
+        if (w < 140) w = 140;
+        MoveWindow(g_hCmdEdit, 426, btnsY, w, 26, TRUE);
+        if (g_hCmdRun) MoveWindow(g_hCmdRun, 426 + w + 6, btnsY, 100, 26, TRUE);
+    }
 
     MoveWindow(g_hStatusText, 0, cy - STATUS_H, cx, STATUS_H, TRUE);
 }
@@ -2078,6 +2124,32 @@ void onAppUnblock() {
     sendCmd("unblockapp " + app);
 }
 
+// run whatever is typed in the command box; "clear"/"cls" are handled locally
+void onCmdRun() {
+    std::string cmd = getEditUTF8(g_hCmdEdit);
+    size_t a = cmd.find_first_not_of(" \t\r\n");
+    size_t b = cmd.find_last_not_of(" \t\r\n");
+    cmd = (a == std::string::npos) ? "" : cmd.substr(a, b - a + 1);
+    if (cmd.empty()) return;
+
+    if (g_cmdHistory.empty() || g_cmdHistory.back() != cmd)
+        g_cmdHistory.push_back(cmd);
+    if (g_cmdHistory.size() > 100) g_cmdHistory.erase(g_cmdHistory.begin());
+    g_cmdHistPos = -1;
+    setEditUTF8(g_hCmdEdit, "");
+
+    if (cmd == "clear" || cmd == "cls") { clearLog(); return; }
+    appendLog("> " + cmd + "\r\n");
+    sendCmd(cmd);
+    PostMessage(g_hMain, WM_APP_LOGNEW, 0, 0);
+}
+
+void onExportCsv() {
+    appendLog("[*] exporting device table to atk\\devices.csv\r\n");
+    sendCmd("export atk\\devices.csv");
+    PostMessage(g_hMain, WM_APP_LOGNEW, 0, 0);
+}
+
 void showPage(int idx) {
     for (int i = 0; i < 5; ++i)
         ShowWindow(g_pages[i], i == idx ? SW_SHOW : SW_HIDE);
@@ -2104,6 +2176,37 @@ bool handleGlobalKey(WPARAM vk) {
         }
     }
     return false;
+}
+
+// ---------------------------------------------------------------
+// command box: Enter runs, Up/Down walks the history
+// ---------------------------------------------------------------
+LRESULT CALLBACK CmdEditProc(HWND h, UINT msg, WPARAM wp, LPARAM lp,
+                             UINT_PTR, DWORD_PTR) {
+    if (msg == WM_KEYDOWN) {
+        if (wp == VK_RETURN) { onCmdRun(); return 0; }
+        if (wp == VK_UP && !g_cmdHistory.empty()) {
+            if (g_cmdHistPos < 0) g_cmdHistPos = (int)g_cmdHistory.size() - 1;
+            else if (g_cmdHistPos > 0) g_cmdHistPos--;
+            setEditUTF8(h, g_cmdHistory[g_cmdHistPos]);
+            SendMessageW(h, EM_SETSEL, (WPARAM)-1, (LPARAM)-1);
+            return 0;
+        }
+        if (wp == VK_DOWN && !g_cmdHistory.empty()) {
+            if (g_cmdHistPos >= 0 && g_cmdHistPos < (int)g_cmdHistory.size() - 1) {
+                g_cmdHistPos++;
+                setEditUTF8(h, g_cmdHistory[g_cmdHistPos]);
+            } else {
+                g_cmdHistPos = (int)g_cmdHistory.size();
+                setEditUTF8(h, "");
+            }
+            SendMessageW(h, EM_SETSEL, (WPARAM)-1, (LPARAM)-1);
+            return 0;
+        }
+    }
+    if (msg == WM_CHAR && (wp == VK_RETURN || wp == VK_TAB)) return 0;
+    if (msg == WM_NCDESTROY) RemoveWindowSubclass(h, CmdEditProc, 1);
+    return DefSubclassProc(h, msg, wp, lp);
 }
 
 // ---------------------------------------------------------------
@@ -2244,6 +2347,13 @@ LRESULT CALLBACK MainProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
                 case ID_LOG_CLEAR:    clearLog();    break;
                 case ID_LOG_COPY:     copyLog();     break;
                 case ID_LOG_SAVE:     saveLog();     break;
+                case ID_CMD_RUN:      onCmdRun();    break;
+                case ID_EXPORT_CSV:   onExportCsv(); break;
+                case ID_KILLALL:
+                    appendLog("[*] resetting all tracked connections\r\n");
+                    sendCmd("killall *");
+                    PostMessage(g_hMain, WM_APP_LOGNEW, 0, 0);
+                    break;
             }
             return 0;
         }
@@ -2513,6 +2623,26 @@ void buildMainChrome() {
     SendMessage(bs, WM_SETFONT, (WPARAM)g_fontUI, TRUE);
     SetWindowTheme(bs, L"DarkMode_Explorer", NULL);
 
+    HWND be = CreateWindowW(L"BUTTON", L"Export CSV",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_FLAT,
+        322, 776, 100, 26, g_hMain, (HMENU)ID_EXPORT_CSV, g_hInst, NULL);
+    SendMessage(be, WM_SETFONT, (WPARAM)g_fontUI, TRUE);
+    SetWindowTheme(be, L"DarkMode_Explorer", NULL);
+
+    g_hCmdEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+        426, 776, 460, 26, g_hMain, (HMENU)ID_CMD_EDIT, g_hInst, NULL);
+    SendMessage(g_hCmdEdit, WM_SETFONT, (WPARAM)g_fontMono, TRUE);
+    SendMessageW(g_hCmdEdit, EM_SETCUEBANNER, TRUE,
+                 (LPARAM)L"engine command (hosts, export, killall, flood ...)");
+    SetWindowSubclass(g_hCmdEdit, CmdEditProc, 1, 0);
+
+    g_hCmdRun = CreateWindowW(L"BUTTON", L"Run",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_FLAT,
+        892, 776, 80, 26, g_hMain, (HMENU)ID_CMD_RUN, g_hInst, NULL);
+    SendMessage(g_hCmdRun, WM_SETFONT, (WPARAM)g_fontBold, TRUE);
+    SetWindowTheme(g_hCmdRun, L"DarkMode_Explorer", NULL);
+
     g_hStatusText = CreateWindowExW(0, L"STATIC", L"[ idle ]",
         WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
         0, 810, 900, 40, g_hMain, (HMENU)ID_STATUS_TEXT, g_hInst, NULL);
@@ -2587,7 +2717,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow) {
     addTooltip(GetDlgItem(g_pages[0], ID_SELECT_ALL), L"Select all devices.");
     addTooltip(GetDlgItem(g_pages[0], ID_SELECT_NONE), L"Deselect all devices.");
     addTooltip(GetDlgItem(g_pages[0], ID_FWD), L"Toggle IP forwarding on/off.");
-    addTooltip(GetDlgItem(g_pages[0], ID_HELP), L"Show the quick guide.");
+    addTooltip(g_hCmdEdit, L"Type an engine command and press Enter (Up/Down = history).");
+    addTooltip(g_hCmdRun,  L"Run the typed engine command.");
+    addTooltip(GetDlgItem(g_hMain, ID_EXPORT_CSV), L"Write the device table to atk\\devices.csv.");
+    addTooltip(GetDlgItem(g_pages[2], ID_KILLALL), L"Send RST to every tracked connection (all devices).");    addTooltip(GetDlgItem(g_pages[0], ID_HELP), L"Show the quick guide.");
     addTooltip(GetDlgItem(g_pages[0], ID_START), L"Start attacking selected devices.");
     addTooltip(GetDlgItem(g_pages[0], ID_STOP), L"Stop and repair ARP caches.");
 

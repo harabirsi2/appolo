@@ -47,8 +47,12 @@ HOW TO START (GUI)
 GUI TABS
   Setup       Scan / Quick Start / Resolve Names / Fingerprint / Rename /
               Select all/none / toggle IP forwarding / How To Use;
-              device list with checkboxes (IP, MAC, hostname, open ports,
-              OS guess); mode dropdown; START / STOP & REPAIR.
+              device list with checkboxes (IP, MAC, hostname, name source,
+              open ports, OS guess, age); mode dropdown; START / STOP &
+              REPAIR.
+              The Source column says where the name came from (manual /
+              upnp / dhcp / netbios / llmnr / mdns / dns / vendor) and Age
+              is seconds since that device was last seen.
               Rename gives the selected device a manual name (type "clear"
               to remove it); the name is saved in atk\names.txt and always
               wins over discovered names.
@@ -66,7 +70,7 @@ GUI TABS
               "Open Captures" (see DETAILED TRAFFIC VIEW below)
   Control     DNS rules: block domain / redirect domain→IP / unblock,
               rule list, Save Rules / Load Rules, Kick (SYN flood) /
-              Unkick
+              Unkick / Kill All Conns (RST every tracked connection)
   Message     captive-portal notice: type a message, choose target
               (* = everyone, or one IP), Send / Stop. Needs a running
               attack; if none is active the GUI offers to start one.
@@ -74,7 +78,11 @@ GUI TABS
               on the victim's next DNS lookup / portal probe.
   Apps        detected apps per device; Block App / Unblock App kill the
               app for that device (DNS block + live TCP RST)
-  (bottom)    full engine log — Clear / Copy / Save
+  (bottom)    full engine log — Clear / Copy / Save, Export CSV, and a
+              command box: type any engine command and press Enter (Up/Down
+              recalls history; "clear" clears the log). This exposes every
+              console feature from the GUI, e.g. hosts, export, killall,
+              flood, perf, sweep, pcapmax, autonames, name, block, apps.
 
 
 ATTACK MODES
@@ -300,6 +308,7 @@ CONSOLE (optional — auto_attack.exe can also be run by hand)
           rules, save, load, blockapp <app> [ip|*], unblockapp <app>,
           apps, appsigs, msgall <text>, msg <ip> <text>, msgstop,
           msgtest, kick <ip>, unkick, dosrate <pkts/s>, flood <ip> [pps],
+          killall [ip|*], export [file.csv],
           sweep [ms], restore, names, hosts
   run with --adapter=N or --adapter-guid={GUID} to skip the adapter prompt
   (the GUI always passes the GUID so a NIC appearing/disappearing cannot
