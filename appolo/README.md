@@ -3,8 +3,9 @@
 A clean-room, Podium-class reputation and messaging platform.
 Reviews, shared inbox, AI employee, contacts, reporting — **no payments.**
 
-> **Status:** Phase 0 (foundations) and Phase 1 (contacts + inbox) are
-> implemented, verified, and committed. See `ROADMAP.md` for what comes next.
+> **Status:** Phase 0 (foundations), Phase 1 (contacts + inbox), and Phase 2
+> (review requests + landing pages) are implemented, verified, and committed.
+> See `ROADMAP.md` for what comes next.
 
 ## Documents
 
@@ -89,6 +90,29 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
   (inbound creates a contact + conversation, send is blocked without consent,
   consent unlocks a delivered reply, STOP revokes consent and closes the thread,
   web chat round-trips).
+
+## What Phase 2 ships (review requests + landing pages)
+
+- **Review templates:** per-org SMS/email templates with `{{first_name}}`,
+  `{{business_name}}`, `{{location_name}}`, and `{{review_link}}` variables,
+  seeded defaults, and a create/delete editor on the Reviews page.
+- **Request engine:** single and bulk requests from contacts, with consent,
+  quiet-hours, per-contact cooldown, and daily-cap checks before anything sends.
+  Requests are logged as messages in the shared inbox.
+- **Tokenized landing page:** `/r/[token]` shows the business name, a star
+  rating, and public review buttons for Google/Facebook. Private feedback is
+  optional and never gates or blocks the public link.
+- **Public API:** `/api/public/reviews/[token]` resolves a link and records the
+  click; `/api/public/reviews/feedback` accepts private feedback.
+- **Review inbox:** recent public reviews, per-review reply drafts, platform
+  list, and a sync action.
+- **Platform sync:** a demo adapter for every platform plus a documented Google
+  Business Profile v4 adapter behind `GOOGLE_BUSINESS_ACCESS_TOKEN`. No scraping.
+- **Settings:** quiet hours, timezone, daily cap, cooldown, and default platform,
+  editable from the Reviews page and via `/api/reviews/settings`.
+- **Verification:** `pnpm smoke` covers template creation, quiet-hours blocking,
+  send, token resolution, the public landing page, private feedback, review
+  stats, and platform sync.
 
 ## Commands
 

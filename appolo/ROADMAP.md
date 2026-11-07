@@ -47,6 +47,8 @@ delivered; STOP blocks all sends and is recorded.
 
 ## Phase 2 — Review requests + landing pages (L)
 
+**Status:** shipped — see the Phase 2 section of `README.md`.
+
 **Goal:** the review acquisition engine.
 
 - Templates with variables + template editor. (RV-05)

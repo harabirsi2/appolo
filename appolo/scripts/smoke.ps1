@@ -127,6 +127,12 @@ function Json-Get($url) {
     return [pscustomobject]@{ code = [int]$code; json = (Read-Json $p1resp) }
 }
 
+function Json-Patch($url, $obj) {
+    [IO.File]::WriteAllText($p1body, ($obj | ConvertTo-Json -Compress -Depth 6))
+    $code = (curl.exe -s -o $p1resp -w "%{http_code}" -b $p1jar -c $p1jar -X PATCH -H "Content-Type: application/json" --data "@$p1body" $url).Trim()
+    return [pscustomobject]@{ code = [int]$code; json = (Read-Json $p1resp) }
+}
+
 function Twilio-Post($to, $from, $smsBody, $sid) {
     return (curl.exe -s -o $p1resp -w "%{http_code}" -X POST `
         --data-urlencode "To=$to" --data-urlencode "From=$from" `
@@ -219,6 +225,152 @@ T "contacts CSV export works" ($exportStatus -eq "200")
 
 Remove-Item $p1jar, $p1resp, $p1body, $inboxHtml, $contactsHtml -Force -ErrorAction SilentlyContinue
 
+# --- Phase 2: review requests, landing, feedback, sync ---
+Write-Host ""
+Write-Host "Phase 2: reviews"
+
+$p2jar = Join-Path $env:TEMP "appolo_p2_cookies.txt"
+$p2resp = Join-Path $env:TEMP "appolo_p2_resp.json"
+$p2body = Join-Path $env:TEMP "appolo_p2_body.json"
+
+function P2-ReadJson($path) {
+    try {
+        $raw = Get-Content -Raw $path -ErrorAction Stop
+        if (-not $raw) { return $null }
+        return ($raw | ConvertFrom-Json)
+    } catch { return $null }
+}
+
+function P2-Post($url, $obj) {
+    [IO.File]::WriteAllText($p2body, ($obj | ConvertTo-Json -Compress -Depth 6))
+    $code = (curl.exe -s -o $p2resp -w "%{http_code}" -b $p2jar -c $p2jar -X POST -H "Content-Type: application/json" --data "@$p2body" $url).Trim()
+    return [pscustomobject]@{ code = [int]$code; json = (P2-ReadJson $p2resp) }
+}
+
+function P2-Get($url) {
+    $code = (curl.exe -s -o $p2resp -w "%{http_code}" -b $p2jar -c $p2jar $url).Trim()
+    return [pscustomobject]@{ code = [int]$code; json = (P2-ReadJson $p2resp) }
+}
+
+function P2-Patch($url, $obj) {
+    [IO.File]::WriteAllText($p2body, ($obj | ConvertTo-Json -Compress -Depth 6))
+    $code = (curl.exe -s -o $p2resp -w "%{http_code}" -b $p2jar -c $p2jar -X PATCH -H "Content-Type: application/json" --data "@$p2body" $url).Trim()
+    return [pscustomobject]@{ code = [int]$code; json = (P2-ReadJson $p2resp) }
+}
+
+[IO.File]::WriteAllText($p2body, (@{ email = "owner@appolo.test"; password = "appolo-demo-1234" } | ConvertTo-Json -Compress))
+curl.exe -s -c $p2jar -H "Content-Type: application/json" --data "@$p2body" "$Base/api/auth/login" | Out-Null
+
+# 1. settings are readable and writable
+$settingsGet = P2-Get "$Base/api/reviews/settings"
+T "review settings readable" ($settingsGet.code -eq 200 -and $null -ne $settingsGet.json.settings.quietHours)
+
+# 2. quiet hours block sends. Use a UTC window straddling "now".
+$nowUtc = (Get-Date).ToUniversalTime()
+$quietStart = $nowUtc.AddHours(-1).ToString("HH:mm")
+$quietEnd = $nowUtc.AddHours(1).ToString("HH:mm")
+$quietOn = P2-Patch "$Base/api/reviews/settings" @{
+    timezone   = "UTC"
+    quietHours = @{ enabled = $true; start = $quietStart; end = $quietEnd }
+}
+T "quiet hours enabled for test" ($quietOn.code -eq 200 -and $quietOn.json.settings.quietHours.enabled -eq $true)
+
+$p2stamp = [guid]::NewGuid().ToString("N").Substring(0, 8)
+$p2digits = -join (1..4 | ForEach-Object { Get-Random -Minimum 0 -Maximum 10 })
+$reviewContact = P2-Post "$Base/api/contacts" @{
+    name     = "Review Contact $p2stamp"
+    channels = @(@{ kind = "phone"; value = "+1555557$p2digits" })
+}
+$reviewContactId = $reviewContact.json.contact.id
+T "review contact created" ($reviewContact.code -eq 201)
+
+$reviewGrant = P2-Post "$Base/api/contacts/$reviewContactId/consent" @{ channel = "sms"; status = "granted"; source = "smoke" }
+T "review contact consent granted" ($reviewGrant.code -eq 201)
+
+$template = P2-Post "$Base/api/review-templates" @{
+    name    = "Smoke Review $p2stamp"
+    channel = "sms"
+    body    = "Hi {{first_name}}, thanks for visiting {{business_name}}! Review us: {{review_link}}"
+}
+T "review template created" ($template.code -eq 201 -and $template.json.template.name -like "Smoke Review*")
+$templateId = $template.json.template.id
+
+# Quiet hours are evaluated in the location's timezone. Use the UTC
+# "Smoke Test Site" location so the UTC window computed above is deterministic.
+$smokeLocationId = $created.location.id
+
+$blockedReview = P2-Post "$Base/api/review-requests" @{
+    contactId    = $reviewContactId
+    channel      = "sms"
+    templateId   = $templateId
+    platformKind = "google"
+    locationId   = $smokeLocationId
+}
+T "review request blocked during quiet hours (409)" ($blockedReview.code -eq 409 -and $blockedReview.json.code -eq "QUIET_HOURS")
+
+# 3. turn quiet hours off, then send for real.
+$quietOff = P2-Patch "$Base/api/reviews/settings" @{ quietHours = @{ enabled = $false; start = "21:00"; end = "08:00" } }
+T "quiet hours disabled" ($quietOff.code -eq 200 -and $quietOff.json.settings.quietHours.enabled -eq $false)
+
+$sentReview = P2-Post "$Base/api/review-requests" @{
+    contactId    = $reviewContactId
+    channel      = "sms"
+    templateId   = $templateId
+    platformKind = "google"
+    locationId   = $smokeLocationId
+}
+T "review request sent" ($sentReview.code -eq 201 -and $sentReview.json.status -eq "sent")
+T "review request returns a landing link" ($sentReview.json.reviewUrl -match "/r/")
+$reviewToken = ($sentReview.json.reviewUrl -split "/r/")[-1]
+
+# 4. public token resolves without a session
+$resolve = P2-Get "$Base/api/public/reviews/$reviewToken"
+T "public review token resolves" ($resolve.code -eq 200 -and $resolve.json.businessName -eq "Demo Business")
+T "landing exposes a public platform link" (@($resolve.json.platforms | Where-Object { $_.url }).Count -ge 1)
+
+$landingHtml = Join-Path $env:TEMP "appolo_smoke_landing.html"
+$landingStatus = (curl.exe -s -o $landingHtml -w "%{http_code}" "$Base/r/$reviewToken").Trim()
+$landingContent = Get-Content -Raw $landingHtml -ErrorAction SilentlyContinue
+T "public landing page renders" ($landingStatus -eq "200" -and $landingContent -match "How was your visit")
+T "public review button is shown" ($landingContent -match "Review us on")
+
+$demoResolve = P2-Get "$Base/api/public/reviews/demo-review-token-0001"
+T "seeded demo review link resolves" ($demoResolve.code -eq 200)
+
+# 5. private feedback is accepted and never blocks the public link
+$feedbackRes = P2-Post "$Base/api/public/reviews/feedback" @{
+    token  = $reviewToken
+    rating = 2
+    body   = "Smoke test private feedback"
+    name   = "Smoke Tester"
+}
+T "private feedback accepted" ($feedbackRes.code -eq 200 -and $feedbackRes.json.ok -eq $true)
+$resolveAfter = P2-Get "$Base/api/public/reviews/$reviewToken"
+T "landing marks feedback received" ($resolveAfter.json.alreadyResponded -eq $true)
+
+# 6. review inbox + platform sync
+$reviewList = P2-Get "$Base/api/reviews"
+T "reviews list returns stats" ($reviewList.code -eq 200 -and $null -ne $reviewList.json.stats.total)
+
+$sync = P2-Post "$Base/api/reviews/sync" @{}
+T "review sync runs" ($sync.code -eq 200 -and $sync.json.platforms -ge 1 -and ($sync.json.imported + $sync.json.updated) -ge 1)
+
+$reviewsHtml = Join-Path $env:TEMP "appolo_smoke_reviews.html"
+$reviewsStatus = (curl.exe -s -b $p2jar -o $reviewsHtml -w "%{http_code}" "$Base/app/reviews").Trim()
+$reviewsContent = Get-Content -Raw $reviewsHtml -ErrorAction SilentlyContinue
+T "reviews page renders" ($reviewsStatus -eq "200" -and $reviewsContent -match "Send a review request")
+
+# restore the demo quiet-hours policy
+P2-Patch "$Base/api/reviews/settings" @{
+    timezone   = "America/Denver"
+    quietHours = @{ enabled = $true; start = "21:00"; end = "08:00" }
+} | Out-Null
+
+$reviewContactIds = @($reviewContactId)
+$smokeTemplateId = $templateId
+
+Remove-Item $p2jar, $p2resp, $p2body, $landingHtml, $reviewsHtml -Force -ErrorAction SilentlyContinue
+
 # --- logout clears the session ---
 Invoke-RestMethod "$Base/api/auth/logout" -Method Post -WebSession $session -TimeoutSec 20 | Out-Null
 $afterLogout = $false
@@ -250,7 +402,7 @@ try {
     if (-not $dbUrl) { $dbUrl = "postgresql://appolo@127.0.0.1:55432/appolo" }
 
     if ($psqlExe -and (Test-Path $psqlExe)) {
-        $smokeIds = @($contactId, $inboundContactId, $wcContactId) |
+        $smokeIds = @(@($contactId, $inboundContactId, $wcContactId) + @($reviewContactIds)) |
             Where-Object { $_ -and $_ -match '^[0-9a-fA-F-]{36}$' } |
             Select-Object -Unique
         $contactDelete = ""
@@ -263,6 +415,8 @@ try {
 delete from orgs where slug like 'smoke-co-%';
 delete from locations where name = 'Smoke Test Site'
   and org_id = (select id from orgs where slug = 'demo');
+delete from private_feedback where body = 'Smoke test private feedback';
+delete from review_templates where name like 'Smoke Review %';
 $contactDelete
 "@
         $cleanupSql | & $psqlExe -d $dbUrl -v ON_ERROR_STOP=1 -f - | Out-Null

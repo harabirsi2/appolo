@@ -485,6 +485,26 @@ export const reviewPlatforms = pgTable(
   }),
 );
 
+export const reviewTemplates = pgTable(
+  "review_templates",
+  {
+    id: pk(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    channel: text("channel").notNull().default("sms"),
+    subject: text("subject"),
+    body: text("body").notNull(),
+    variables: jsonb("variables").notNull().default(sql`'[]'::jsonb`),
+    isDefault: boolean("is_default").notNull().default(false),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    orgIdx: index("review_templates_org_idx").on(t.orgId, t.active),
+  }),
+);
+
 export const reviewRequests = pgTable(
   "review_requests",
   {

@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { eq, and, sql } from "drizzle-orm";
-import { hashPassword } from "@appolo/core";
+import { hashPassword, sha256, DEFAULT_REVIEW_TEMPLATES } from "@appolo/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pkgRoot = path.resolve(here, "..");
@@ -32,6 +32,9 @@ const {
   reviewPlatforms,
   reviews,
   reviewRequests,
+  reviewTemplates,
+  reviewTokens,
+  privateFeedback,
 } = schema;
 
 const db = getAdminDb();
@@ -406,6 +409,134 @@ async function main(): Promise<void> {
     }
 
     void webchatChannel;
+  });
+
+  // --- Phase 2 fixtures: review templates, public links, settings ---
+  // Idempotent: safe to rerun against an already-seeded database.
+  await withOrgAdmin(orgId, async (tx) => {
+    const day = 86_400_000;
+
+    const templateCount = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(reviewTemplates)
+      .where(eq(reviewTemplates.orgId, orgId));
+    if ((templateCount[0]?.n ?? 0) === 0) {
+      await tx.insert(reviewTemplates).values(
+        DEFAULT_REVIEW_TEMPLATES.map((template) => ({
+          orgId,
+          name: template.name,
+          channel: template.channel,
+          subject: template.subject ?? null,
+          body: template.body,
+          isDefault: template.isDefault ?? false,
+          variables: ["first_name", "business_name", "review_link"],
+        })),
+      );
+    }
+
+    // Demo platforms point at public review URLs so the landing page has real
+    // outbound links. Live Google sync still needs a real token + resource name.
+    const platformRows = await tx.select().from(reviewPlatforms).where(eq(reviewPlatforms.orgId, orgId));
+    const demoPlatforms: { kind: "google" | "facebook"; displayName: string; url: string }[] = [
+      { kind: "google", displayName: "Google", url: "https://search.google.com/local/writereview?placeid=appolo-demo" },
+      { kind: "facebook", displayName: "Facebook", url: "https://www.facebook.com/appolo-demo/reviews" },
+    ];
+    for (const demo of demoPlatforms) {
+      const existing = platformRows.find((row) => row.kind === demo.kind);
+      if (!existing) {
+        await tx.insert(reviewPlatforms).values({
+          orgId,
+          kind: demo.kind,
+          displayName: demo.displayName,
+          externalRef: demo.url,
+        });
+      } else if (!/^https?:\/\//i.test(existing.externalRef ?? "")) {
+        await tx
+          .update(reviewPlatforms)
+          .set({ externalRef: demo.url })
+          .where(eq(reviewPlatforms.id, existing.id));
+      }
+    }
+
+    // A stable demo token so the public landing page is easy to open.
+    const demoToken = "demo-review-token-0001";
+    const existingToken = await tx
+      .select({ id: reviewTokens.id })
+      .from(reviewTokens)
+      .where(eq(reviewTokens.tokenHash, sha256(demoToken)))
+      .limit(1);
+    if (!existingToken[0]) {
+      const demoContact = (
+        await tx
+          .select({ id: contacts.id })
+          .from(contacts)
+          .where(and(eq(contacts.orgId, orgId), eq(contacts.name, "Ava Thompson")))
+          .limit(1)
+      )[0];
+      if (demoContact) {
+        const request = (
+          await tx
+            .insert(reviewRequests)
+            .values({
+              orgId,
+              contactId: demoContact.id,
+              locationId,
+              channel: "sms",
+              status: "sent",
+              sentAt: new Date(Date.now() - day),
+              platformKind: "google",
+            })
+            .returning({ id: reviewRequests.id })
+        )[0]!;
+        await tx.insert(reviewTokens).values({
+          orgId,
+          tokenHash: sha256(demoToken),
+          requestId: request.id,
+          expiresAt: new Date(Date.now() + 30 * day),
+        });
+      }
+    }
+
+    // Seed one piece of private feedback for the dashboard (not tied to the
+    // demo landing token, so that form stays usable).
+    const feedbackCount = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(privateFeedback)
+      .where(eq(privateFeedback.orgId, orgId));
+    if ((feedbackCount[0]?.n ?? 0) === 0) {
+      const marcus = (
+        await tx
+          .select({ id: contacts.id })
+          .from(contacts)
+          .where(and(eq(contacts.orgId, orgId), eq(contacts.name, "Marcus Lee")))
+          .limit(1)
+      )[0];
+      await tx.insert(privateFeedback).values({
+        orgId,
+        contactId: marcus?.id ?? null,
+        rating: 3,
+        body: "Service was good but the quote changed at pickup. Would appreciate a heads-up next time.",
+        status: "new",
+      });
+    }
+
+    // Default review-request policy, only if the org has not set one yet.
+    const [orgSettingsRow] = await tx
+      .select({ settings: orgs.settings })
+      .from(orgs)
+      .where(eq(orgs.id, orgId))
+      .limit(1);
+    const settings = { ...((orgSettingsRow?.settings ?? {}) as Record<string, unknown>) };
+    if (!settings.reviewRequests) {
+      settings.reviewRequests = {
+        quietHours: { enabled: true, start: "21:00", end: "08:00" },
+        dailyCap: 200,
+        timezone: "America/Denver",
+        cooldownDays: 90,
+        defaultPlatformKind: "google",
+      };
+      await tx.update(orgs).set({ settings }).where(eq(orgs.id, orgId));
+    }
   });
 
   console.log("");

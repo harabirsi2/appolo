@@ -5,3 +5,4 @@ export * from "./validation";
 export * from "./consent";
 export * from "./contacts";
 export * from "./messaging";
+export * from "./reviews";

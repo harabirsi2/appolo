@@ -833,6 +833,24 @@ export async function startConversation(orgId: string, contactId: string, channe
   });
 }
 
+/**
+ * Finds or creates the conversation for a contact on the org's channel of the
+ * given kind. Used by review requests so they show up in the shared inbox.
+ */
+export async function ensureConversationForContact(
+  orgId: string,
+  contactId: string,
+  channelKind: "sms" | "email" | "webchat",
+): Promise<string> {
+  return withOrg(orgId, async (tx) => {
+    const [channel] = await tx
+      .select({ id: channels.id, locationId: channels.locationId })
+      .from(channels)
+      .where(and(eq(channels.orgId, orgId), eq(channels.kind, channelKind)))
+      .limit(1);
+    return ensureConversation(tx, orgId, contactId, channel?.id ?? null, channel?.locationId ?? null);
+  });
+}
 /** Channels the org can send on, for the UI. */
 export async function listOrgChannels(orgId: string) {
   return withOrg(orgId, (tx) => tx.select().from(channels).where(eq(channels.orgId, orgId)).orderBy(channels.kind));
