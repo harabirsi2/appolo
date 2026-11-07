@@ -28,6 +28,8 @@ a user can sign up and land on an empty dashboard.
 
 ## Phase 1 — Contacts + Inbox (L)
 
+**Status:** shipped — see the Phase 1 section of `README.md`.
+
 **Goal:** the core loop — receive a message, see the contact, reply.
 
 - Contacts CRUD, channels, normalization, CSV import/export, tags. (CT-01, CT-03, CT-04)

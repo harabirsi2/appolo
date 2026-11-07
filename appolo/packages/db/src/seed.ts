@@ -2,7 +2,7 @@ import "dotenv/config";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { eq, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { hashPassword } from "@appolo/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -22,6 +22,13 @@ const {
   users,
   memberships,
   contacts,
+  contactChannels,
+  consentRecords,
+  channels,
+  phoneNumbers,
+  conversations,
+  messages,
+  savedReplies,
   reviewPlatforms,
   reviews,
   reviewRequests,
@@ -209,6 +216,197 @@ async function main(): Promise<void> {
       ]);
     });
   }
+
+  // --- Phase 1 fixtures: channels, consent, inbox -------------------
+  // Idempotent: each item is created only if missing, so seed can rerun.
+  await withOrgAdmin(orgId, async (tx) => {
+    let smsChannel = (
+      await tx
+        .select()
+        .from(channels)
+        .where(and(eq(channels.orgId, orgId), eq(channels.kind, "sms")))
+        .limit(1)
+    )[0];
+    if (!smsChannel) {
+      smsChannel = (
+        await tx
+          .insert(channels)
+          .values({
+            orgId,
+            locationId,
+            kind: "sms",
+            provider: "mock",
+            providerRef: "+15555550100",
+            status: "active",
+          })
+          .returning()
+      )[0]!;
+    }
+
+    let webchatChannel = (
+      await tx
+        .select()
+        .from(channels)
+        .where(and(eq(channels.orgId, orgId), eq(channels.kind, "webchat")))
+        .limit(1)
+    )[0];
+    if (!webchatChannel) {
+      webchatChannel = (
+        await tx
+          .insert(channels)
+          .values({
+            orgId,
+            locationId,
+            kind: "webchat",
+            provider: "appolo",
+            providerRef: "demo-webchat",
+            status: "active",
+          })
+          .returning()
+      )[0]!;
+    }
+
+    const existingNumber = await tx
+      .select({ id: phoneNumbers.id })
+      .from(phoneNumbers)
+      .where(eq(phoneNumbers.e164, "+15555550100"))
+      .limit(1);
+    if (!existingNumber[0]) {
+      await tx.insert(phoneNumbers).values({
+        orgId,
+        e164: "+15555550100",
+        providerSid: "PN_demo",
+        capabilities: { sms: true, voice: false },
+        a2pStatus: "registered",
+        country: "US",
+      });
+    }
+
+    const primaryContact = (
+      await tx
+        .select()
+        .from(contacts)
+        .where(and(eq(contacts.orgId, orgId), eq(contacts.name, "Ava Thompson")))
+        .limit(1)
+    )[0];
+
+    if (primaryContact) {
+      const existing = await tx
+        .select({ kind: contactChannels.kind })
+        .from(contactChannels)
+        .where(eq(contactChannels.contactId, primaryContact.id));
+      const kinds = new Set(existing.map((c) => c.kind));
+      if (!kinds.has("phone")) {
+        await tx.insert(contactChannels).values({
+          orgId,
+          contactId: primaryContact.id,
+          kind: "phone",
+          value: "+15555550111",
+          normalizedValue: "+15555550111",
+          isPrimary: true,
+        });
+      }
+      if (!kinds.has("email")) {
+        await tx.insert(contactChannels).values({
+          orgId,
+          contactId: primaryContact.id,
+          kind: "email",
+          value: "ava@thompsondental.test",
+          normalizedValue: "ava@thompsondental.test",
+        });
+      }
+
+      const granted = await tx
+        .select({ id: consentRecords.id })
+        .from(consentRecords)
+        .where(and(eq(consentRecords.contactId, primaryContact.id), eq(consentRecords.channel, "sms")))
+        .limit(1);
+      if (!granted[0]) {
+        await tx.insert(consentRecords).values({
+          orgId,
+          contactId: primaryContact.id,
+          channel: "sms",
+          status: "granted",
+          source: "seed",
+          evidence: { note: "seeded consent" },
+        });
+      }
+
+      const existingConversation = await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(eq(conversations.contactId, primaryContact.id))
+        .limit(1);
+      if (!existingConversation[0]) {
+        const conversation = (
+          await tx
+            .insert(conversations)
+            .values({
+              orgId,
+              contactId: primaryContact.id,
+              channelId: smsChannel.id,
+              locationId,
+              status: "open",
+              unreadCount: 1,
+              lastMessageAt: new Date(),
+            })
+            .returning()
+        )[0]!;
+        const now = Date.now();
+        await tx.insert(messages).values([
+          {
+            orgId,
+            conversationId: conversation.id,
+            direction: "inbound",
+            senderType: "contact",
+            body: "Hi! Do you have any openings this week?",
+            status: "received",
+            sentAt: new Date(now - 3_600_000),
+          },
+          {
+            orgId,
+            conversationId: conversation.id,
+            direction: "outbound",
+            senderType: "user",
+            senderId: userId,
+            body: "Hi Ava! We have Thursday at 2pm open — want me to hold it for you?",
+            status: "delivered",
+            sentAt: new Date(now - 3_500_000),
+          },
+        ]);
+      }
+    }
+
+    const existingReply = await tx
+      .select({ id: savedReplies.id })
+      .from(savedReplies)
+      .where(eq(savedReplies.orgId, orgId))
+      .limit(1);
+    if (!existingReply[0]) {
+      await tx.insert(savedReplies).values([
+        {
+          orgId,
+          scope: "org",
+          title: "Greeting",
+          body: "Hi {{first_name}}! Thanks for reaching out to us. How can we help?",
+        },
+        {
+          orgId,
+          scope: "org",
+          title: "Hours",
+          body: "We're open Mon–Fri 9–6 and Sat 10–4. What time works best for you, {{first_name}}?",
+        },
+        {
+          orgId,
+          scope: "org",
+          title: "Review ask",
+          body: "Glad we could help! If you have a moment, a quick review would mean a lot to our team.",
+        },
+      ]);
+    }
+
+    void webchatChannel;
+  });
 
   console.log("");
   console.log("  seed complete");

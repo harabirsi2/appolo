@@ -1,16 +1,29 @@
 "use server";
 
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   can,
+  contactCreateSchema,
+  consentInputSchema,
   firstIssue,
   locationSchema,
   loginSchema,
+  savedReplySchema,
   signupSchema,
   type Capability,
 } from "@appolo/core";
 import { signIn, signOut, signUp } from "./services/auth";
+import { createContact, importContactsCsv, updateContact } from "./services/contacts";
+import { recordConsent } from "./services/consent";
+import {
+  addInternalNote,
+  createSavedReply,
+  sendOutboundMessage,
+  updateConversation,
+} from "./services/messaging";
+import { isDomainError } from "./services/errors";
 import { requireSession } from "./session";
 import { withOrg, schema } from "./db";
 
@@ -19,6 +32,34 @@ const { locations } = schema;
 function safeNext(value: FormDataEntryValue | null): string {
   const raw = typeof value === "string" ? value : "";
   return raw.startsWith("/") && !raw.startsWith("//") ? raw : "/app";
+}
+
+function fail(path: string, error: unknown): never {
+  const message = isDomainError(error) ? error.message : "Something went wrong. Please try again.";
+  const sep = path.includes("?") ? "&" : "?";
+  redirect(`${path}${sep}error=${encodeURIComponent(message)}`);
+}
+
+function stringField(formData: FormData, name: string): string | undefined {
+  const value = formData.get(name);
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function tagList(formData: FormData, name: string): string[] {
+  const raw = stringField(formData, name);
+  if (!raw) return [];
+  return raw
+    .split(/[;,]/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+async function requestIp(): Promise<string | null> {
+  const h = await headers();
+  const forwarded = h.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0]!.trim();
+  return h.get("x-real-ip");
 }
 
 export async function signupAction(formData: FormData): Promise<void> {
@@ -99,4 +140,245 @@ export async function createLocationAction(formData: FormData): Promise<void> {
   revalidatePath("/app/locations");
   revalidatePath("/app");
   redirect("/app/locations?ok=1");
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 1 — contacts                                                  */
+/* ------------------------------------------------------------------ */
+
+export async function createContactAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "contacts:write")) {
+    redirect(`/app/contacts?error=${encodeURIComponent("Your role cannot create contacts.")}`);
+  }
+
+  const channels: { kind: "phone" | "email"; value: string }[] = [];
+  const phone = stringField(formData, "phone");
+  const email = stringField(formData, "email");
+  if (phone) channels.push({ kind: "phone", value: phone });
+  if (email) channels.push({ kind: "email", value: email });
+
+  const parsed = contactCreateSchema.safeParse({
+    name: stringField(formData, "name"),
+    company: stringField(formData, "company"),
+    channels,
+    tags: tagList(formData, "tags"),
+    source: "console",
+  });
+
+  if (!parsed.success) {
+    redirect(`/app/contacts?error=${encodeURIComponent(firstIssue(parsed.error))}`);
+  }
+  if (channels.length === 0) {
+    redirect(`/app/contacts?error=${encodeURIComponent("Add at least a phone number or email.")}`);
+  }
+
+  try {
+    await createContact(session.org.id, parsed.data);
+  } catch (error) {
+    fail("/app/contacts", error);
+  }
+
+  revalidatePath("/app/contacts");
+  revalidatePath("/app");
+  redirect("/app/contacts?ok=Contact%20created");
+}
+
+export async function importContactsAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "contacts:write")) {
+    redirect(`/app/contacts?error=${encodeURIComponent("Your role cannot import contacts.")}`);
+  }
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    redirect(`/app/contacts?error=${encodeURIComponent("Choose a CSV file to import.")}`);
+  }
+  if (file.size > 2_000_000) {
+    redirect(`/app/contacts?error=${encodeURIComponent("CSV is too large (max 2 MB).")}`);
+  }
+
+  let stats;
+  try {
+    stats = await importContactsCsv(session.org.id, await file.text());
+  } catch (error) {
+    fail("/app/contacts", error);
+  }
+
+  revalidatePath("/app/contacts");
+  revalidatePath("/app");
+  redirect(
+    `/app/contacts?ok=${encodeURIComponent(`Imported ${stats.created} contact(s), skipped ${stats.skipped}.`)}`,
+  );
+}
+
+export async function updateContactAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const contactId = stringField(formData, "contactId");
+  const back = `/app/contacts/${contactId ?? ""}`;
+
+  if (!contactId) redirect("/app/contacts");
+  if (!can(session.membership.role, "contacts:write")) {
+    redirect(`${back}?error=${encodeURIComponent("Your role cannot edit contacts.")}`);
+  }
+
+  try {
+    await updateContact(session.org.id, contactId, {
+      name: stringField(formData, "name") ?? null,
+      company: stringField(formData, "company") ?? null,
+      notes: stringField(formData, "notes") ?? null,
+      tags: tagList(formData, "tags"),
+    });
+  } catch (error) {
+    fail(back, error);
+  }
+
+  revalidatePath(back);
+  revalidatePath("/app/contacts");
+  redirect(`${back}?ok=Saved`);
+}
+
+export async function consentAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const contactId = stringField(formData, "contactId");
+  const back = `/app/contacts/${contactId ?? ""}`;
+
+  if (!contactId) redirect("/app/contacts");
+  if (!can(session.membership.role, "contacts:write")) {
+    redirect(`${back}?error=${encodeURIComponent("Your role cannot change consent.")}`);
+  }
+
+  const parsed = consentInputSchema.safeParse({
+    channel: stringField(formData, "channel"),
+    status: stringField(formData, "status"),
+    source: "console",
+  });
+  if (!parsed.success) {
+    redirect(`${back}?error=${encodeURIComponent(firstIssue(parsed.error))}`);
+  }
+
+  try {
+    await recordConsent(session.org.id, contactId, parsed.data, { ip: await requestIp() });
+  } catch (error) {
+    fail(back, error);
+  }
+
+  revalidatePath(back);
+  revalidatePath("/app/inbox");
+  redirect(`${back}?ok=Consent%20updated`);
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 1 — inbox                                                     */
+/* ------------------------------------------------------------------ */
+
+export async function sendMessageAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const conversationId = stringField(formData, "conversationId");
+  const back = `/app/inbox?c=${conversationId ?? ""}`;
+
+  if (!conversationId) redirect("/app/inbox");
+  if (!can(session.membership.role, "messages:send")) {
+    redirect(`/app/inbox?error=${encodeURIComponent("Your role cannot send messages.")}`);
+  }
+
+  const body = stringField(formData, "body");
+  if (!body) redirect(`${back}&error=${encodeURIComponent("Message cannot be empty.")}`);
+
+  try {
+    await sendOutboundMessage(session.org.id, conversationId, {
+      body,
+      senderType: "user",
+      senderId: session.user.id,
+    });
+  } catch (error) {
+    fail(back, error);
+  }
+
+  revalidatePath("/app/inbox");
+  revalidatePath("/app");
+  redirect(back);
+}
+
+export async function updateConversationAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const conversationId = stringField(formData, "conversationId");
+  const back = `/app/inbox?c=${conversationId ?? ""}`;
+
+  if (!conversationId) redirect("/app/inbox");
+  if (!can(session.membership.role, "messages:send")) {
+    redirect(`/app/inbox?error=${encodeURIComponent("Your role cannot update conversations.")}`);
+  }
+
+  const status = stringField(formData, "status");
+  const assignTo = stringField(formData, "assignTo");
+  const assigneeId =
+    assignTo === "me"
+      ? session.user.id
+      : assignTo === "unassigned"
+        ? null
+        : assignTo && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(assignTo)
+          ? assignTo
+          : undefined;
+
+  try {
+    await updateConversation(session.org.id, conversationId, {
+      ...(status ? { status } : {}),
+      ...(assigneeId !== undefined ? { assigneeId } : {}),
+    });
+  } catch (error) {
+    fail(back, error);
+  }
+
+  revalidatePath("/app/inbox");
+  redirect(back);
+}
+
+export async function addNoteAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const conversationId = stringField(formData, "conversationId");
+  const back = `/app/inbox?c=${conversationId ?? ""}`;
+
+  if (!conversationId) redirect("/app/inbox");
+  if (!can(session.membership.role, "messages:send")) {
+    redirect(`/app/inbox?error=${encodeURIComponent("Your role cannot add notes.")}`);
+  }
+
+  const body = stringField(formData, "body");
+  if (!body) redirect(`${back}&error=${encodeURIComponent("Note cannot be empty.")}`);
+
+  try {
+    await addInternalNote(session.org.id, conversationId, session.user.id, body);
+  } catch (error) {
+    fail(back, error);
+  }
+
+  revalidatePath("/app/inbox");
+  redirect(back);
+}
+
+export async function createSavedReplyAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "messages:send")) {
+    redirect(`/app/settings?error=${encodeURIComponent("Your role cannot create saved replies.")}`);
+  }
+
+  const parsed = savedReplySchema.safeParse({
+    title: stringField(formData, "title"),
+    body: stringField(formData, "body"),
+    scope: stringField(formData, "scope") ?? "org",
+  });
+  if (!parsed.success) {
+    redirect(`/app/settings?error=${encodeURIComponent(firstIssue(parsed.error))}`);
+  }
+
+  try {
+    await createSavedReply(session.org.id, session.user.id, parsed.data);
+  } catch (error) {
+    fail("/app/settings", error);
+  }
+
+  revalidatePath("/app/settings");
+  revalidatePath("/app/inbox");
+  redirect("/app/settings?ok=Saved%20reply%20created");
 }

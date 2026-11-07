@@ -1,18 +1,25 @@
 import { eq } from "drizzle-orm";
-import { Badge, Card, CardTitle } from "@appolo/ui";
-import { capabilitiesFor } from "@appolo/core";
+import { Badge, Button, Card, CardTitle, Field, Input, Select, Textarea } from "@appolo/ui";
+import { capabilitiesFor, can } from "@appolo/core";
 import { requireSession } from "@/lib/session";
 import { getDb, withOrg, schema } from "@/lib/db";
+import { listOrgChannels, listSavedReplies } from "@/lib/services/messaging";
+import { createSavedReplyAction } from "@/lib/actions";
 
 const { memberships, users, locations } = schema;
 
 export const metadata = { title: "Settings" };
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string; ok?: string }>;
+}) {
   const session = await requireSession();
+  const { error, ok } = await searchParams;
   const db = getDb();
 
-  const [members, locationRows] = await Promise.all([
+  const [members, locationRows, savedReplies, orgChannels] = await Promise.all([
     db
       .select({
         id: memberships.id,
@@ -25,9 +32,18 @@ export default async function SettingsPage() {
       .innerJoin(users, eq(memberships.userId, users.id))
       .where(eq(memberships.orgId, session.org.id)),
     withOrg(session.org.id, (tx) => tx.select({ id: locations.id, name: locations.name }).from(locations)),
+    listSavedReplies(session.org.id, session.user.id),
+    listOrgChannels(session.org.id),
   ]);
 
   const caps = capabilitiesFor(session.membership.role);
+  const canWrite = can(session.membership.role, "messages:send");
+  const webchatChannel = orgChannels.find((channel) => channel.kind === "webchat");
+  const baseUrl = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const embedUrl = webchatChannel?.providerRef ? `${baseUrl}/embed/${webchatChannel.providerRef}` : null;
+  const embedSnippet = embedUrl
+    ? `<iframe src="${embedUrl}" title="Chat" style="width:380px;height:560px;border:0;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.18)"></iframe>`
+    : null;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -35,6 +51,13 @@ export default async function SettingsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="mt-1 text-sm text-muted">Workspace, members, and your effective permissions.</p>
       </div>
+
+      {error ? (
+        <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>
+      ) : null}
+      {ok ? (
+        <p className="rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">{ok}</p>
+      ) : null}
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
@@ -103,6 +126,76 @@ export default async function SettingsPage() {
           Invitations and role editing arrive with the notifications workstream. Phase 0 enforces the
           matrix server-side already.
         </p>
+      </Card>
+
+      <Card>
+        <CardTitle
+          action={<Badge>{savedReplies.length} saved</Badge>}
+        >
+          Saved replies
+        </CardTitle>
+        {savedReplies.length === 0 ? (
+          <p className="text-sm text-muted">No saved replies yet.</p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {savedReplies.map((reply) => (
+              <li key={reply.id} className="py-3 first:pt-0 last:pb-0">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium">{reply.title}</p>
+                  <Badge tone={reply.scope === "user" ? "neutral" : "brand"}>{reply.scope}</Badge>
+                </div>
+                <p className="mt-1 line-clamp-2 text-xs text-muted">{reply.body}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {canWrite ? (
+          <form action={createSavedReplyAction} className="mt-4 space-y-3 border-t border-border pt-4">
+            <div className="grid gap-3 sm:grid-cols-[200px_1fr]">
+              <Field label="Title">
+                <Input name="title" placeholder="Pricing question" required />
+              </Field>
+              <Field label="Scope">
+                <Select name="scope" defaultValue="org">
+                  <option value="org">Everyone</option>
+                  <option value="user">Just me</option>
+                </Select>
+              </Field>
+            </div>
+            <Field label="Message" hint="Use {{first_name}} to personalize.">
+              <Textarea name="body" rows={3} placeholder="Thanks {{first_name}}! Our pricing starts at..." required />
+            </Field>
+            <Button type="submit" variant="secondary">Add saved reply</Button>
+          </form>
+        ) : null}
+      </Card>
+
+      <Card>
+        <CardTitle>Web chat widget</CardTitle>
+        {embedSnippet ? (
+          <>
+            <p className="text-sm text-muted">
+              Paste this on any page to add a live chat bubble. Visitors are matched by a browser id, so a
+              returning visitor keeps their thread.
+            </p>
+            <pre className="mt-3 overflow-x-auto rounded-lg border border-border bg-surface-2 p-3 text-xs text-muted">
+              {embedSnippet}
+            </pre>
+            <a
+              href={embedUrl ?? "#"}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 inline-flex h-9 items-center rounded-lg border border-border bg-surface-2 px-3 text-sm text-ink hover:border-border-strong"
+            >
+              Open the widget
+            </a>
+          </>
+        ) : (
+          <p className="text-sm text-muted">
+            No active web chat channel. Seed or connect one to get an embed snippet.
+          </p>
+        )}
       </Card>
 
       <Card>

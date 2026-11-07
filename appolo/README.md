@@ -3,8 +3,8 @@
 A clean-room, Podium-class reputation and messaging platform.
 Reviews, shared inbox, AI employee, contacts, reporting — **no payments.**
 
-> **Status:** Phase 0 scaffold is implemented and runnable. See
-> `ROADMAP.md` for what comes next.
+> **Status:** Phase 0 (foundations) and Phase 1 (contacts + inbox) are
+> implemented, verified, and committed. See `ROADMAP.md` for what comes next.
 
 ## Documents
 
@@ -69,6 +69,26 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
 - **API:** `/api/health`, `/api/me`, `/api/auth/*`, `/api/locations`.
 - **Verification:** `pnpm db:rls-test` proves cross-org reads and writes are
   blocked.
+
+## What Phase 1 ships (contacts + inbox)
+
+- **Contacts:** CRUD, phone/email/social channels with normalization, tags,
+  duplicate-aware CSV import, and CSV export.
+- **Consent ledger:** append-only records per channel; the send pipeline checks
+  the latest record before anything leaves the system. STOP/START/HELP keywords
+  are parsed on inbound SMS.
+- **Channels:** SMS via a mock adapter by default (or the Twilio REST API when
+  `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM_NUMBER` are set),
+  plus an embeddable web chat widget at `/embed/[key]`.
+- **Inbox:** conversation list with status/channel filters, assignment, internal
+  notes, unread counts, and 5-second polling refresh.
+- **Send pipeline:** consent-gated outbound messages, provider delivery, Twilio
+  inbound + status webhooks, and idempotent inbound persistence.
+- **Saved replies:** org-wide and per-user, insertable from the composer.
+- **Verification:** `pnpm smoke` now includes end-to-end Phase 1 checks
+  (inbound creates a contact + conversation, send is blocked without consent,
+  consent unlocks a delivered reply, STOP revokes consent and closes the thread,
+  web chat round-trips).
 
 ## Commands
 

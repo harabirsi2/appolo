@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 import { cn } from "./cn";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
@@ -63,6 +63,19 @@ export function Select({ className, children, ...props }: SelectHTMLAttributes<H
     >
       {children}
     </select>
+  );
+}
+
+export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      className={cn(
+        "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink",
+        "placeholder:text-muted-2 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand",
+        className,
+      )}
+      {...props}
+    />
   );
 }
 
