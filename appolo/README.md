@@ -3,8 +3,9 @@
 A clean-room, Podium-class reputation and messaging platform.
 Reviews, shared inbox, AI employee, contacts, reporting — **no payments.**
 
-> **Status:** Phase 0 (foundations), Phase 1 (contacts + inbox), and Phase 2
-> (review requests + landing pages) are implemented, verified, and committed.
+> **Status:** Phase 0 (foundations), Phase 1 (contacts + inbox), Phase 2
+> (review requests + landing pages), and Phase 3 (review management,
+> automations, campaigns, reporting) are implemented, verified, and committed.
 > See `ROADMAP.md` for what comes next.
 
 ## Documents
@@ -121,6 +122,38 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
 - **Verification:** `pnpm smoke` covers template creation, quiet-hours blocking,
   send, token resolution, the public landing page, private feedback, review
   stats, and platform sync.
+
+## What Phase 3 ships (review management + automations + reporting)
+
+- **Review inbox:** filters for platform, rating, reply state, assignee, flags,
+  and free-text search, all over `/api/reviews`. Each row shows the latest
+  draft or posted reply.
+- **Reply workflow:** save a draft, generate an AI (or deterministic heuristic)
+  draft with a tone, then publish with one click. Publishing calls the platform's
+  documented reply endpoint when available (Google Business Profile `updateReply`)
+  and otherwise records the reply locally. Drafts are always human-approved.
+- **Assignment + flags:** assign a review to a teammate and flag/unflag it for
+  follow-up. Both are audited.
+- **Embeddable review widget:** one widget per org with a public key, configurable
+  headline/theme/layout/minimum rating/count, served at `/embed/reviews/[key]`
+  and `/api/public/widgets/[key]`, with schema.org `AggregateRating` JSON-LD.
+- **Keyword automations:** create automations that auto-reply when an inbound SMS
+  or webchat message contains (or exactly matches) a keyword. Replies respect
+  consent, render `{{first_name}}` / `{{business_name}}`, and record runs.
+- **Campaigns / broadcasts:** send one message to `all` contacts or a `tag`
+  segment. Consent is enforced per recipient (blocked sends are recorded as
+  skipped), quiet hours block the whole send, and the org daily cap applies.
+- **Reporting:** `/app/reports` shows review volume, rating distribution, reply
+  rate, request funnel, and breakdowns by platform and location for a chosen
+  range. `/api/reports` returns the same rollup as JSON.
+- **Contact timeline:** contact detail pages merge messages, consent changes,
+  review requests, and automation events into one feed.
+- **Audit log:** `/app/audit` lists review replies, assignments, automation
+  changes, campaign sends, and exports, newest first.
+- **CSV export:** `/api/reviews/export` streams a CSV of every review.
+- **Verification:** `pnpm smoke` covers the filters, AI draft, publish,
+  assignment/flag, widget + JSON-LD, reports, CSV export, keyword auto-reply,
+  campaign send with consent, the audit log, and the contact timeline.
 
 ## Commands
 

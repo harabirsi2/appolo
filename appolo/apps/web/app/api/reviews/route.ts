@@ -16,12 +16,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     const params = request.nextUrl.searchParams;
     const limit = Number(params.get("limit") ?? "50") || 50;
-    const platformKind = params.get("platformKind") ?? undefined;
     const maxRatingRaw = params.get("maxRating");
-    const maxRating = maxRatingRaw ? Number(maxRatingRaw) : undefined;
+    const minRatingRaw = params.get("minRating");
+    const ratingRaw = params.get("rating");
 
     const [reviews, stats] = await Promise.all([
-      listReviews(session.org.id, { limit, platformKind, maxRating }),
+      listReviews(session.org.id, {
+        limit,
+        platformKind: params.get("platformKind") ?? undefined,
+        maxRating: maxRatingRaw ? Number(maxRatingRaw) : undefined,
+        minRating: minRatingRaw ? Number(minRatingRaw) : undefined,
+        rating: ratingRaw ? Number(ratingRaw) : undefined,
+        replyStatus: params.get("replyStatus") ?? undefined,
+        assignedTo: params.get("assignedTo") ?? undefined,
+        locationId: params.get("locationId") ?? undefined,
+        flagged: params.get("flagged") === "true" || undefined,
+        search: params.get("q") ?? undefined,
+      }),
       reviewStats(session.org.id),
     ]);
 

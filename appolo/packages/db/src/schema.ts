@@ -564,6 +564,8 @@ export const reviews = pgTable(
     url: text("url"),
     replyStatus: replyStatusEnum("reply_status").notNull().default("draft"),
     sentiment: text("sentiment"),
+    assignedTo: uuid("assigned_to").references(() => users.id, { onDelete: "set null" }),
+    flagged: boolean("flagged").notNull().default(false),
     raw: jsonb("raw").notNull().default(emptyJson()),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -571,6 +573,7 @@ export const reviews = pgTable(
   (t) => ({
     platformExternalUq: uniqueIndex("reviews_platform_external_uq").on(t.platformId, t.externalId),
     orgReviewedIdx: index("reviews_org_reviewed_idx").on(t.orgId, t.reviewedAt),
+    orgReplyIdx: index("reviews_org_reply_idx").on(t.orgId, t.replyStatus),
   }),
 );
 

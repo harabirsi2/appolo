@@ -440,7 +440,7 @@ export async function receiveInboundSms(input: InboundSms) {
         .where(and(eq(messages.orgId, orgId), eq(messages.providerSid, input.providerSid)))
         .limit(1);
       if (duplicate[0]) {
-        return { conversationId: duplicate[0].conversationId, contactId: null, duplicate: true, action: "duplicate" as const };
+        return { orgId, conversationId: duplicate[0].conversationId, contactId: null, duplicate: true, action: "duplicate" as const };
       }
     }
 
@@ -604,7 +604,7 @@ export async function receiveInboundSms(input: InboundSms) {
         .where(eq(conversations.id, conversationId));
     }
 
-    return { conversationId, contactId, duplicate: false, action };
+    return { orgId, conversationId, contactId, duplicate: false, action };
   });
 }
 
@@ -715,7 +715,7 @@ export async function receiveWebchatMessage(
       })
       .where(eq(conversations.id, conversationId));
 
-    return { conversationId, contactId, messageId: message!.id };
+    return { orgId, conversationId, contactId, messageId: message!.id };
   });
 }
 

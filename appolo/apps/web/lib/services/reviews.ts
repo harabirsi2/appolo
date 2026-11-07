@@ -2,23 +2,30 @@ import { and, desc, eq, gte, inArray, isNotNull, lt, ne, sql } from "drizzle-orm
 import {
   DEFAULT_QUIET_HOURS,
   DEFAULT_REVIEW_TEMPLATES,
+  DEFAULT_WIDGET_CONFIG,
   bulkReviewRequestSchema,
   exceedsDailyCap,
   isWithinQuietHours,
   publicToken,
   renderReviewTemplate,
+  reviewWidgetConfigSchema,
+  sentimentForRating,
   sha256,
   type BulkReviewRequestInput,
   type PrivateFeedbackInput,
   type QuietHours,
+  type ReplyTone,
   type ReviewRequestInput,
   type ReviewTemplateInput,
+  type ReviewWidgetConfig,
 } from "@appolo/core";
 import { getAdminDb, withOrg, schema, type Tx } from "@/lib/db";
 import { DomainError } from "./errors";
 import { checkConsent } from "./consent";
 import { ensureConversationForContact, sendOutboundMessage } from "./messaging";
 import { getReviewPlatformClient } from "./review-platforms";
+import { draftReviewReply } from "./ai";
+import { recordAudit } from "./audit";
 
 const {
   orgs,
@@ -32,6 +39,8 @@ const {
   reviews,
   reviewReplies,
   privateFeedback,
+  reviewWidgets,
+  users,
 } = schema;
 
 const REQUEST_TTL_DAYS = 45;
@@ -842,17 +851,39 @@ export async function submitPrivateFeedback(
 /* review inbox + sync                                                 */
 /* ------------------------------------------------------------------ */
 
-export async function listReviews(
-  orgId: string,
-  filters: { limit?: number; platformKind?: string; maxRating?: number } = {},
-) {
-  const limit = Math.min(filters.limit ?? 50, 100);
+export interface ReviewListFilters {
+  limit?: number;
+  platformKind?: string;
+  maxRating?: number;
+  minRating?: number;
+  rating?: number;
+  replyStatus?: string;
+  assignedTo?: string;
+  locationId?: string;
+  flagged?: boolean;
+  search?: string;
+}
+
+export async function listReviews(orgId: string, filters: ReviewListFilters = {}) {
+  const limit = Math.min(filters.limit ?? 50, 200);
   return withOrg(orgId, async (tx) => {
     const conditions = [];
     if (filters.platformKind) conditions.push(eq(reviewPlatforms.kind, filters.platformKind as never));
     if (filters.maxRating) conditions.push(sql`${reviews.rating} <= ${filters.maxRating}`);
+    if (filters.minRating) conditions.push(sql`${reviews.rating} >= ${filters.minRating}`);
+    if (filters.rating) conditions.push(eq(reviews.rating, filters.rating));
+    if (filters.replyStatus === "none") conditions.push(sql`${reviews.replyStatus} <> 'posted'`);
+    else if (filters.replyStatus) conditions.push(eq(reviews.replyStatus, filters.replyStatus as never));
+    if (filters.assignedTo === "unassigned") conditions.push(sql`${reviews.assignedTo} is null`);
+    else if (filters.assignedTo) conditions.push(eq(reviews.assignedTo, filters.assignedTo));
+    if (filters.locationId) conditions.push(eq(reviews.locationId, filters.locationId));
+    if (filters.flagged) conditions.push(eq(reviews.flagged, true));
+    if (filters.search) {
+      const like = `%${filters.search.replace(/[%_]/g, "")}%`;
+      conditions.push(sql`(${reviews.body} ilike ${like} or ${reviews.authorName} ilike ${like})`);
+    }
 
-    return tx
+    const rows = await tx
       .select({
         id: reviews.id,
         authorName: reviews.authorName,
@@ -860,14 +891,46 @@ export async function listReviews(
         body: reviews.body,
         reviewedAt: reviews.reviewedAt,
         replyStatus: reviews.replyStatus,
+        assignedTo: reviews.assignedTo,
+        flagged: reviews.flagged,
+        locationId: reviews.locationId,
+        platformId: reviews.platformId,
+        externalId: reviews.externalId,
         platformKind: reviewPlatforms.kind,
         platformName: reviewPlatforms.displayName,
+        assigneeName: users.name,
       })
       .from(reviews)
       .leftJoin(reviewPlatforms, eq(reviewPlatforms.id, reviews.platformId))
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .leftJoin(users, eq(users.id, reviews.assignedTo))
+      .where(conditions.length > 0 ? and(eq(reviews.orgId, orgId), ...conditions) : eq(reviews.orgId, orgId))
       .orderBy(desc(reviews.reviewedAt))
       .limit(limit);
+
+    // Attach the most recent reply per review so the inbox can show drafts.
+    const ids = rows.map((row) => row.id);
+    const replies = ids.length
+      ? await tx
+          .select({
+            reviewId: reviewReplies.reviewId,
+            id: reviewReplies.id,
+            body: reviewReplies.body,
+            status: reviewReplies.status,
+            aiGenerated: reviewReplies.aiGenerated,
+            postedAt: reviewReplies.postedAt,
+            createdAt: reviewReplies.createdAt,
+          })
+          .from(reviewReplies)
+          .where(and(eq(reviewReplies.orgId, orgId), inArray(reviewReplies.reviewId, ids)))
+          .orderBy(desc(reviewReplies.createdAt))
+      : [];
+
+    const latestReply = new Map<string, (typeof replies)[number]>();
+    for (const reply of replies) {
+      if (!latestReply.has(reply.reviewId)) latestReply.set(reply.reviewId, reply);
+    }
+
+    return rows.map((row) => ({ ...row, reply: latestReply.get(row.id) ?? null }));
   });
 }
 
@@ -1044,6 +1107,7 @@ export async function syncPlatformReviews(
             reviewedAt: review.reviewedAt,
             url: review.url,
             replyStatus: "draft",
+            sentiment: sentimentForRating(review.rating),
             raw: (review.raw ?? {}) as never,
           })
           .onConflictDoUpdate({
@@ -1053,6 +1117,7 @@ export async function syncPlatformReviews(
               rating: review.rating,
               body: review.body,
               reviewedAt: review.reviewedAt,
+              sentiment: sentimentForRating(review.rating),
               updatedAt: new Date(),
             },
           }),
@@ -1070,6 +1135,7 @@ export async function replyToReview(
   reviewId: string,
   body: string,
   authorId: string,
+  options: { aiGenerated?: boolean } = {},
 ): Promise<{ id: string }> {
   return withOrg(orgId, async (tx) => {
     const [review] = await tx.select({ id: reviews.id }).from(reviews).where(eq(reviews.id, reviewId)).limit(1);
@@ -1077,7 +1143,7 @@ export async function replyToReview(
 
     const [reply] = await tx
       .insert(reviewReplies)
-      .values({ orgId, reviewId, body, status: "draft", authorId })
+      .values({ orgId, reviewId, body, status: "draft", authorId, aiGenerated: options.aiGenerated ?? false })
       .returning({ id: reviewReplies.id });
 
     await tx
@@ -1085,7 +1151,307 @@ export async function replyToReview(
       .set({ replyStatus: "draft", updatedAt: new Date() })
       .where(eq(reviews.id, reviewId));
 
+    await recordAudit(tx, {
+      orgId,
+      actorId: authorId,
+      action: "review.reply_draft",
+      entityType: "review",
+      entityId: reviewId,
+      after: { body, aiGenerated: options.aiGenerated ?? false },
+    });
+
     return { id: reply!.id };
+  });
+}
+
+export interface DraftReplyResult {
+  replyId: string;
+  body: string;
+  aiGenerated: boolean;
+  provider: string;
+}
+
+/** Drafts a reply with the AI service (or the deterministic fallback). */
+export async function draftReplyForReview(
+  orgId: string,
+  reviewId: string,
+  tone: ReplyTone,
+  authorId: string,
+): Promise<DraftReplyResult> {
+  const context = await withOrg(orgId, async (tx) => {
+    const [review] = await tx
+      .select({
+        id: reviews.id,
+        authorName: reviews.authorName,
+        rating: reviews.rating,
+        body: reviews.body,
+      })
+      .from(reviews)
+      .where(eq(reviews.id, reviewId))
+      .limit(1);
+    if (!review) throw new DomainError("REVIEW_NOT_FOUND", "Review not found.", 404);
+    const [org] = await tx.select({ name: orgs.name }).from(orgs).limit(1);
+    return { review, businessName: org?.name ?? null };
+  });
+
+  const draft = await draftReviewReply({
+    authorName: context.review.authorName,
+    rating: context.review.rating,
+    body: context.review.body,
+    businessName: context.businessName,
+    tone,
+  });
+
+  const { id } = await replyToReview(orgId, reviewId, draft.body, authorId, {
+    aiGenerated: draft.aiGenerated,
+  });
+
+  return { replyId: id, body: draft.body, aiGenerated: draft.aiGenerated, provider: draft.provider };
+}
+
+/**
+ * Publishes the most recent draft reply to the review's platform (or records
+ * it locally when the platform has no documented reply endpoint). Human
+ * approval is implicit: this is only called from an explicit publish action.
+ */
+export async function publishReviewReply(
+  orgId: string,
+  reviewId: string,
+  actorId: string,
+  replyId?: string,
+): Promise<{ externalId: string | null; status: "posted" }> {
+  const context = await withOrg(orgId, async (tx) => {
+    const [review] = await tx
+      .select({
+        id: reviews.id,
+        externalId: reviews.externalId,
+        platformId: reviews.platformId,
+        platformKind: reviewPlatforms.kind,
+        externalRef: reviewPlatforms.externalRef,
+        credentialsRef: reviewPlatforms.credentialsRef,
+      })
+      .from(reviews)
+      .leftJoin(reviewPlatforms, eq(reviewPlatforms.id, reviews.platformId))
+      .where(eq(reviews.id, reviewId))
+      .limit(1);
+    if (!review) throw new DomainError("REVIEW_NOT_FOUND", "Review not found.", 404);
+
+    const [reply] = replyId
+      ? await tx
+          .select({ id: reviewReplies.id, body: reviewReplies.body, status: reviewReplies.status })
+          .from(reviewReplies)
+          .where(and(eq(reviewReplies.id, replyId), eq(reviewReplies.reviewId, reviewId)))
+          .limit(1)
+      : await tx
+          .select({ id: reviewReplies.id, body: reviewReplies.body, status: reviewReplies.status })
+          .from(reviewReplies)
+          .where(and(eq(reviewReplies.orgId, orgId), eq(reviewReplies.reviewId, reviewId)))
+          .orderBy(desc(reviewReplies.createdAt))
+          .limit(1);
+    return { review, reply };
+  });
+
+  if (!context.reply) throw new DomainError("NO_REPLY", "Write or draft a reply first.", 409);
+  if (context.reply.status === "posted") throw new DomainError("ALREADY_POSTED", "This reply is already posted.", 409);
+
+  const client = getReviewPlatformClient(context.review.platformKind ?? "custom");
+  let externalId: string | null = null;
+  if (client.replyToReview && context.review.externalRef) {
+    const result = await client.replyToReview({
+      externalRef: context.review.externalRef,
+      credentialsRef: context.review.credentialsRef,
+      reviewExternalId: context.review.externalId,
+      body: context.reply.body,
+    });
+    externalId = result.externalId;
+  } else {
+    // No documented reply endpoint: record the post locally so the workflow
+    // still completes audibly for the operator.
+    externalId = `local-${context.reply.id}`;
+  }
+
+  await withOrg(orgId, async (tx) => {
+    await tx
+      .update(reviewReplies)
+      .set({ status: "posted", postedAt: new Date(), externalId })
+      .where(eq(reviewReplies.id, context.reply!.id));
+    await tx
+      .update(reviews)
+      .set({ replyStatus: "posted", updatedAt: new Date() })
+      .where(eq(reviews.id, reviewId));
+    await recordAudit(tx, {
+      orgId,
+      actorId,
+      action: "review.reply_published",
+      entityType: "review",
+      entityId: reviewId,
+      after: { externalId, body: context.reply!.body },
+    });
+  });
+
+  return { externalId, status: "posted" };
+}
+
+export async function assignReview(
+  orgId: string,
+  reviewId: string,
+  assignedTo: string | null,
+  actorId: string,
+): Promise<void> {
+  await withOrg(orgId, async (tx) => {
+    const [review] = await tx.select({ id: reviews.id }).from(reviews).where(eq(reviews.id, reviewId)).limit(1);
+    if (!review) throw new DomainError("REVIEW_NOT_FOUND", "Review not found.", 404);
+    await tx
+      .update(reviews)
+      .set({ assignedTo, updatedAt: new Date() })
+      .where(eq(reviews.id, reviewId));
+    await recordAudit(tx, {
+      orgId,
+      actorId,
+      action: "review.assigned",
+      entityType: "review",
+      entityId: reviewId,
+      after: { assignedTo },
+    });
+  });
+}
+
+export async function flagReview(
+  orgId: string,
+  reviewId: string,
+  flagged: boolean,
+  actorId: string,
+): Promise<void> {
+  await withOrg(orgId, async (tx) => {
+    await tx.update(reviews).set({ flagged, updatedAt: new Date() }).where(eq(reviews.id, reviewId));
+    await recordAudit(tx, {
+      orgId,
+      actorId,
+      action: flagged ? "review.flagged" : "review.unflagged",
+      entityType: "review",
+      entityId: reviewId,
+    });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* embeds                                                              */
+/* ------------------------------------------------------------------ */
+
+function coerceWidgetConfig(raw: unknown): ReviewWidgetConfig {
+  const parsed = reviewWidgetConfigSchema.safeParse(raw ?? {});
+  return parsed.success ? parsed.data : DEFAULT_WIDGET_CONFIG;
+}
+
+export async function listReviewWidgets(orgId: string) {
+  return withOrg(orgId, async (tx) => {
+    const rows = await tx
+      .select()
+      .from(reviewWidgets)
+      .where(eq(reviewWidgets.orgId, orgId))
+      .orderBy(reviewWidgets.createdAt);
+    return rows.map((row) => ({ ...row, config: coerceWidgetConfig(row.config) }));
+  });
+}
+
+/** Every org gets one embeddable review widget; created on first read. */
+export async function ensureReviewWidget(orgId: string) {
+  return withOrg(orgId, async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(reviewWidgets)
+      .where(eq(reviewWidgets.orgId, orgId))
+      .orderBy(reviewWidgets.createdAt)
+      .limit(1);
+    if (existing) return { ...existing, config: coerceWidgetConfig(existing.config) };
+
+    const [created] = await tx
+      .insert(reviewWidgets)
+      .values({
+        orgId,
+        publicKey: `rw_${publicToken(18).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24)}`,
+        config: DEFAULT_WIDGET_CONFIG as never,
+      })
+      .returning();
+    return { ...created!, config: coerceWidgetConfig(created?.config) };
+  });
+}
+
+export async function updateReviewWidget(
+  orgId: string,
+  widgetId: string,
+  patch: Partial<ReviewWidgetConfig>,
+): Promise<ReviewWidgetConfig> {
+  return withOrg(orgId, async (tx) => {
+    const [widget] = await tx
+      .select()
+      .from(reviewWidgets)
+      .where(and(eq(reviewWidgets.id, widgetId), eq(reviewWidgets.orgId, orgId)))
+      .limit(1);
+    if (!widget) throw new DomainError("WIDGET_NOT_FOUND", "Widget not found.", 404);
+    const next = coerceWidgetConfig({ ...coerceWidgetConfig(widget.config), ...patch });
+    await tx.update(reviewWidgets).set({ config: next as never }).where(eq(reviewWidgets.id, widgetId));
+    return next;
+  });
+}
+
+export interface PublicWidget {
+  orgName: string;
+  publicKey: string;
+  config: ReviewWidgetConfig;
+  reviews: {
+    id: string;
+    authorName: string | null;
+    rating: number;
+    body: string | null;
+    reviewedAt: Date;
+    platformName: string | null;
+  }[];
+  aggregate: { count: number; average: number };
+}
+
+/** Public, unauthenticated widget payload resolved by its public key. */
+export async function getPublicWidget(publicKey: string): Promise<PublicWidget | null> {
+  const [widget] = await getAdminDb()
+    .select({ id: reviewWidgets.id, orgId: reviewWidgets.orgId, config: reviewWidgets.config })
+    .from(reviewWidgets)
+    .where(eq(reviewWidgets.publicKey, publicKey))
+    .limit(1);
+  if (!widget) return null;
+
+  const config = coerceWidgetConfig(widget.config);
+  return withOrg(widget.orgId, async (tx) => {
+    const [org] = await tx.select({ name: orgs.name }).from(orgs).limit(1);
+    const rows = await tx
+      .select({
+        id: reviews.id,
+        authorName: reviews.authorName,
+        rating: reviews.rating,
+        body: reviews.body,
+        reviewedAt: reviews.reviewedAt,
+        platformName: reviewPlatforms.displayName,
+      })
+      .from(reviews)
+      .leftJoin(reviewPlatforms, eq(reviewPlatforms.id, reviews.platformId))
+      .where(and(eq(reviews.orgId, widget.orgId), gte(reviews.rating, config.minRating)))
+      .orderBy(desc(reviews.reviewedAt))
+      .limit(config.limit);
+
+    const [agg] = await tx
+      .select({
+        count: sql<number>`count(*)::int`,
+        average: sql<number>`coalesce(avg(${reviews.rating}), 0)::float`,
+      })
+      .from(reviews)
+      .where(eq(reviews.orgId, widget.orgId));
+
+    return {
+      orgName: org?.name ?? "Our business",
+      publicKey,
+      config,
+      reviews: rows,
+      aggregate: { count: agg?.count ?? 0, average: Number((agg?.average ?? 0).toFixed(2)) },
+    };
   });
 }
 

@@ -66,6 +66,45 @@ export const reviewReplySchema = z.object({
   body: z.string().trim().min(1, "Reply cannot be empty.").max(2000),
 });
 
+export const reviewAssignSchema = z.object({
+  reviewId: z.string().uuid(),
+  assignedTo: z.string().uuid().nullish(),
+});
+
+export const reviewFlagSchema = z.object({
+  reviewId: z.string().uuid(),
+  flagged: z.boolean(),
+});
+
+export const reviewPublishSchema = z.object({
+  reviewId: z.string().uuid(),
+  replyId: z.string().uuid().optional(),
+});
+
+export const reviewDraftSchema = z.object({
+  reviewId: z.string().uuid(),
+  tone: z.enum(["friendly", "professional", "brief"]).default("friendly"),
+});
+
+export const replyTones = ["friendly", "professional", "brief"] as const;
+export type ReplyTone = (typeof replyTones)[number];
+
+/* ------------------------------------------------------------------ */
+/* review widget                                                       */
+/* ------------------------------------------------------------------ */
+
+export const reviewWidgetConfigSchema = z.object({
+  headline: z.string().trim().max(120).default("What our customers say"),
+  theme: z.enum(["light", "dark"]).default("dark"),
+  layout: z.enum(["carousel", "list", "badge"]).default("list"),
+  minRating: z.coerce.number().int().min(1).max(5).default(4),
+  limit: z.coerce.number().int().min(1).max(20).default(6),
+  showRating: z.boolean().default(true),
+});
+export type ReviewWidgetConfig = z.infer<typeof reviewWidgetConfigSchema>;
+export const DEFAULT_WIDGET_CONFIG: ReviewWidgetConfig = reviewWidgetConfigSchema.parse({});
+
+
 export type ReviewTemplateInput = z.infer<typeof reviewTemplateSchema>;
 export type ReviewRequestInput = z.infer<typeof reviewRequestInputSchema>;
 export type BulkReviewRequestInput = z.infer<typeof bulkReviewRequestSchema>;
@@ -174,4 +213,60 @@ export function isWithinQuietHours(
 export function exceedsDailyCap(sentToday: number, dailyCap: number | null | undefined): boolean {
   if (!dailyCap || dailyCap <= 0) return false;
   return sentToday >= dailyCap;
+}
+
+/* ------------------------------------------------------------------ */
+/* reply drafting (deterministic fallback)                             */
+/* ------------------------------------------------------------------ */
+
+function firstNameOf(author: string | null | undefined): string {
+  const name = (author ?? "").trim();
+  if (!name) return "there";
+  return name.split(/\s+/)[0] ?? "there";
+}
+
+/**
+ * Deterministic, policy-safe reply draft used when no AI provider is
+ * configured. It never promises refunds, discounts, or anything the business
+ * has not authorized; it thanks, acknowledges, and invites an offline follow-up.
+ */
+export function draftReplyFallback(input: {
+  authorName?: string | null;
+  rating: number;
+  body?: string | null;
+  businessName?: string | null;
+  tone?: ReplyTone;
+}): string {
+  const name = firstNameOf(input.authorName);
+  const business = (input.businessName ?? "our team").trim() || "our team";
+  const tone = input.tone ?? "friendly";
+  const low = input.rating <= 3;
+
+  if (low) {
+    const opening =
+      tone === "brief"
+        ? `Hi ${name}, thank you for the honest feedback.`
+        : `Hi ${name}, thank you for taking the time to share this with us.`;
+    const middle =
+      tone === "professional"
+        ? "We take this seriously and would like to make it right. Our team will reach out so we can learn more."
+        : "We're sorry this was your experience — it isn't the standard we aim for. We'd like to make it right.";
+    return `${opening} ${middle} — ${business}`;
+  }
+
+  const opening =
+    tone === "brief"
+      ? `Thanks so much, ${name}!`
+      : `Hi ${name}, thank you so much for the kind words!`;
+  const middle =
+    tone === "professional"
+      ? "We appreciate you choosing us and look forward to serving you again."
+      : "It made our day to read this. We can't wait to welcome you back!";
+  return `${opening} ${middle} — ${business}`;
+}
+
+export function sentimentForRating(rating: number): "positive" | "neutral" | "negative" {
+  if (rating >= 4) return "positive";
+  if (rating === 3) return "neutral";
+  return "negative";
 }

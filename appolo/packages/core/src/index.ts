@@ -6,3 +6,5 @@ export * from "./consent";
 export * from "./contacts";
 export * from "./messaging";
 export * from "./reviews";
+export * from "./automations";
+export * from "./campaigns";

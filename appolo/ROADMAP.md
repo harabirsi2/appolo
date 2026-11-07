@@ -68,6 +68,8 @@ opt-outs and quiet hours honored.
 
 ## Phase 3 — Review management + automations + reporting (L)
 
+**Status:** shipped — see the Phase 3 section of `README.md`.
+
 **Goal:** manage reviews and automate the funnel.
 
 - Unified review inbox (filters, status, assignment). (RV-10)

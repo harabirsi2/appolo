@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { verifyTwilioSignature } from "@/lib/services/providers";
 import { receiveInboundSms } from "@/lib/services/messaging";
+import { runKeywordAutomations } from "@/lib/services/automations";
 import { isDomainError } from "@/lib/services/errors";
 
 export const dynamic = "force-dynamic";
@@ -43,13 +44,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    await receiveInboundSms({
+    const result = await receiveInboundSms({
       to,
       from,
       body,
       providerSid: params.MessageSid ?? null,
       media,
     });
+
+    // Keyword automations are best-effort: a failure must not make Twilio
+    // retry, and STOP/HELP/START are handled above (action != "message").
+    if (result.action === "message" && result.contactId) {
+      try {
+        await runKeywordAutomations(result.orgId, {
+          contactId: result.contactId,
+          channel: "sms",
+          body,
+        });
+      } catch (automationError) {
+        console.error("[twilio/sms] automation failed:", automationError);
+      }
+    }
+
     return new NextResponse("<Response></Response>", {
       status: 200,
       headers: { "Content-Type": "text/xml; charset=utf-8" },

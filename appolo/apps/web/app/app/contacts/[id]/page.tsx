@@ -5,6 +5,7 @@ import { Badge, Button, Card, CardTitle, EmptyState, Field, Input, Select, Texta
 import { requireSession } from "@/lib/session";
 import { getContact } from "@/lib/services/contacts";
 import { consentSummary } from "@/lib/services/consent";
+import { contactTimeline } from "@/lib/services/reports";
 import { consentAction, updateContactAction } from "@/lib/actions";
 
 export const metadata = { title: "Contact" };
@@ -30,6 +31,7 @@ export default async function ContactDetailPage({
   if (!detail) notFound();
 
   const consent = await consentSummary(session.org.id, id);
+  const timeline = await contactTimeline(session.org.id, id);
   const canWrite = can(session.membership.role, "contacts:write");
   const displayName =
     detail.contact.name ??
@@ -201,17 +203,23 @@ export default async function ContactDetailPage({
         </Card>
 
         <Card>
-          <CardTitle>Timeline</CardTitle>
-          {detail.events.length === 0 ? (
+          <CardTitle action={timeline.length > 0 ? <Badge>{timeline.length}</Badge> : undefined}>Timeline</CardTitle>
+          {timeline.length === 0 ? (
             <p className="text-sm text-muted">No activity yet.</p>
           ) : (
-            <ul className="space-y-2">
-              {detail.events.map((event) => (
-                <li key={event.id} className="flex items-start justify-between gap-3 text-sm">
-                  <span className="text-muted">{event.kind}</span>
-                  <span className="shrink-0 text-xs text-muted-2">
-                    {new Date(event.createdAt).toLocaleString()}
-                  </span>
+            <ul className="space-y-3">
+              {timeline.map((entry) => (
+                <li key={entry.id} className="flex items-start gap-3 text-sm">
+                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="capitalize text-ink">{entry.title}</span>
+                      <span className="shrink-0 text-xs text-muted-2">
+                        {new Date(entry.at).toLocaleString()}
+                      </span>
+                    </div>
+                    {entry.detail ? <p className="mt-0.5 line-clamp-2 text-xs text-muted">{entry.detail}</p> : null}
+                  </div>
                 </li>
               ))}
             </ul>

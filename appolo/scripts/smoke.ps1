@@ -429,6 +429,230 @@ $smokeTemplateId = $templateId
 
 Remove-Item $p2jar, $p2resp, $p2body, $landingHtml, $reviewsHtml -Force -ErrorAction SilentlyContinue
 
+# --- Phase 3: review management, automations, campaigns, reporting ---
+Write-Host ""
+Write-Host "Phase 3: review management"
+
+$p3jar = Join-Path $env:TEMP "appolo_p3_cookies.txt"
+$p3resp = Join-Path $env:TEMP "appolo_p3_resp.json"
+$p3body = Join-Path $env:TEMP "appolo_p3_body.json"
+
+function P3-ReadJson($path) {
+    try {
+        $raw = Get-Content -Raw $path -ErrorAction Stop
+        if (-not $raw) { return $null }
+        return ($raw | ConvertFrom-Json)
+    } catch { return $null }
+}
+
+function P3-Post($url, $obj) {
+    [IO.File]::WriteAllText($p3body, ($obj | ConvertTo-Json -Compress -Depth 6))
+    $code = (curl.exe -s -o $p3resp -w "%{http_code}" -b $p3jar -c $p3jar -X POST -H "Content-Type: application/json" --data "@$p3body" $url).Trim()
+    return [pscustomobject]@{ code = [int]$code; json = (P3-ReadJson $p3resp) }
+}
+
+function P3-Put($url, $obj) {
+    [IO.File]::WriteAllText($p3body, ($obj | ConvertTo-Json -Compress -Depth 6))
+    $code = (curl.exe -s -o $p3resp -w "%{http_code}" -b $p3jar -c $p3jar -X PUT -H "Content-Type: application/json" --data "@$p3body" $url).Trim()
+    return [pscustomobject]@{ code = [int]$code; json = (P3-ReadJson $p3resp) }
+}
+
+function P3-Patch($url, $obj) {
+    [IO.File]::WriteAllText($p3body, ($obj | ConvertTo-Json -Compress -Depth 6))
+    $code = (curl.exe -s -o $p3resp -w "%{http_code}" -b $p3jar -c $p3jar -X PATCH -H "Content-Type: application/json" --data "@$p3body" $url).Trim()
+    return [pscustomobject]@{ code = [int]$code; json = (P3-ReadJson $p3resp) }
+}
+
+function P3-Get($url) {
+    $code = (curl.exe -s -o $p3resp -w "%{http_code}" -b $p3jar -c $p3jar $url).Trim()
+    return [pscustomobject]@{ code = [int]$code; json = (P3-ReadJson $p3resp) }
+}
+
+# Best-effort direct SQL, used only to set up a private tag segment so a
+# broadcast test never messages the seeded demo contacts.
+function P3-Sql($sql) {
+    if (-not $script:p3psql) {
+        $pgBin = $env:PG_BIN
+        if (-not $pgBin) {
+            $installs = Get-ChildItem "C:\Program Files\PostgreSQL" -Directory -ErrorAction SilentlyContinue |
+                Sort-Object Name -Descending
+            foreach ($i in $installs) {
+                $candidate = Join-Path $i.FullName "bin"
+                if (Test-Path (Join-Path $candidate "psql.exe")) { $pgBin = $candidate; break }
+            }
+        }
+        $script:p3psql = if ($pgBin) { Join-Path $pgBin "psql.exe" } else { $null }
+        $envFile = Join-Path (Split-Path -Parent $PSScriptRoot) ".env"
+        $dbUrl = $null
+        if (Test-Path $envFile) {
+            $line = Get-Content $envFile | Where-Object { $_ -match '^\s*MIGRATE_DATABASE_URL\s*=' } | Select-Object -First 1
+            if ($line) { $dbUrl = ($line -split '=', 2)[1].Trim() }
+        }
+        if (-not $dbUrl) { $dbUrl = "postgresql://appolo@127.0.0.1:55432/appolo" }
+        $script:p3db = $dbUrl
+    }
+    if (-not $script:p3psql -or -not (Test-Path $script:p3psql)) { return $false }
+    $sql | & $script:p3psql -d $script:p3db -v ON_ERROR_STOP=1 -f - | Out-Null
+    return $true
+}
+
+[IO.File]::WriteAllText($p3body, (@{ email = "owner@appolo.test"; password = "appolo-demo-1234" } | ConvertTo-Json -Compress))
+curl.exe -s -c $p3jar -H "Content-Type: application/json" --data "@$p3body" "$Base/api/auth/login" | Out-Null
+
+$me3 = P3-Get "$Base/api/me"
+$ownerId = $me3.json.user.id
+
+# 1. review inbox filters
+$allReviews = P3-Get "$Base/api/reviews?limit=100"
+T "reviews list returns inbox fields" ($allReviews.code -eq 200 -and $null -ne @($allReviews.json.reviews)[0].replyStatus)
+
+$fiveOnly = P3-Get "$Base/api/reviews?rating=5"
+$allFive = (@($fiveOnly.json.reviews) | Where-Object { $_.rating -ne 5 }).Count -eq 0
+T "reviews filter by rating" ($fiveOnly.code -eq 200 -and $allFive)
+
+$unanswered = P3-Get "$Base/api/reviews?replyStatus=none"
+$noPosted = (@($unanswered.json.reviews) | Where-Object { $_.replyStatus -eq "posted" }).Count -eq 0
+T "reviews filter to unanswered" ($unanswered.code -eq 200 -and $noPosted)
+
+# Pick a Facebook review: the mock adapter supports replies without credentials.
+$target = @($unanswered.json.reviews) | Where-Object { $_.platformKind -eq "facebook" } | Select-Object -First 1
+T "there is a facebook review to reply to" ($null -ne $target)
+$p3TargetId = $target.id
+
+# 2. AI (heuristic) draft
+$draft = P3-Post "$Base/api/reviews/$p3TargetId/draft" @{ tone = "friendly" }
+T "AI draft created" ($draft.code -eq 201 -and $draft.json.draft.body.Length -gt 0)
+T "draft is not auto-published" ($draft.json.draft.aiGenerated -eq $false)
+$draftId = $draft.json.draft.replyId
+
+# 3. publish the draft
+$publish = P3-Put "$Base/api/reviews/$p3TargetId/reply" @{ replyId = $draftId }
+T "reply published" ($publish.code -eq 200 -and $publish.json.status -eq "posted")
+$postedList = P3-Get "$Base/api/reviews?replyStatus=posted&platformKind=facebook"
+$nowPosted = @($postedList.json.reviews) | Where-Object { $_.id -eq $p3TargetId -and $_.replyStatus -eq "posted" }
+T "published reply shows in the inbox" ($null -ne $nowPosted)
+
+# 4. assignment + flag
+$assign = P3-Patch "$Base/api/reviews/$p3TargetId" @{ assignedTo = $ownerId; flagged = $true }
+T "review assigned and flagged" ($assign.code -eq 200)
+$flagged = P3-Get "$Base/api/reviews?flagged=true"
+$isFlagged = @($flagged.json.reviews) | Where-Object { $_.id -eq $p3TargetId -and $_.flagged -eq $true }
+T "flagged filter returns the review" ($null -ne $isFlagged)
+P3-Patch "$Base/api/reviews/$p3TargetId" @{ flagged = $false } | Out-Null
+
+# 5. review widget + public JSON + embed
+$widget = P3-Get "$Base/api/reviews/widgets"
+T "review widget provisioned" ($widget.code -eq 200 -and $widget.json.widget.publicKey -like "rw_*")
+$widgetKey = $widget.json.widget.publicKey
+
+$publicWidget = P3-Get "$Base/api/public/widgets/$widgetKey"
+T "public widget data is available" ($publicWidget.code -eq 200 -and $null -ne $publicWidget.json.aggregate.count)
+
+$embedHtml = Join-Path $env:TEMP "appolo_p3_embed.html"
+$embedStatus = (curl.exe -s -o $embedHtml -w "%{http_code}" "$Base/embed/reviews/$widgetKey").Trim()
+$embedContent = Get-Content -Raw $embedHtml -ErrorAction SilentlyContinue
+T "review widget embed renders" ($embedStatus -eq "200")
+T "review widget emits JSON-LD" ($embedContent -match "aggregateRating")
+
+# 6. reports + CSV export
+$report = P3-Get "$Base/api/reports?days=90"
+T "reports return a review rollup" ($report.code -eq 200 -and $report.json.report.total -ge 1)
+T "reports include platform breakdown" (@($report.json.report.byPlatform).Count -ge 1)
+
+$csvPath = Join-Path $env:TEMP "appolo_p3_reviews.csv"
+$csvStatus = (curl.exe -s -b $p3jar -o $csvPath -w "%{http_code}" "$Base/api/reviews/export").Trim()
+$csvContent = Get-Content -Raw $csvPath -ErrorAction SilentlyContinue
+T "reviews CSV export works" ($csvStatus -eq "200" -and $csvContent -match "rating")
+
+# 7. automations: the seeded keyword automation auto-replies
+$autos = P3-Get "$Base/api/automations"
+T "seeded automation is listed" ($autos.code -eq 200 -and (@(@($autos.json.automations) | Where-Object { $_.name -eq "Hours question" })).Count -ge 1)
+
+$p3stamp = [guid]::NewGuid().ToString("N").Substring(0, 8)
+$p3digits = -join (1..4 | ForEach-Object { Get-Random -Minimum 0 -Maximum 10 })
+$autoContact = P3-Post "$Base/api/contacts" @{
+    name     = "Auto Contact $p3stamp"
+    channels = @(@{ kind = "phone"; value = "+1555556$p3digits" })
+}
+$p3AutoContactId = $autoContact.json.contact.id
+T "automation contact created" ($autoContact.code -eq 201)
+P3-Post "$Base/api/contacts/$p3AutoContactId/consent" @{ channel = "sms"; status = "granted"; source = "smoke" } | Out-Null
+
+$autoFrom = "+1555556$p3digits"
+$autoInbound = "What are your hours this weekend?"
+$autoCode = Twilio-Post "+15555550100" $autoFrom $autoInbound "SM_smoke_auto_$p3stamp"
+T "automation trigger accepted" ($autoCode -eq "200")
+
+$autoConvos = P3-Get "$Base/api/conversations?channel=sms"
+$autoConvo = @($autoConvos.json.conversations) | Where-Object { $_.contactId -eq $p3AutoContactId } | Select-Object -First 1
+T "automation contact reached the inbox" ($null -ne $autoConvo)
+$autoDetail = P3-Get "$Base/api/conversations/$($autoConvo.id)"
+$autoReply = @($autoDetail.json.messages) | Where-Object { $_.direction -eq "outbound" -and $_.body -match "Mon-Fri" }
+T "keyword automation auto-replied" ($null -ne $autoReply)
+
+# 8. campaigns: preview + create + send (consent enforced per recipient)
+P3-Patch "$Base/api/reviews/settings" @{ quietHours = @{ enabled = $false; start = "21:00"; end = "08:00" } } | Out-Null
+
+# Scope the broadcast to the throwaway contact via a private tag so the seeded
+# demo contacts are never messaged by the smoke run.
+$segTag = "smoke-seg-$p3stamp"
+$tagged = P3-Sql @"
+insert into tags (org_id, name, color)
+  values ((select id from orgs where slug = 'demo'), '$segTag', '#888888');
+insert into contact_tags (org_id, contact_id, tag_id)
+  values (
+    (select id from orgs where slug = 'demo'),
+    '$p3AutoContactId',
+    (select id from tags where name = '$segTag' order by id limit 1)
+  );
+"@
+T "campaign segment tag created" $tagged
+
+$preview = P3-Get "$Base/api/campaigns?preview=1&segment=tag&tag=$segTag"
+T "campaign segment preview counts contacts" ($preview.code -eq 200 -and $preview.json.recipients -eq 1)
+
+$campaign = P3-Post "$Base/api/campaigns" @{
+    name    = "Smoke Campaign $p3stamp"
+    channel = "sms"
+    segment = "tag"
+    tag     = $segTag
+    body    = "Hi {{first_name}}, thanks from {{business_name}}!"
+}
+T "campaign created" ($campaign.code -eq 201 -and $campaign.json.campaign.recipients -eq 1)
+$campaignId = $campaign.json.campaign.id
+
+$sendResult = P3-Post "$Base/api/campaigns/$campaignId/send" @{}
+T "campaign send runs" ($sendResult.code -eq 200 -and $sendResult.json.sent -eq 1)
+
+# restore demo review settings
+P3-Patch "$Base/api/reviews/settings" @{
+    timezone   = "America/Denver"
+    quietHours = @{ enabled = $true; start = "21:00"; end = "08:00" }
+} | Out-Null
+
+# 9. audit log + contact timeline + phase 3 pages
+$auditHtml = Join-Path $env:TEMP "appolo_p3_audit.html"
+$auditStatus = (curl.exe -s -b $p3jar -o $auditHtml -w "%{http_code}" "$Base/app/audit").Trim()
+$auditContent = Get-Content -Raw $auditHtml -ErrorAction SilentlyContinue
+T "audit page renders" ($auditStatus -eq "200" -and $auditContent -match "Audit log")
+T "audit page shows the published reply" ($auditContent -match "review.reply_published")
+
+$timelineHtml = Join-Path $env:TEMP "appolo_p3_contact.html"
+$timelineStatus = (curl.exe -s -b $p3jar -o $timelineHtml -w "%{http_code}" "$Base/app/contacts/$p3AutoContactId").Trim()
+$timelineContent = Get-Content -Raw $timelineHtml -ErrorAction SilentlyContinue
+T "contact timeline page renders" ($timelineStatus -eq "200" -and $timelineContent -match "Timeline")
+T "contact timeline shows a message" ($timelineContent -match "Message received")
+
+$p3pages = @("/app/automations", "/app/campaigns", "/app/reports")
+foreach ($p3page in $p3pages) {
+    $pageOut = Join-Path $env:TEMP ("appolo_p3_page" + ($p3page -replace "[^a-z]", "") + ".html")
+    $pageStatus = (curl.exe -s -b $p3jar -o $pageOut -w "%{http_code}" "$Base$p3page").Trim()
+    T "page $p3page renders" ($pageStatus -eq "200")
+    Remove-Item $pageOut -Force -ErrorAction SilentlyContinue
+}
+
+Remove-Item $p3jar, $p3resp, $p3body, $embedHtml, $csvPath, $auditHtml, $timelineHtml -Force -ErrorAction SilentlyContinue
+
 # --- logout clears the session ---
 Invoke-RestMethod "$Base/api/auth/logout" -Method Post -WebSession $session -TimeoutSec 20 | Out-Null
 $afterLogout = $false
@@ -460,7 +684,7 @@ try {
     if (-not $dbUrl) { $dbUrl = "postgresql://appolo@127.0.0.1:55432/appolo" }
 
     if ($psqlExe -and (Test-Path $psqlExe)) {
-        $smokeIds = @(@($contactId, $inboundContactId, $wcContactId) + @($reviewContactIds)) |
+        $smokeIds = @(@($contactId, $inboundContactId, $wcContactId, $p3AutoContactId) + @($reviewContactIds)) |
             Where-Object { $_ -and $_ -match '^[0-9a-fA-F-]{36}$' } |
             Select-Object -Unique
         $contactDelete = ""
@@ -469,12 +693,24 @@ try {
             $contactDelete = "delete from contacts where id in ($idList);"
         }
 
+        $reviewReset = ""
+        if ($p3TargetId -and $p3TargetId -match '^[0-9a-fA-F-]{36}$') {
+            $reviewReset = @"
+delete from review_replies where review_id = '$p3TargetId';
+update reviews set reply_status = 'draft', assigned_to = null, flagged = false where id = '$p3TargetId';
+"@
+        }
+
         $cleanupSql = @"
 delete from orgs where slug like 'smoke-co-%';
 delete from locations where name = 'Smoke Test Site'
   and org_id = (select id from orgs where slug = 'demo');
 delete from private_feedback where body = 'Smoke test private feedback';
 delete from review_templates where name like 'Smoke Review %';
+delete from campaigns where name like 'Smoke Campaign %';
+delete from automations where name like 'Smoke Automation %';
+delete from tags where name like 'smoke-seg-%';
+$reviewReset
 $contactDelete
 "@
         $cleanupSql | & $psqlExe -d $dbUrl -v ON_ERROR_STOP=1 -f - | Out-Null

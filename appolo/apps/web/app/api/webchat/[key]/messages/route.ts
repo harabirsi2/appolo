@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { firstIssue, webchatCustomerSchema } from "@appolo/core";
 import { apiError, jsonError } from "@/lib/api";
 import { getWebchatMessages, receiveWebchatMessage } from "@/lib/services/messaging";
+import { runKeywordAutomations } from "@/lib/services/automations";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,17 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     if (!parsed.success) return jsonError(firstIssue(parsed.error), 400, "INVALID_INPUT");
 
     const result = await receiveWebchatMessage(key, parsed.data);
+    if (result.contactId) {
+      try {
+        await runKeywordAutomations(result.orgId, {
+          contactId: result.contactId,
+          channel: "webchat",
+          body: parsed.data.body,
+        });
+      } catch (automationError) {
+        console.error("[webchat] automation failed:", automationError);
+      }
+    }
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     return apiError(error);

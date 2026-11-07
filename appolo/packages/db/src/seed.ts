@@ -35,6 +35,13 @@ const {
   reviewTemplates,
   reviewTokens,
   privateFeedback,
+  reviewWidgets,
+  automations,
+  automationSteps,
+  campaigns,
+  campaignRecipients,
+  tags,
+  contactTags,
 } = schema;
 
 const db = getAdminDb();
@@ -566,6 +573,115 @@ async function main(): Promise<void> {
         },
       };
       await tx.update(orgs).set({ settings }).where(eq(orgs.id, orgId));
+    }
+  });
+
+  // --- Phase 3 fixtures: widget, keyword automation, draft campaign ---
+  // Idempotent: each item is created only if its table is empty for the org.
+  await withOrgAdmin(orgId, async (tx) => {
+    const widgetCount = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(reviewWidgets)
+      .where(eq(reviewWidgets.orgId, orgId));
+    if ((widgetCount[0]?.n ?? 0) === 0) {
+      await tx.insert(reviewWidgets).values({
+        orgId,
+        publicKey: "rw_demo000000000000000000",
+        config: {
+          headline: "What our customers say",
+          theme: "dark",
+          layout: "list",
+          minRating: 4,
+          limit: 6,
+          showRating: true,
+        },
+      });
+    }
+
+    // A demo tag so tag-segment campaigns have something to target.
+    const primaryContact = (
+      await tx
+        .select({ id: contacts.id })
+        .from(contacts)
+        .where(and(eq(contacts.orgId, orgId), eq(contacts.name, "Ava Thompson")))
+        .limit(1)
+    )[0];
+    if (primaryContact) {
+      let vipTag = (
+        await tx
+          .select({ id: tags.id })
+          .from(tags)
+          .where(and(eq(tags.orgId, orgId), eq(tags.name, "vip")))
+          .limit(1)
+      )[0];
+      if (!vipTag) {
+        vipTag = (await tx.insert(tags).values({ orgId, name: "vip", color: "#f59e0b" }).returning({ id: tags.id }))[0]!;
+      }
+      await tx
+        .insert(contactTags)
+        .values({ orgId, contactId: primaryContact.id, tagId: vipTag.id })
+        .onConflictDoNothing();
+    }
+
+    const automationCount = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(automations)
+      .where(eq(automations.orgId, orgId));
+    if ((automationCount[0]?.n ?? 0) === 0) {
+      const [automation] = await tx
+        .insert(automations)
+        .values({
+          orgId,
+          name: "Hours question",
+          trigger: "keyword",
+          conditions: { keywords: ["hours", "open", "closing"], matchType: "contains", channels: [] },
+          enabled: true,
+        })
+        .returning({ id: automations.id });
+      await tx.insert(automationSteps).values({
+        orgId,
+        automationId: automation!.id,
+        order: 1,
+        kind: "auto_reply",
+        config: {
+          body: "Hi {{first_name}}, we're open Mon-Fri 9-6 and Sat 10-4. Reply here and we'll help!",
+        },
+      });
+    }
+
+    const campaignCount = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(campaigns)
+      .where(eq(campaigns.orgId, orgId));
+    if ((campaignCount[0]?.n ?? 0) === 0) {
+      const contactRows = await tx
+        .select({ id: contacts.id })
+        .from(contacts)
+        .where(eq(contacts.orgId, orgId))
+        .limit(3);
+      if (contactRows.length > 0) {
+        const [campaign] = await tx
+          .insert(campaigns)
+          .values({
+            orgId,
+            name: "Thank-you broadcast",
+            channel: "sms",
+            segment: {
+              type: "all",
+              body: "Hi {{first_name}}, thanks for being a customer of {{business_name}}!",
+            },
+            status: "draft",
+          })
+          .returning({ id: campaigns.id });
+        await tx.insert(campaignRecipients).values(
+          contactRows.map((contact) => ({
+            orgId,
+            campaignId: campaign!.id,
+            contactId: contact.id,
+            status: "pending",
+          })),
+        );
+      }
     }
   });
 

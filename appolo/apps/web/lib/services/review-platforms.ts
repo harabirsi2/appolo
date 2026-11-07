@@ -28,10 +28,29 @@ export interface FetchReviewsInput {
   since?: Date | null;
 }
 
+export interface PublishReplyInput {
+  externalRef: string | null;
+  credentialsRef: string | null;
+  /** The platform's id for the review being replied to. */
+  reviewExternalId: string;
+  body: string;
+}
+
+export interface PublishReplyResult {
+  /** Platform id for the posted reply, when the API returns one. */
+  externalId: string | null;
+}
+
 export interface ReviewPlatformClient {
   readonly kind: string;
   readonly live: boolean;
   fetchReviews(input: FetchReviewsInput): Promise<NormalizedReview[]>;
+  /**
+   * Publishes a reply to a public review. Optional: platforms without a
+   * documented reply endpoint simply omit it, and the org can record the reply
+   * as "posted locally" instead.
+   */
+  replyToReview?(input: PublishReplyInput): Promise<PublishReplyResult>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -72,6 +91,9 @@ function mockClient(): ReviewPlatformClient {
           raw: { source: "mock" },
         },
       ];
+    },
+    async replyToReview({ reviewExternalId }): Promise<PublishReplyResult> {
+      return { externalId: `mock-reply-${reviewExternalId}` };
     },
   };
 }
@@ -134,6 +156,31 @@ function googleClient(accessToken: string): ReviewPlatformClient {
           raw: review,
         }));
     },
+    async replyToReview({ externalRef, reviewExternalId, body }): Promise<PublishReplyResult> {
+      if (!externalRef) {
+        throw new DomainError("PLATFORM_NOT_CONFIGURED", "This Google platform has no location reference.", 422);
+      }
+      // Documented endpoint:
+      // https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/updateReply
+      const name = `${externalRef}/reviews/${reviewExternalId}`;
+      const response = await fetch(`https://mybusiness.googleapis.com/v4/${name}/reply`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ comment: body }),
+      });
+      if (!response.ok) {
+        throw new DomainError(
+          "PLATFORM_ERROR",
+          `Google Business Profile rejected the reply (${response.status}).`,
+          502,
+        );
+      }
+      const payload = (await response.json().catch(() => ({}))) as { name?: string };
+      return { externalId: payload.name ?? name };
+    },
   };
 }
 
@@ -150,6 +197,13 @@ export function getReviewPlatformClient(kind: string): ReviewPlatformClient {
       kind: "google",
       live: false,
       async fetchReviews(): Promise<NormalizedReview[]> {
+        throw new DomainError(
+          "PLATFORM_NOT_CONNECTED",
+          "Google Business Profile is not connected. Set GOOGLE_BUSINESS_ACCESS_TOKEN on the server.",
+          422,
+        );
+      },
+      async replyToReview(): Promise<PublishReplyResult> {
         throw new DomainError(
           "PLATFORM_NOT_CONNECTED",
           "Google Business Profile is not connected. Set GOOGLE_BUSINESS_ACCESS_TOKEN on the server.",

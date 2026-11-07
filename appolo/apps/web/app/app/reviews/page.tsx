@@ -1,8 +1,9 @@
 import { Badge, Button, Card, CardTitle, EmptyState, Field, Input, Select, Stat, Stars, Textarea } from "@appolo/ui";
-import { can, reviewPlatformKinds } from "@appolo/core";
+import { can, replyTones, reviewPlatformKinds } from "@appolo/core";
 import { requireSession } from "@/lib/session";
 import { withOrg, schema } from "@/lib/db";
 import {
+  ensureReviewWidget,
   getLandingBranding,
   getReviewSettings,
   listContactOptions,
@@ -13,23 +14,38 @@ import {
   listReviewTemplates,
   reviewStats,
 } from "@/lib/services/reviews";
+import { listMembers } from "@/lib/services/messaging";
 import { isGoogleConfigured } from "@/lib/services/review-platforms";
 import {
+  assignReviewAction,
   bulkReviewRequestAction,
   createReviewTemplateAction,
   deleteReviewTemplateAction,
+  draftReviewReplyAction,
+  flagReviewAction,
+  publishReviewReplyAction,
   replyToReviewAction,
   runFollowUpsAction,
   sendReviewRequestAction,
   syncReviewsAction,
   updateBrandingAction,
   updateReviewSettingsAction,
+  updateWidgetAction,
 } from "@/lib/actions";
 
 const { locations } = schema;
 
 export const metadata = { title: "Reviews" };
 export const dynamic = "force-dynamic";
+
+const REVIEW_FILTERS = [
+  "platformKind",
+  "rating",
+  "replyStatus",
+  "assignedTo",
+  "flagged",
+  "q",
+] as const;
 
 const STATUS_TONES: Record<string, "neutral" | "brand" | "success" | "warn" | "danger"> = {
   queued: "neutral",
@@ -50,17 +66,34 @@ function formatDate(value: Date | string | null): string {
 export default async function ReviewsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; ok?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    ok?: string;
+    platformKind?: string;
+    rating?: string;
+    replyStatus?: string;
+    assignedTo?: string;
+    flagged?: string;
+    q?: string;
+  }>;
 }) {
   const session = await requireSession();
-  const { error, ok } = await searchParams;
+  const { error, ok, ...filterParams } = await searchParams;
   const orgId = session.org.id;
 
-  const [stats, requests, reviews, feedback, templates, platforms, contacts, settings, branding, locationRows] =
+  const [stats, requests, reviews, feedback, templates, platforms, contacts, settings, branding, locationRows, members, widget] =
     await Promise.all([
       reviewStats(orgId),
       listReviewRequests(orgId, { limit: 25 }),
-      listReviews(orgId, { limit: 15 }),
+      listReviews(orgId, {
+        limit: 25,
+        platformKind: filterParams.platformKind || undefined,
+        rating: filterParams.rating ? Number(filterParams.rating) : undefined,
+        replyStatus: filterParams.replyStatus || undefined,
+        assignedTo: filterParams.assignedTo || undefined,
+        flagged: filterParams.flagged === "true" || undefined,
+        search: filterParams.q || undefined,
+      }),
       listPrivateFeedback(orgId, 15),
       listReviewTemplates(orgId),
       listReviewPlatforms(orgId),
@@ -68,6 +101,8 @@ export default async function ReviewsPage({
       getReviewSettings(orgId),
       getLandingBranding(orgId),
       withOrg(orgId, (tx) => tx.select({ id: locations.id, name: locations.name }).from(locations)),
+      listMembers(orgId),
+      ensureReviewWidget(orgId),
     ]);
 
   const canRequest = can(session.membership.role, "reviews:request");
@@ -76,6 +111,10 @@ export default async function ReviewsPage({
   const emailTemplates = templates.filter((template) => template.channel === "email" && template.active);
   const defaultTemplate = templates.find((template) => template.isDefault && template.channel === "sms") ?? smsTemplates[0];
   const clickRate = stats.requestsSent > 0 ? Math.round((stats.clicked / stats.requestsSent) * 100) : 0;
+
+  const activeFilterCount = REVIEW_FILTERS.filter((key) => Boolean(filterParams[key])).length;
+  const baseUrl = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const widgetSnippet = `<iframe src="${baseUrl}/embed/reviews/${widget.publicKey}" title="Customer reviews" style="width:100%;height:440px;border:0" loading="lazy"></iframe>`;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -469,12 +508,75 @@ export default async function ReviewsPage({
       </Card>
 
       <Card>
-        <CardTitle action={<Badge>{reviews.length} recent</Badge>}>Public reviews</CardTitle>
+        <CardTitle
+          action={
+            <div className="flex items-center gap-2">
+              {activeFilterCount > 0 ? <Badge tone="brand">{activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"}</Badge> : null}
+              <Badge>{reviews.length} shown</Badge>
+            </div>
+          }
+        >
+          Review inbox
+        </CardTitle>
+
+        <form method="get" className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <Field label="Search">
+            <Input name="q" defaultValue={filterParams.q ?? ""} placeholder="Author or text" />
+          </Field>
+          <Field label="Platform">
+            <Select name="platformKind" defaultValue={filterParams.platformKind ?? ""}>
+              <option value="">All</option>
+              {reviewPlatformKinds.map((kind) => (
+                <option key={kind} value={kind}>{kind}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Rating">
+            <Select name="rating" defaultValue={filterParams.rating ?? ""}>
+              <option value="">All</option>
+              {[5, 4, 3, 2, 1].map((n) => (
+                <option key={n} value={n}>{n} star{n === 1 ? "" : "s"}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Reply">
+            <Select name="replyStatus" defaultValue={filterParams.replyStatus ?? ""}>
+              <option value="">All</option>
+              <option value="none">Needs a reply</option>
+              <option value="draft">Draft saved</option>
+              <option value="posted">Replied</option>
+            </Select>
+          </Field>
+          <Field label="Assignee">
+            <Select name="assignedTo" defaultValue={filterParams.assignedTo ?? ""}>
+              <option value="">Anyone</option>
+              <option value="unassigned">Unassigned</option>
+              {members.map((member) => (
+                <option key={member.userId} value={member.userId}>{member.name}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Flagged">
+            <Select name="flagged" defaultValue={filterParams.flagged ?? ""}>
+              <option value="">Any</option>
+              <option value="true">Flagged only</option>
+            </Select>
+          </Field>
+          <div className="flex items-center gap-2 sm:col-span-2 lg:col-span-6">
+            <Button type="submit" size="sm">Apply filters</Button>
+            <a href="/app/reviews" className="text-xs text-muted hover:text-ink">Reset</a>
+          </div>
+        </form>
+
         {reviews.length === 0 ? (
           <EmptyState
-            title="No public reviews synced yet"
-            body="Connect a platform and sync, or let incoming requests convert into reviews. The demo adapter imports two sample reviews."
-            action={canRespond ? (
+            title={activeFilterCount > 0 ? "No reviews match those filters" : "No public reviews synced yet"}
+            body={
+              activeFilterCount > 0
+                ? "Reset the filters or widen your search."
+                : "Connect a platform and sync, or let incoming requests convert into reviews. The demo adapter imports two sample reviews."
+            }
+            action={canRespond && activeFilterCount === 0 ? (
               <form action={syncReviewsAction}>
                 <Button type="submit" size="sm">Sync now</Button>
               </form>
@@ -488,21 +590,130 @@ export default async function ReviewsPage({
                   <Stars rating={review.rating} />
                   <p className="text-sm font-medium">{review.authorName ?? "Anonymous"}</p>
                   <Badge tone="neutral">{review.platformName ?? review.platformKind ?? "review"}</Badge>
+                  {review.flagged ? <Badge tone="danger">flagged</Badge> : null}
+                  {review.assigneeName ? <Badge tone="brand">{review.assigneeName}</Badge> : null}
                   <span className="ml-auto text-xs text-muted-2">{formatDate(review.reviewedAt)}</span>
-                  <Badge tone={review.replyStatus === "posted" ? "success" : "warn"}>{review.replyStatus}</Badge>
+                  <Badge tone={review.replyStatus === "posted" ? "success" : review.replyStatus === "draft" ? "warn" : "neutral"}>
+                    {review.replyStatus === "posted" ? "replied" : review.replyStatus === "draft" ? "draft" : "unanswered"}
+                  </Badge>
                 </div>
+
+                {review.reply ? (
+                  <div className="mt-2 rounded-lg border border-border bg-surface-2 p-3">
+                    <p className="text-xs font-medium text-muted-2">
+                      {review.reply.status === "posted" ? "Posted reply" : "Draft reply"}
+                      {review.reply.aiGenerated ? " · AI-assisted" : ""}
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted">{review.reply.body}</p>
+                  </div>
+                ) : null}
                 {review.body ? <p className="mt-1 text-sm text-muted">{review.body}</p> : null}
-                {canRespond ? (
-                  <form action={replyToReviewAction} className="mt-2 flex flex-col gap-2 sm:flex-row">
-                    <input type="hidden" name="reviewId" value={review.id} />
-                    <Input name="body" placeholder="Draft a reply…" required />
-                    <Button type="submit" variant="secondary" size="sm">Save reply</Button>
-                  </form>
+{canRespond ? (
+                  <div className="mt-2 space-y-2">
+                    <form action={replyToReviewAction} className="flex flex-col gap-2 sm:flex-row">
+                      <input type="hidden" name="reviewId" value={review.id} />
+                      <Input name="body" placeholder="Write a reply" required />
+                      <Button type="submit" variant="secondary" size="sm">Save draft</Button>
+                    </form>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <form action={draftReviewReplyAction} className="flex items-center gap-2">
+                        <input type="hidden" name="reviewId" value={review.id} />
+                        <Select name="tone" defaultValue="friendly" className="h-8 w-32 text-xs">
+                          {replyTones.map((tone) => (
+                            <option key={tone} value={tone}>{tone}</option>
+                          ))}
+                        </Select>
+                        <Button type="submit" variant="ghost" size="sm">AI draft</Button>
+                      </form>
+                      {review.reply && review.reply.status !== "posted" ? (
+                        <form action={publishReviewReplyAction}>
+                          <input type="hidden" name="reviewId" value={review.id} />
+                          <Button type="submit" size="sm">Publish reply</Button>
+                        </form>
+                      ) : null}
+                      <form action={assignReviewAction} className="flex items-center gap-2">
+                        <input type="hidden" name="reviewId" value={review.id} />
+                        <Select name="assignedTo" defaultValue={review.assignedTo ?? "unassigned"} className="h-8 w-40 text-xs">
+                          <option value="unassigned">Unassigned</option>
+                          {members.map((member) => (
+                            <option key={member.userId} value={member.userId}>{member.name}</option>
+                          ))}
+                        </Select>
+                        <Button type="submit" variant="ghost" size="sm">Assign</Button>
+                      </form>
+                      <form action={flagReviewAction}>
+                        <input type="hidden" name="reviewId" value={review.id} />
+                        <input type="hidden" name="flagged" value={review.flagged ? "" : "on"} />
+                        <Button type="submit" variant="ghost" size="sm">{review.flagged ? "Unflag" : "Flag"}</Button>
+                      </form>
+                    </div>
+                  </div>
                 ) : null}
               </li>
             ))}
           </ul>
-        )}
+)}
+
+        <div className="mt-4 flex justify-end border-t border-border pt-4">
+          <a
+            href="/api/reviews/export"
+            className="inline-flex h-8 items-center rounded-lg border border-border bg-surface-2 px-3 text-xs text-ink hover:border-border-strong"
+          >
+            Export CSV
+          </a>
+        </div>
+      </Card>
+
+      <Card>
+        <CardTitle action={<Badge tone="brand">embed</Badge>}>Review widget</CardTitle>
+        <p className="text-sm text-muted">
+          Show your best {widget.config.minRating}+ star reviews on any website. Paste this snippet before{" "}
+          <span className="font-mono">&lt;/body&gt;</span>.
+        </p>
+        <pre className="mt-3 overflow-x-auto rounded-lg border border-border bg-surface-2 p-3 text-xs text-muted">
+          {widgetSnippet}
+        </pre>
+        <p className="mt-2 text-xs text-muted-2">
+          Public data: <span className="font-mono">/api/public/widgets/{widget.publicKey}</span>
+        </p>
+
+        {canRequest ? (
+          <form action={updateWidgetAction} className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
+            <Field label="Headline">
+              <Input name="headline" defaultValue={widget.config.headline} />
+            </Field>
+            <Field label="Theme">
+              <Select name="theme" defaultValue={widget.config.theme}>
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </Select>
+            </Field>
+            <Field label="Layout">
+              <Select name="layout" defaultValue={widget.config.layout}>
+                <option value="list">List</option>
+                <option value="carousel">Carousel</option>
+                <option value="badge">Badge</option>
+              </Select>
+            </Field>
+            <Field label="Minimum rating">
+              <Select name="minRating" defaultValue={String(widget.config.minRating)}>
+                {[3, 4, 5].map((n) => (
+                  <option key={n} value={n}>{n}+ stars</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="How many reviews">
+              <Input name="limit" type="number" min={1} max={20} defaultValue={widget.config.limit} />
+            </Field>
+            <label className="flex items-end gap-2 pb-2 text-sm">
+              <input type="checkbox" name="showRating" defaultChecked={widget.config.showRating} className="h-4 w-4 rounded border-border" />
+              <span>Show the average rating</span>
+            </label>
+            <div className="sm:col-span-2">
+              <Button type="submit" variant="secondary" size="sm">Save widget</Button>
+            </div>
+          </form>
+        ) : null}
       </Card>
     </div>
   );

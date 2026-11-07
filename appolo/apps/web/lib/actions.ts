@@ -4,7 +4,9 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
+  automationSchema,
   bulkReviewRequestSchema,
+  campaignSchema,
   can,
   contactCreateSchema,
   consentInputSchema,
@@ -13,9 +15,12 @@ import {
   loginSchema,
   parseClock,
   privateFeedbackSchema,
+  replyTones,
+  reviewDraftSchema,
   reviewReplySchema,
   reviewRequestInputSchema,
   reviewTemplateSchema,
+  reviewWidgetConfigSchema,
   savedReplySchema,
   signupSchema,
   type Capability,
@@ -30,8 +35,13 @@ import {
   updateConversation,
 } from "./services/messaging";
 import {
+  assignReview,
   createReviewTemplate,
   deleteReviewTemplate,
+  draftReplyForReview,
+  ensureReviewWidget,
+  flagReview,
+  publishReviewReply,
   replyToReview,
   sendBulkReviewRequests,
   sendDueFollowUps,
@@ -40,7 +50,15 @@ import {
   syncPlatformReviews,
   updateLandingBranding,
   updateReviewSettings,
+  updateReviewWidget,
 } from "./services/reviews";
+import {
+  createAutomation,
+  deleteAutomation,
+  setAutomationEnabled,
+  updateAutomation,
+} from "./services/automations";
+import { createCampaign, deleteCampaign, sendCampaign } from "./services/campaigns";
 import { isDomainError } from "./services/errors";
 import { requireSession } from "./session";
 import { withOrg, schema } from "./db";
@@ -682,4 +700,300 @@ export async function submitPrivateFeedbackAction(formData: FormData): Promise<v
   }
 
   redirect(`/r/${token}?ok=1#feedback`);
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 3 — review management                                         */
+/* ------------------------------------------------------------------ */
+
+export async function draftReviewReplyAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "reviews:respond")) {
+    redirect(`/app/reviews?error=${encodeURIComponent("Your role cannot draft replies.")}`);
+  }
+
+  const parsed = reviewDraftSchema.safeParse({
+    reviewId: stringField(formData, "reviewId"),
+    tone: stringField(formData, "tone") ?? "friendly",
+  });
+  if (!parsed.success) {
+    redirect(`/app/reviews?error=${encodeURIComponent(firstIssue(parsed.error))}`);
+  }
+
+  try {
+    await draftReplyForReview(session.org.id, parsed.data.reviewId, parsed.data.tone, session.user.id);
+  } catch (error) {
+    fail("/app/reviews", error);
+  }
+
+  revalidatePath("/app/reviews");
+  redirect("/app/reviews?ok=AI%20draft%20ready");
+}
+
+export async function publishReviewReplyAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "reviews:respond")) {
+    redirect(`/app/reviews?error=${encodeURIComponent("Your role cannot publish replies.")}`);
+  }
+
+  const reviewId = stringField(formData, "reviewId");
+  if (!reviewId) redirect("/app/reviews");
+
+  try {
+    await publishReviewReply(session.org.id, reviewId, session.user.id);
+  } catch (error) {
+    fail("/app/reviews", error);
+  }
+
+  revalidatePath("/app/reviews");
+  redirect("/app/reviews?ok=Reply%20published");
+}
+
+export async function assignReviewAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "reviews:respond")) {
+    redirect(`/app/reviews?error=${encodeURIComponent("Your role cannot assign reviews.")}`);
+  }
+
+  const reviewId = stringField(formData, "reviewId");
+  const rawAssignee = stringField(formData, "assignedTo");
+  const assignedTo = rawAssignee && rawAssignee !== "unassigned" ? rawAssignee : null;
+  if (!reviewId) redirect("/app/reviews");
+
+  try {
+    await assignReview(session.org.id, reviewId, assignedTo, session.user.id);
+  } catch (error) {
+    fail("/app/reviews", error);
+  }
+
+  revalidatePath("/app/reviews");
+  redirect("/app/reviews?ok=Review%20assigned");
+}
+
+export async function flagReviewAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "reviews:respond")) {
+    redirect(`/app/reviews?error=${encodeURIComponent("Your role cannot flag reviews.")}`);
+  }
+
+  const reviewId = stringField(formData, "reviewId");
+  const flagged = formData.get("flagged") === "on";
+  if (!reviewId) redirect("/app/reviews");
+
+  try {
+    await flagReview(session.org.id, reviewId, flagged, session.user.id);
+  } catch (error) {
+    fail("/app/reviews", error);
+  }
+
+  revalidatePath("/app/reviews");
+  redirect(flagged ? "/app/reviews?ok=Review%20flagged" : "/app/reviews?ok=Review%20unflagged");
+}
+
+export async function updateWidgetAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "reviews:request")) {
+    redirect(`/app/reviews?error=${encodeURIComponent("Your role cannot change the widget.")}`);
+  }
+
+  const parsed = reviewWidgetConfigSchema.safeParse({
+    headline: stringField(formData, "headline") ?? "What our customers say",
+    theme: stringField(formData, "theme") ?? "dark",
+    layout: stringField(formData, "layout") ?? "list",
+    minRating: Number(stringField(formData, "minRating") ?? "4") || 4,
+    limit: Number(stringField(formData, "limit") ?? "6") || 6,
+    showRating: formData.get("showRating") === "on",
+  });
+  if (!parsed.success) {
+    redirect(`/app/reviews?error=${encodeURIComponent(firstIssue(parsed.error))}`);
+  }
+
+  try {
+    const widget = await ensureReviewWidget(session.org.id);
+    await updateReviewWidget(session.org.id, widget.id, parsed.data);
+  } catch (error) {
+    fail("/app/reviews", error);
+  }
+
+  revalidatePath("/app/reviews");
+  redirect("/app/reviews?ok=Widget%20saved");
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 3 — automations                                               */
+/* ------------------------------------------------------------------ */
+
+function automationInputFrom(formData: FormData) {
+  const keywords = (stringField(formData, "keywords") ?? "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+  const channels = formData
+    .getAll("channels")
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+  return {
+    name: stringField(formData, "name"),
+    trigger: stringField(formData, "trigger") ?? "keyword",
+    enabled: formData.get("enabled") === "on",
+    keywords,
+    matchType: stringField(formData, "matchType") ?? "contains",
+    channels,
+    replyBody: stringField(formData, "replyBody") ?? "",
+  };
+}
+
+export async function createAutomationAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "automations:manage")) {
+    redirect(`/app/automations?error=${encodeURIComponent("Your role cannot manage automations.")}`);
+  }
+
+  const parsed = automationSchema.safeParse(automationInputFrom(formData));
+  if (!parsed.success) {
+    redirect(`/app/automations?error=${encodeURIComponent(firstIssue(parsed.error))}`);
+  }
+
+  try {
+    await createAutomation(session.org.id, parsed.data, session.user.id);
+  } catch (error) {
+    fail("/app/automations", error);
+  }
+
+  revalidatePath("/app/automations");
+  redirect("/app/automations?ok=Automation%20created");
+}
+
+export async function updateAutomationAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "automations:manage")) {
+    redirect(`/app/automations?error=${encodeURIComponent("Your role cannot manage automations.")}`);
+  }
+
+  const id = stringField(formData, "automationId");
+  if (!id) redirect("/app/automations");
+
+  const parsed = automationSchema.safeParse(automationInputFrom(formData));
+  if (!parsed.success) {
+    redirect(`/app/automations?error=${encodeURIComponent(firstIssue(parsed.error))}`);
+  }
+
+  try {
+    await updateAutomation(session.org.id, id, parsed.data, session.user.id);
+  } catch (error) {
+    fail("/app/automations", error);
+  }
+
+  revalidatePath("/app/automations");
+  redirect("/app/automations?ok=Automation%20saved");
+}
+
+export async function toggleAutomationAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "automations:manage")) {
+    redirect(`/app/automations?error=${encodeURIComponent("Your role cannot manage automations.")}`);
+  }
+
+  const id = stringField(formData, "automationId");
+  const enabled = formData.get("enabled") === "on";
+  if (!id) redirect("/app/automations");
+
+  try {
+    await setAutomationEnabled(session.org.id, id, enabled, session.user.id);
+  } catch (error) {
+    fail("/app/automations", error);
+  }
+
+  revalidatePath("/app/automations");
+  redirect(enabled ? "/app/automations?ok=Automation%20enabled" : "/app/automations?ok=Automation%20paused");
+}
+
+export async function deleteAutomationAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "automations:manage")) {
+    redirect(`/app/automations?error=${encodeURIComponent("Your role cannot manage automations.")}`);
+  }
+
+  const id = stringField(formData, "automationId");
+  if (!id) redirect("/app/automations");
+
+  try {
+    await deleteAutomation(session.org.id, id, session.user.id);
+  } catch (error) {
+    fail("/app/automations", error);
+  }
+
+  revalidatePath("/app/automations");
+  redirect("/app/automations?ok=Automation%20deleted");
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 3 — campaigns                                                 */
+/* ------------------------------------------------------------------ */
+
+export async function createCampaignAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "messages:send")) {
+    redirect(`/app/campaigns?error=${encodeURIComponent("Your role cannot create campaigns.")}`);
+  }
+
+  const parsed = campaignSchema.safeParse({
+    name: stringField(formData, "name"),
+    channel: stringField(formData, "channel") ?? "sms",
+    segment: stringField(formData, "segment") ?? "all",
+    tag: stringField(formData, "tag") ?? undefined,
+    subject: stringField(formData, "subject") ?? undefined,
+    body: stringField(formData, "body"),
+  });
+  if (!parsed.success) {
+    redirect(`/app/campaigns?error=${encodeURIComponent(firstIssue(parsed.error))}`);
+  }
+
+  let created;
+  try {
+    created = await createCampaign(session.org.id, parsed.data, session.user.id);
+  } catch (error) {
+    fail("/app/campaigns", error);
+  }
+
+  revalidatePath("/app/campaigns");
+  redirect(`/app/campaigns?ok=${encodeURIComponent(`Campaign queued for ${created.recipients} recipient(s).`)}`);
+}
+
+export async function sendCampaignAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "messages:send")) {
+    redirect(`/app/campaigns?error=${encodeURIComponent("Your role cannot send campaigns.")}`);
+  }
+
+  const id = stringField(formData, "campaignId");
+  if (!id) redirect("/app/campaigns");
+
+  let result;
+  try {
+    result = await sendCampaign(session.org.id, id, session.user.id);
+  } catch (error) {
+    fail("/app/campaigns", error);
+  }
+
+  revalidatePath("/app/campaigns");
+  redirect(`/app/campaigns?ok=${encodeURIComponent(`Sent ${result.sent}, skipped ${result.skipped}, failed ${result.failed}.`)}`);
+}
+
+export async function deleteCampaignAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "messages:send")) {
+    redirect(`/app/campaigns?error=${encodeURIComponent("Your role cannot delete campaigns.")}`);
+  }
+
+  const id = stringField(formData, "campaignId");
+  if (!id) redirect("/app/campaigns");
+
+  try {
+    await deleteCampaign(session.org.id, id, session.user.id);
+  } catch (error) {
+    fail("/app/campaigns", error);
+  }
+
+  revalidatePath("/app/campaigns");
+  redirect("/app/campaigns?ok=Campaign%20deleted");
 }
