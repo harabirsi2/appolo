@@ -1,0 +1,19 @@
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+.env
+.env.local
+.env.*.local
+
+# self-contained local postgres cluster (created by scripts/dev-db.ps1)
+.pgdata/
+*.log
+
+.DS_Store
+Thumbs.db

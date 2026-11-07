@@ -1,0 +1,28 @@
+{
+  "name": "appolo",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @appolo/web --filter @appolo/worker dev",
+    "dev:web": "pnpm --filter @appolo/web dev",
+    "dev:worker": "pnpm --filter @appolo/worker dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "db:generate": "pnpm --filter @appolo/db generate",
+    "db:migrate": "pnpm --filter @appolo/db migrate",
+    "db:seed": "pnpm --filter @appolo/db seed",
+    "db:rls-test": "pnpm --filter @appolo/db rls-test",
+    "db:reset": "pnpm --filter @appolo/db reset",
+    "db:up": "powershell -ExecutionPolicy Bypass -File scripts/dev-db.ps1",
+    "db:down": "powershell -ExecutionPolicy Bypass -File scripts/dev-db.ps1 -Stop",
+    "smoke": "powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1",
+    "ci": "powershell -ExecutionPolicy Bypass -File scripts/ci.ps1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

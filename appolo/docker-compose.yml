@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: appolo-postgres
+    environment:
+      POSTGRES_DB: appolo
+      POSTGRES_USER: appolo
+      POSTGRES_PASSWORD: appolo
+    ports:
+      - "55432:5432"
+    volumes:
+      - appolo_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appolo -d appolo"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: appolo-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - appolo_redis:/data
+
+  minio:
+    image: minio/minio:latest
+    container_name: appolo-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: appolo
+      MINIO_ROOT_PASSWORD: appolo-dev-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - appolo_minio:/data
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: appolo-mailpit
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+volumes:
+  appolo_pg:
+  appolo_redis:
+  appolo_minio:
