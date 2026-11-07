@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
 import {
   DEFAULT_QUIET_HOURS,
   DEFAULT_REVIEW_TEMPLATES,
@@ -41,13 +41,24 @@ const DEFAULT_COOLDOWN_DAYS = 90;
 /* settings                                                            */
 /* ------------------------------------------------------------------ */
 
+export interface FollowUpSettings {
+  enabled: boolean;
+  days: number;
+  max: number;
+  body: string;
+}
+
 export interface ReviewSettings {
   quietHours: QuietHours;
   dailyCap: number;
   timezone: string;
   cooldownDays: number;
   defaultPlatformKind: string;
+  followUp: FollowUpSettings;
 }
+
+export const DEFAULT_FOLLOW_UP_BODY =
+  "Hi {{first_name}}, just a gentle reminder — if you have a moment, a quick review for {{business_name}} would really help us out: {{review_link}}";
 
 const DEFAULT_SETTINGS: ReviewSettings = {
   quietHours: DEFAULT_QUIET_HOURS,
@@ -55,12 +66,14 @@ const DEFAULT_SETTINGS: ReviewSettings = {
   timezone: "UTC",
   cooldownDays: DEFAULT_COOLDOWN_DAYS,
   defaultPlatformKind: "google",
+  followUp: { enabled: true, days: 3, max: 1, body: DEFAULT_FOLLOW_UP_BODY },
 };
 
 function coerceSettings(raw: unknown): ReviewSettings {
   const value = (raw ?? {}) as Record<string, unknown>;
   const review = (value.reviewRequests ?? {}) as Record<string, unknown>;
   const quiet = (review.quietHours ?? {}) as Record<string, unknown>;
+  const follow = (review.followUp ?? {}) as Record<string, unknown>;
   return {
     quietHours: {
       enabled: typeof quiet.enabled === "boolean" ? quiet.enabled : DEFAULT_SETTINGS.quietHours.enabled,
@@ -72,6 +85,15 @@ function coerceSettings(raw: unknown): ReviewSettings {
     cooldownDays: typeof review.cooldownDays === "number" ? review.cooldownDays : DEFAULT_SETTINGS.cooldownDays,
     defaultPlatformKind:
       typeof review.defaultPlatformKind === "string" ? review.defaultPlatformKind : DEFAULT_SETTINGS.defaultPlatformKind,
+    followUp: {
+      enabled: typeof follow.enabled === "boolean" ? follow.enabled : DEFAULT_SETTINGS.followUp.enabled,
+      days: typeof follow.days === "number" ? follow.days : DEFAULT_SETTINGS.followUp.days,
+      max: typeof follow.max === "number" ? follow.max : DEFAULT_SETTINGS.followUp.max,
+      body:
+        typeof follow.body === "string" && follow.body.trim()
+          ? follow.body
+          : DEFAULT_SETTINGS.followUp.body,
+    },
   };
 }
 
@@ -92,10 +114,71 @@ export async function updateReviewSettings(orgId: string, patch: Partial<ReviewS
       timezone: patch.timezone ?? current.timezone,
       cooldownDays: patch.cooldownDays ?? current.cooldownDays,
       defaultPlatformKind: patch.defaultPlatformKind ?? current.defaultPlatformKind,
+      followUp: patch.followUp ?? current.followUp,
     };
 
     const settings = { ...((org?.settings ?? {}) as Record<string, unknown>) };
     settings.reviewRequests = next;
+    await tx.update(orgs).set({ settings, updatedAt: new Date() }).where(eq(orgs.id, orgId));
+    return next;
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* landing-page branding                                               */
+/* ------------------------------------------------------------------ */
+
+export interface LandingBranding {
+  logoUrl: string | null;
+  accentColor: string;
+  tagline: string | null;
+  supportEmail: string | null;
+}
+
+export const DEFAULT_ACCENT_COLOR = "#6366f1";
+const BRANDING_FALLBACK: LandingBranding = {
+  logoUrl: null,
+  accentColor: DEFAULT_ACCENT_COLOR,
+  tagline: null,
+  supportEmail: null,
+};
+
+function coerceBranding(raw: unknown): LandingBranding {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const accent = typeof value.accentColor === "string" && /^#[0-9a-f]{6}$/i.test(value.accentColor)
+    ? value.accentColor
+    : BRANDING_FALLBACK.accentColor;
+  return {
+    logoUrl: typeof value.logoUrl === "string" && value.logoUrl.trim() ? value.logoUrl.trim() : null,
+    accentColor: accent,
+    tagline: typeof value.tagline === "string" && value.tagline.trim() ? value.tagline.trim() : null,
+    supportEmail:
+      typeof value.supportEmail === "string" && value.supportEmail.trim() ? value.supportEmail.trim() : null,
+  };
+}
+
+export async function getLandingBranding(orgId: string): Promise<LandingBranding> {
+  return withOrg(orgId, async (tx) => {
+    const [org] = await tx.select({ settings: orgs.settings }).from(orgs).limit(1);
+    return coerceBranding(((org?.settings ?? {}) as Record<string, unknown>).branding);
+  });
+}
+
+export async function updateLandingBranding(
+  orgId: string,
+  patch: Partial<LandingBranding>,
+): Promise<LandingBranding> {
+  return withOrg(orgId, async (tx) => {
+    const [org] = await tx.select({ settings: orgs.settings }).from(orgs).limit(1);
+    const current = coerceBranding(((org?.settings ?? {}) as Record<string, unknown>).branding);
+    const next: LandingBranding = {
+      logoUrl: patch.logoUrl !== undefined ? patch.logoUrl : current.logoUrl,
+      accentColor: patch.accentColor !== undefined ? (coerceBranding({ ...current, ...patch }).accentColor) : current.accentColor,
+      tagline: patch.tagline !== undefined ? patch.tagline : current.tagline,
+      supportEmail: patch.supportEmail !== undefined ? patch.supportEmail : current.supportEmail,
+    };
+    const settings = { ...((org?.settings ?? {}) as Record<string, unknown>) };
+    settings.branding = next;
     await tx.update(orgs).set({ settings, updatedAt: new Date() }).where(eq(orgs.id, orgId));
     return next;
   });
@@ -366,6 +449,14 @@ export async function sendReviewRequest(
     locationName: context.location?.name ?? "",
     reviewLink: reviewUrl,
   });
+  const renderedSubject = context.template.subject
+    ? renderReviewTemplate(context.template.subject, {
+        firstName: context.contact.name?.split(/\s+/)[0] ?? "there",
+        businessName,
+        locationName: context.location?.name ?? "",
+        reviewLink: reviewUrl,
+      })
+    : null;
 
   const requestId = await withOrg(orgId, async (tx) => {
     const [request] = await tx
@@ -398,6 +489,7 @@ export async function sendReviewRequest(
     const conversationId = await ensureConversationForContact(orgId, input.contactId, input.channel);
     const message = await sendOutboundMessage(orgId, conversationId, {
       body: rendered,
+      subject: renderedSubject,
       senderType: actor.id ? "user" : "system",
       senderId: actor.id,
     });
@@ -469,6 +561,139 @@ export async function sendBulkReviewRequests(
 }
 
 /* ------------------------------------------------------------------ */
+/* follow-up cadence                                                   */
+/* ------------------------------------------------------------------ */
+
+export interface FollowUpResult {
+  due: number;
+  sent: number;
+  skipped: number;
+  failed: number;
+  results: { requestId: string; contactId: string; ok: boolean; reason?: string }[];
+}
+
+/**
+ * Sends the next reminder for requests that have gone quiet. A new short link
+ * is minted per follow-up so the original token can expire independently.
+ */
+export async function sendDueFollowUps(
+  orgId: string,
+  actor: { id: string | null },
+): Promise<FollowUpResult> {
+  const settings = await getReviewSettings(orgId);
+  if (!settings.followUp.enabled || settings.followUp.max <= 0) {
+    return { due: 0, sent: 0, skipped: 0, failed: 0, results: [] };
+  }
+
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - settings.followUp.days * 86_400_000);
+
+  const candidates = await withOrg(orgId, (tx) =>
+    tx
+      .select({
+        id: reviewRequests.id,
+        contactId: reviewRequests.contactId,
+        channel: reviewRequests.channel,
+        followUpCount: reviewRequests.followUpCount,
+        contactName: contacts.name,
+        locationName: locations.name,
+        locationTimezone: locations.timezone,
+      })
+      .from(reviewRequests)
+      .leftJoin(contacts, eq(contacts.id, reviewRequests.contactId))
+      .leftJoin(locations, eq(locations.id, reviewRequests.locationId))
+      .where(
+        and(
+          eq(reviewRequests.orgId, orgId),
+          inArray(reviewRequests.status, ["sent", "clicked"]),
+          isNotNull(reviewRequests.sentAt),
+          lt(reviewRequests.followUpCount, settings.followUp.max),
+          sql`coalesce(${reviewRequests.lastFollowUpAt}, ${reviewRequests.sentAt}) <= ${cutoff.toISOString()}::timestamptz`,
+          sql`not exists (select 1 from ${privateFeedback} f where f.request_id = ${reviewRequests.id})`,
+        ),
+      )
+      .orderBy(reviewRequests.sentAt)
+      .limit(100),
+  );
+
+  const result: FollowUpResult = { due: candidates.length, sent: 0, skipped: 0, failed: 0, results: [] };
+  if (candidates.length === 0) return result;
+
+  const [org] = await withOrg(orgId, (tx) => tx.select({ name: orgs.name }).from(orgs).limit(1));
+  const businessName = org?.name ?? "our business";
+
+  for (const candidate of candidates) {
+    const channel = candidate.channel === "email" ? "email" : "sms";
+    try {
+      const timeZone = candidate.locationTimezone ?? settings.timezone;
+      if (isWithinQuietHours(settings.quietHours, timeZone, now)) {
+        result.skipped += 1;
+        result.results.push({ requestId: candidate.id, contactId: candidate.contactId, ok: false, reason: "quiet hours" });
+        continue;
+      }
+
+      const consent = await checkConsent(orgId, candidate.contactId, channel);
+      if (!consent.allowed) {
+        result.skipped += 1;
+        result.results.push({
+          requestId: candidate.id,
+          contactId: candidate.contactId,
+          ok: false,
+          reason: consent.reason ?? "no consent",
+        });
+        continue;
+      }
+
+      const rawToken = publicToken();
+      const reviewUrl = `${baseUrl()}/r/${rawToken}`;
+      const rendered = renderReviewTemplate(settings.followUp.body, {
+        firstName: candidate.contactName?.split(/\s+/)[0] ?? "there",
+        businessName,
+        locationName: candidate.locationName ?? "",
+        reviewLink: reviewUrl,
+      });
+
+      await withOrg(orgId, (tx) =>
+        tx.insert(reviewTokens).values({
+          orgId,
+          tokenHash: sha256(rawToken),
+          requestId: candidate.id,
+          expiresAt: new Date(now.getTime() + REQUEST_TTL_DAYS * 86_400_000),
+        }),
+      );
+
+      const conversationId = await ensureConversationForContact(orgId, candidate.contactId, channel);
+      await sendOutboundMessage(orgId, conversationId, {
+        body: rendered,
+        subject: "A quick reminder about your review",
+        senderType: actor.id ? "user" : "system",
+        senderId: actor.id,
+      });
+
+      await withOrg(orgId, (tx) =>
+        tx
+          .update(reviewRequests)
+          .set({ followUpCount: candidate.followUpCount + 1, lastFollowUpAt: now })
+          .where(eq(reviewRequests.id, candidate.id)),
+      );
+
+      result.sent += 1;
+      result.results.push({ requestId: candidate.id, contactId: candidate.contactId, ok: true });
+    } catch (error) {
+      result.failed += 1;
+      result.results.push({
+        requestId: candidate.id,
+        contactId: candidate.contactId,
+        ok: false,
+        reason: error instanceof Error ? error.message : "Failed",
+      });
+    }
+  }
+
+  return result;
+}
+
+/* ------------------------------------------------------------------ */
 /* tokens + public landing                                             */
 /* ------------------------------------------------------------------ */
 
@@ -505,6 +730,7 @@ export interface ReviewLanding {
   platforms: { kind: string; displayName: string; url: string | null }[];
   publicUrl: string;
   alreadyResponded: boolean;
+  branding: LandingBranding;
 }
 
 export async function resolveReviewLanding(
@@ -522,7 +748,7 @@ export async function resolveReviewLanding(
       .limit(1);
     if (!request) return null;
 
-    const [org] = await tx.select({ name: orgs.name }).from(orgs).limit(1);
+    const [org] = await tx.select({ name: orgs.name, settings: orgs.settings }).from(orgs).limit(1);
     let locationName: string | null = null;
     if (request.locationId) {
       const [loc] = await tx
@@ -562,6 +788,7 @@ export async function resolveReviewLanding(
     }
 
     const businessName = org?.name ?? "our business";
+    const branding = coerceBranding(((org?.settings ?? {}) as Record<string, unknown>).branding);
     const platforms = platformRows.map((row) => ({
       kind: row.kind,
       displayName: row.displayName,
@@ -577,6 +804,7 @@ export async function resolveReviewLanding(
       platforms,
       publicUrl: platforms.find((p) => p.url)?.url ?? fallbackReviewUrl(businessName),
       alreadyResponded: Boolean(existingFeedback),
+      branding,
     };
   });
 }
@@ -655,6 +883,8 @@ export async function listReviewRequests(orgId: string, filters: { limit?: numbe
         sentAt: reviewRequests.sentAt,
         clickedAt: reviewRequests.clickedAt,
         reviewedAt: reviewRequests.reviewedAt,
+        followUpCount: reviewRequests.followUpCount,
+        lastFollowUpAt: reviewRequests.lastFollowUpAt,
         createdAt: reviewRequests.createdAt,
         contactId: reviewRequests.contactId,
         contactName: contacts.name,

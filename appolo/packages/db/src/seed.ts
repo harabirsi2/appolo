@@ -269,6 +269,29 @@ async function main(): Promise<void> {
       )[0]!;
     }
 
+    let emailChannel = (
+      await tx
+        .select()
+        .from(channels)
+        .where(and(eq(channels.orgId, orgId), eq(channels.kind, "email")))
+        .limit(1)
+    )[0];
+    if (!emailChannel) {
+      emailChannel = (
+        await tx
+          .insert(channels)
+          .values({
+            orgId,
+            locationId,
+            kind: "email",
+            provider: "mock",
+            providerRef: process.env.EMAIL_FROM ?? null,
+            status: "active",
+          })
+          .returning()
+      )[0]!;
+    }
+
     const existingNumber = await tx
       .select({ id: phoneNumbers.id })
       .from(phoneNumbers)
@@ -409,6 +432,7 @@ async function main(): Promise<void> {
     }
 
     void webchatChannel;
+    void emailChannel;
   });
 
   // --- Phase 2 fixtures: review templates, public links, settings ---
@@ -534,6 +558,12 @@ async function main(): Promise<void> {
         timezone: "America/Denver",
         cooldownDays: 90,
         defaultPlatformKind: "google",
+        followUp: {
+          enabled: true,
+          days: 3,
+          max: 1,
+          body: "Hi {{first_name}}, just a gentle reminder — if you have a moment, a quick review for {{business_name}} would really help us out: {{review_link}}",
+        },
       };
       await tx.update(orgs).set({ settings }).where(eq(orgs.id, orgId));
     }

@@ -14,7 +14,7 @@ import {
   type SignupInput,
 } from "@appolo/core";
 
-const { orgs, locations, users, memberships, sessions } = schema;
+const { orgs, locations, users, memberships, sessions, channels } = schema;
 
 const SESSION_DAYS = 30;
 
@@ -92,6 +92,17 @@ export async function signUp(input: SignupInput): Promise<AuthResult> {
           name: input.locationName ?? "Main location",
           timezone: input.timezone,
         });
+        const [location] = await tx
+          .select({ id: locations.id })
+          .from(locations)
+          .where(eq(locations.orgId, orgId))
+          .limit(1);
+        if (location) {
+          await tx.insert(channels).values([
+            { orgId, locationId: location.id, kind: "sms", provider: "mock", status: "active" },
+            { orgId, locationId: location.id, kind: "email", provider: "mock", status: "active" },
+          ]);
+        }
         return user;
       });
 

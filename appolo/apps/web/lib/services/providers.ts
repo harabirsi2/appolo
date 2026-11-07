@@ -89,6 +89,90 @@ export function getSmsProvider(): SmsProvider {
   return mockProvider();
 }
 
+/* ------------------------------------------------------------------ */
+/* email                                                               */
+/* ------------------------------------------------------------------ */
+
+export interface SendEmailInput {
+  to: string;
+  from?: string | null;
+  subject?: string | null;
+  body: string;
+  /** Stable per-message key so provider retries cannot duplicate a send. */
+  idempotencyKey: string;
+}
+
+export interface SendEmailResult {
+  provider: string;
+  providerSid: string;
+  status: "sent" | "delivered" | "queued";
+}
+
+export interface EmailProvider {
+  readonly name: string;
+  sendEmail(input: SendEmailInput): Promise<SendEmailResult>;
+}
+
+const DEFAULT_EMAIL_FROM = "Appolo <reviews@appolo.local>";
+const DEFAULT_EMAIL_SUBJECT = "A message from our team";
+
+/** Dev/provider-less adapter; records the send locally as delivered. */
+function mockEmailProvider(): EmailProvider {
+  return {
+    name: "mock",
+    async sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
+      return {
+        provider: "mock",
+        providerSid: `EM_MOCK_${input.idempotencyKey.replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}_${randomUUID().slice(0, 6)}`,
+        status: "delivered",
+      };
+    },
+  };
+}
+
+function resendProvider(apiKey: string, defaultFrom: string): EmailProvider {
+  return {
+    name: "resend",
+    async sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: input.from || defaultFrom,
+          to: [input.to],
+          subject: input.subject?.trim() || DEFAULT_EMAIL_SUBJECT,
+          text: input.body,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        id?: string;
+        message?: string;
+      };
+
+      if (!response.ok || !payload.id) {
+        throw new Error(`Resend send failed (${response.status}): ${payload.message ?? "unknown error"}`);
+      }
+
+      return { provider: "resend", providerSid: payload.id, status: "sent" };
+    },
+  };
+}
+
+export function isEmailConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim());
+}
+
+export function getEmailProvider(): EmailProvider {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  const from = process.env.EMAIL_FROM?.trim();
+  if (apiKey && from) return resendProvider(apiKey, from);
+  return mockEmailProvider();
+}
+
 /**
  * Validates Twilio's X-Twilio-Signature: base64(HMAC-SHA1(authToken,
  * url + sorted(key+value))). Skipped when no auth token is configured, which

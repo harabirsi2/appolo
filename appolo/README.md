@@ -99,9 +99,17 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
 - **Request engine:** single and bulk requests from contacts, with consent,
   quiet-hours, per-contact cooldown, and daily-cap checks before anything sends.
   Requests are logged as messages in the shared inbox.
+- **Email channel:** outbound email through a mock adapter by default or the
+  Resend REST API when `RESEND_API_KEY` / `EMAIL_FROM` are set. Review email
+  templates include a subject line.
+- **Follow-up cadence:** configurable reminders for requests that go quiet
+  (`followUp.days` / `followUp.max`), minting a fresh short link each time.
+  Consent and quiet hours are re-checked on every reminder.
 - **Tokenized landing page:** `/r/[token]` shows the business name, a star
   rating, and public review buttons for Google/Facebook. Private feedback is
   optional and never gates or blocks the public link.
+- **Landing branding:** org logo, accent colour, tagline, and support email,
+  editable from the Reviews page and applied to every public review link.
 - **Public API:** `/api/public/reviews/[token]` resolves a link and records the
   click; `/api/public/reviews/feedback` accepts private feedback.
 - **Review inbox:** recent public reviews, per-review reply drafts, platform

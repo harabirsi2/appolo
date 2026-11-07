@@ -49,14 +49,28 @@ export default async function ReviewLandingPage({
   }
 
   const publicButtons = landing.platforms.filter((platform) => platform.url);
+  const accent = landing.branding.accentColor;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-4 py-12">
       <div className="mb-6 text-center">
+        {landing.branding.logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={landing.branding.logoUrl}
+            alt={`${landing.businessName} logo`}
+            className="mx-auto mb-4 h-12 w-auto max-w-[180px] object-contain"
+          />
+        ) : null}
         <Badge tone="brand">Review request</Badge>
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">
           How was your visit to {landing.businessName}?
         </h1>
+        {landing.branding.tagline ? (
+          <p className="mt-1 text-sm font-medium" style={{ color: accent }}>
+            {landing.branding.tagline}
+          </p>
+        ) : null}
         <p className="mt-2 text-sm text-muted">
           {landing.contactName ? `Hi ${landing.contactName.split(/\s+/)[0]}, t` : "T"}hanks for stopping by
           {landing.locationName ? ` our ${landing.locationName} location` : ""}. Your feedback helps us improve
@@ -89,7 +103,8 @@ export default async function ReviewLandingPage({
                 href={platform.url ?? "#"}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex h-11 items-center justify-center rounded-lg bg-brand px-4 text-sm font-medium text-white shadow-sm hover:bg-brand-strong"
+                style={{ backgroundColor: accent }}
+                className="inline-flex h-11 items-center justify-center rounded-lg px-4 text-sm font-medium text-white shadow-sm hover:opacity-90"
               >
                 Review us on {platform.displayName}
               </a>
@@ -99,7 +114,8 @@ export default async function ReviewLandingPage({
               href={landing.publicUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex h-11 items-center justify-center rounded-lg bg-brand px-4 text-sm font-medium text-white shadow-sm hover:bg-brand-strong sm:col-span-2"
+              style={{ backgroundColor: accent }}
+              className="inline-flex h-11 items-center justify-center rounded-lg px-4 text-sm font-medium text-white shadow-sm hover:opacity-90 sm:col-span-2"
             >
               Leave a public review
             </a>
@@ -168,7 +184,15 @@ export default async function ReviewLandingPage({
         </Card>
       </div>
 
-      <p className="mt-6 text-center text-xs text-muted-2">Powered by Appolo</p>
+      {landing.branding.supportEmail ? (
+        <p className="mt-6 text-center text-xs text-muted-2">
+          Questions?{" "}
+          <a href={`mailto:${landing.branding.supportEmail}`} className="underline hover:text-ink">
+            {landing.branding.supportEmail}
+          </a>
+        </p>
+      ) : null}
+      <p className="mt-3 text-center text-xs text-muted-2">Powered by Appolo</p>
     </main>
   );
 }

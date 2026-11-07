@@ -3,6 +3,7 @@ import { can, reviewPlatformKinds } from "@appolo/core";
 import { requireSession } from "@/lib/session";
 import { withOrg, schema } from "@/lib/db";
 import {
+  getLandingBranding,
   getReviewSettings,
   listContactOptions,
   listPrivateFeedback,
@@ -18,8 +19,10 @@ import {
   createReviewTemplateAction,
   deleteReviewTemplateAction,
   replyToReviewAction,
+  runFollowUpsAction,
   sendReviewRequestAction,
   syncReviewsAction,
+  updateBrandingAction,
   updateReviewSettingsAction,
 } from "@/lib/actions";
 
@@ -53,7 +56,7 @@ export default async function ReviewsPage({
   const { error, ok } = await searchParams;
   const orgId = session.org.id;
 
-  const [stats, requests, reviews, feedback, templates, platforms, contacts, settings, locationRows] =
+  const [stats, requests, reviews, feedback, templates, platforms, contacts, settings, branding, locationRows] =
     await Promise.all([
       reviewStats(orgId),
       listReviewRequests(orgId, { limit: 25 }),
@@ -63,6 +66,7 @@ export default async function ReviewsPage({
       listReviewPlatforms(orgId),
       listContactOptions(orgId),
       getReviewSettings(orgId),
+      getLandingBranding(orgId),
       withOrg(orgId, (tx) => tx.select({ id: locations.id, name: locations.name }).from(locations)),
     ]);
 
@@ -164,6 +168,7 @@ export default async function ReviewsPage({
         <Card>
           <CardTitle>Quiet hours &amp; caps</CardTitle>
           {canRequest ? (
+            <>
             <form action={updateReviewSettingsAction} className="space-y-3">
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" name="quietEnabled" defaultChecked={settings.quietHours.enabled} className="h-4 w-4 rounded border-border" />
@@ -193,8 +198,35 @@ export default async function ReviewsPage({
                   ))}
                 </Select>
               </Field>
+
+              <div className="space-y-3 border-t border-border pt-3">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" name="followUpEnabled" defaultChecked={settings.followUp.enabled} className="h-4 w-4 rounded border-border" />
+                  <span>Send follow-up reminders</span>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="After (days)">
+                    <Input name="followUpDays" type="number" min={0} defaultValue={settings.followUp.days} />
+                  </Field>
+                  <Field label="Max follow-ups">
+                    <Input name="followUpMax" type="number" min={0} defaultValue={settings.followUp.max} />
+                  </Field>
+                </div>
+                <Field label="Follow-up message" hint="Same variables as templates, including {{review_link}}.">
+                  <Textarea name="followUpBody" rows={3} defaultValue={settings.followUp.body} />
+                </Field>
+              </div>
+
               <Button type="submit" variant="secondary" size="sm">Save settings</Button>
             </form>
+            <form action={runFollowUpsAction} className="mt-3 border-t border-border pt-3">
+              <Button type="submit" variant="ghost" size="sm">Run due follow-ups</Button>
+              <p className="mt-1 text-xs text-muted-2">
+                Sends one reminder to requests quiet for {settings.followUp.days}+ days, up to{" "}
+                {settings.followUp.max} time{settings.followUp.max === 1 ? "" : "s"}.
+              </p>
+            </form>
+            </>
           ) : (
             <p className="text-sm text-muted">Your role cannot change review settings.</p>
           )}
@@ -214,6 +246,7 @@ export default async function ReviewsPage({
                     <th className="pb-2 font-medium">Contact</th>
                     <th className="pb-2 font-medium">Channel</th>
                     <th className="pb-2 font-medium">Status</th>
+                    <th className="pb-2 font-medium">Follow-ups</th>
                     <th className="pb-2 font-medium">Sent</th>
                     <th className="pb-2 font-medium">Clicked</th>
                   </tr>
@@ -226,6 +259,7 @@ export default async function ReviewsPage({
                       <td className="py-3 pr-3">
                         <Badge tone={STATUS_TONES[request.status] ?? "neutral"}>{request.status}</Badge>
                       </td>
+                      <td className="py-3 pr-3 text-muted">{request.followUpCount}</td>
                       <td className="py-3 pr-3 text-muted">{formatDate(request.sentAt)}</td>
                       <td className="py-3 text-muted">{formatDate(request.clickedAt)}</td>
                     </tr>
@@ -400,6 +434,39 @@ export default async function ReviewsPage({
           )}
         </Card>
       </div>
+
+      <Card>
+        <CardTitle action={<Badge tone="brand">{branding.accentColor}</Badge>}>Landing page branding</CardTitle>
+        {canRequest ? (
+          <form action={updateBrandingAction} className="grid gap-3 sm:grid-cols-2">
+            <Field label="Logo URL" hint="Shown above the review prompt.">
+              <Input name="logoUrl" defaultValue={branding.logoUrl ?? ""} placeholder="https://example.com/logo.png" />
+            </Field>
+            <Field label="Accent colour">
+              <Input
+                name="accentColor"
+                type="color"
+                defaultValue={branding.accentColor}
+                className="h-10 w-full cursor-pointer p-1"
+              />
+            </Field>
+            <Field label="Tagline">
+              <Input name="tagline" defaultValue={branding.tagline ?? ""} placeholder="Friendly care, every visit." />
+            </Field>
+            <Field label="Support email">
+              <Input name="supportEmail" type="email" defaultValue={branding.supportEmail ?? ""} placeholder="hello@business.com" />
+            </Field>
+            <div className="sm:col-span-2">
+              <Button type="submit" variant="secondary" size="sm">Save branding</Button>
+            </div>
+          </form>
+        ) : (
+          <p className="text-sm text-muted">Your role cannot change branding.</p>
+        )}
+        <p className="mt-3 text-xs text-muted-2">
+          Applies to every <span className="font-mono">/r/[token]</span> review page. Clear a field to use the default.
+        </p>
+      </Card>
 
       <Card>
         <CardTitle action={<Badge>{reviews.length} recent</Badge>}>Public reviews</CardTitle>

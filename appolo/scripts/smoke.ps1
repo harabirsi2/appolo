@@ -348,7 +348,53 @@ T "private feedback accepted" ($feedbackRes.code -eq 200 -and $feedbackRes.json.
 $resolveAfter = P2-Get "$Base/api/public/reviews/$reviewToken"
 T "landing marks feedback received" ($resolveAfter.json.alreadyResponded -eq $true)
 
-# 6. review inbox + platform sync
+# 6. landing-page branding appears on the public link
+$branding = P2-Patch "$Base/api/reviews/branding" @{
+    accentColor  = "#0ea5e9"
+    tagline      = "Smoke test tagline"
+    supportEmail = "help@appolo.test"
+}
+T "landing branding saved" ($branding.code -eq 200 -and $branding.json.branding.accentColor -eq "#0ea5e9")
+$brandedResolve = P2-Get "$Base/api/public/reviews/$reviewToken"
+T "landing returns branding" ($brandedResolve.json.branding.tagline -eq "Smoke test tagline")
+
+# 7. email review request uses the email channel + template
+$emailStamp = [guid]::NewGuid().ToString("N").Substring(0, 8)
+$emailContact = P2-Post "$Base/api/contacts" @{
+    name     = "Email Review $emailStamp"
+    channels = @(@{ kind = "email"; value = "review-$emailStamp@appolo.test" })
+}
+$emailContactId = $emailContact.json.contact.id
+T "email review contact created" ($emailContact.code -eq 201)
+$emailGrant = P2-Post "$Base/api/contacts/$emailContactId/consent" @{ channel = "email"; status = "granted"; source = "smoke" }
+T "email consent granted" ($emailGrant.code -eq 201)
+
+$emailSend = P2-Post "$Base/api/review-requests" @{
+    contactId    = $emailContactId
+    channel      = "email"
+    platformKind = "google"
+    locationId   = $smokeLocationId
+}
+T "email review request sent" ($emailSend.code -eq 201 -and $emailSend.json.status -eq "sent")
+$emailConvos = P2-Get "$Base/api/conversations?channel=email"
+T "email conversation appears in the inbox" (@($emailConvos.json.conversations).Count -ge 1)
+
+# 8. follow-up cadence sends once, then stops at the max
+$followSettings = P2-Patch "$Base/api/reviews/settings" @{
+    followUp = @{ enabled = $true; days = 0; max = 1; body = "Reminder: {{review_link}}" }
+}
+T "follow-up settings saved" ($followSettings.code -eq 200 -and $followSettings.json.settings.followUp.max -eq 1)
+
+$follows1 = P2-Post "$Base/api/reviews/follow-ups" @{}
+T "follow-up run sends reminders" ($follows1.code -eq 200 -and $follows1.json.sent -ge 1)
+$follows2 = P2-Post "$Base/api/reviews/follow-ups" @{}
+T "follow-up respects the max" ($follows2.code -eq 200 -and $follows2.json.sent -eq 0)
+
+$requestsAfter = P2-Get "$Base/api/review-requests"
+$followedReq = @($requestsAfter.json.requests) | Where-Object { $_.contactId -eq $emailContactId -and $_.followUpCount -ge 1 } | Select-Object -First 1
+T "request records the follow-up" ($null -ne $followedReq)
+
+# 9. review inbox + platform sync
 $reviewList = P2-Get "$Base/api/reviews"
 T "reviews list returns stats" ($reviewList.code -eq 200 -and $null -ne $reviewList.json.stats.total)
 
@@ -360,13 +406,25 @@ $reviewsStatus = (curl.exe -s -b $p2jar -o $reviewsHtml -w "%{http_code}" "$Base
 $reviewsContent = Get-Content -Raw $reviewsHtml -ErrorAction SilentlyContinue
 T "reviews page renders" ($reviewsStatus -eq "200" -and $reviewsContent -match "Send a review request")
 
-# restore the demo quiet-hours policy
+# restore the demo settings and branding
 P2-Patch "$Base/api/reviews/settings" @{
     timezone   = "America/Denver"
     quietHours = @{ enabled = $true; start = "21:00"; end = "08:00" }
+    followUp   = @{
+        enabled = $true
+        days    = 3
+        max     = 1
+        body    = "Hi {{first_name}}, just a gentle reminder - if you have a moment, a quick review for {{business_name}} would really help us out: {{review_link}}"
+    }
+} | Out-Null
+P2-Patch "$Base/api/reviews/branding" @{
+    accentColor  = "#6366f1"
+    logoUrl      = $null
+    tagline      = $null
+    supportEmail = $null
 } | Out-Null
 
-$reviewContactIds = @($reviewContactId)
+$reviewContactIds = @($reviewContactId, $emailContactId)
 $smokeTemplateId = $templateId
 
 Remove-Item $p2jar, $p2resp, $p2body, $landingHtml, $reviewsHtml -Force -ErrorAction SilentlyContinue

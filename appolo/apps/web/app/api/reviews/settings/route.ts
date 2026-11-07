@@ -74,6 +74,24 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       }
       next.defaultPlatformKind = patch.defaultPlatformKind;
     }
+    if (patch.followUp !== undefined) {
+      const follow = patch.followUp as { enabled?: unknown; days?: unknown; max?: unknown; body?: unknown };
+      const days = typeof follow.days === "number" ? follow.days : 3;
+      const max = typeof follow.max === "number" ? follow.max : 1;
+      const body = typeof follow.body === "string" ? follow.body.trim() : "";
+      if (days < 0 || max < 0) {
+        return jsonError("Follow-up days and max must be positive numbers.", 400, "INVALID_INPUT");
+      }
+      if (!body) {
+        return jsonError("Follow-up body cannot be empty.", 400, "INVALID_INPUT");
+      }
+      next.followUp = {
+        enabled: typeof follow.enabled === "boolean" ? follow.enabled : true,
+        days,
+        max,
+        body,
+      };
+    }
 
     const settings = await updateReviewSettings(session.org.id, next);
     return NextResponse.json({ settings });

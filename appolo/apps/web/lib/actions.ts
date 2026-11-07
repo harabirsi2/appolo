@@ -34,9 +34,11 @@ import {
   deleteReviewTemplate,
   replyToReview,
   sendBulkReviewRequests,
+  sendDueFollowUps,
   sendReviewRequest,
   submitPrivateFeedback,
   syncPlatformReviews,
+  updateLandingBranding,
   updateReviewSettings,
 } from "./services/reviews";
 import { isDomainError } from "./services/errors";
@@ -540,6 +542,12 @@ export async function updateReviewSettingsAction(formData: FormData): Promise<vo
       cooldownDays,
       timezone: stringField(formData, "timezone") ?? "UTC",
       defaultPlatformKind: stringField(formData, "defaultPlatformKind") ?? "google",
+      followUp: {
+        enabled: formData.get("followUpEnabled") === "on",
+        days: Math.max(0, Number(stringField(formData, "followUpDays") ?? "3") || 0),
+        max: Math.max(0, Number(stringField(formData, "followUpMax") ?? "1") || 0),
+        body: stringField(formData, "followUpBody") ?? "",
+      },
     });
   } catch (error) {
     fail("/app/reviews", error);
@@ -547,6 +555,64 @@ export async function updateReviewSettingsAction(formData: FormData): Promise<vo
 
   revalidatePath("/app/reviews");
   redirect("/app/reviews?ok=Review%20settings%20saved");
+}
+
+export async function runFollowUpsAction(): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "reviews:request")) {
+    redirect(`/app/reviews?error=${encodeURIComponent("Your role cannot send follow-ups.")}`);
+  }
+
+  let result;
+  try {
+    result = await sendDueFollowUps(session.org.id, { id: session.user.id });
+  } catch (error) {
+    fail("/app/reviews", error);
+  }
+
+  revalidatePath("/app/reviews");
+  revalidatePath("/app/inbox");
+  const message =
+    result.due === 0
+      ? "No follow-ups are due yet."
+      : `Sent ${result.sent}, skipped ${result.skipped}, failed ${result.failed}.`;
+  redirect(`/app/reviews?ok=${encodeURIComponent(message)}`);
+}
+
+export async function updateBrandingAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "reviews:request")) {
+    redirect(`/app/reviews?error=${encodeURIComponent("Your role cannot change branding.")}`);
+  }
+
+  const accentColor = stringField(formData, "accentColor") ?? "#6366f1";
+  if (!/^#[0-9a-f]{6}$/i.test(accentColor)) {
+    redirect(`/app/reviews?error=${encodeURIComponent("Accent colour must be a hex value like #6366f1.")}`);
+  }
+
+  const logoUrl = stringField(formData, "logoUrl") ?? null;
+  if (logoUrl && !/^https?:\/\//i.test(logoUrl)) {
+    redirect(`/app/reviews?error=${encodeURIComponent("Logo URL must start with http:// or https://.")}`);
+  }
+
+  const supportEmail = stringField(formData, "supportEmail") ?? null;
+  if (supportEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(supportEmail)) {
+    redirect(`/app/reviews?error=${encodeURIComponent("Support email looks invalid.")}`);
+  }
+
+  try {
+    await updateLandingBranding(session.org.id, {
+      logoUrl,
+      accentColor,
+      tagline: stringField(formData, "tagline") ?? null,
+      supportEmail,
+    });
+  } catch (error) {
+    fail("/app/reviews", error);
+  }
+
+  revalidatePath("/app/reviews");
+  redirect("/app/reviews?ok=Landing%20page%20branding%20saved");
 }
 
 export async function syncReviewsAction(formData: FormData): Promise<void> {

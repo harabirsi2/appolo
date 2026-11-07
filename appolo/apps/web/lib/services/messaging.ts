@@ -9,7 +9,7 @@ import {
   type ConsentRecordLike,
 } from "@appolo/core";
 import { getAdminDb, withOrg, schema, type Tx } from "@/lib/db";
-import { getSmsProvider } from "./providers";
+import { getEmailProvider, getSmsProvider } from "./providers";
 import { DomainError } from "./errors";
 
 const {
@@ -236,7 +236,7 @@ function destinationFor(
 export async function sendOutboundMessage(
   orgId: string,
   conversationId: string,
-  input: { body: string; senderType: SenderType; senderId?: string | null },
+  input: { body: string; subject?: string | null; senderType: SenderType; senderId?: string | null },
 ) {
   const context = await withOrg(orgId, async (tx) => {
     const [row] = await tx
@@ -329,6 +329,32 @@ export async function sendOutboundMessage(
       throw new DomainError(
         "SEND_FAILED",
         error instanceof Error ? error.message : "The SMS provider rejected the message.",
+        502,
+      );
+    }
+  }
+
+  if (channelKind === "email") {
+    try {
+      const result = await getEmailProvider().sendEmail({
+        to: destination!,
+        from: context.channelRef,
+        subject: input.subject ?? null,
+        body: input.body,
+        idempotencyKey: queued.id,
+      });
+      providerSid = result.providerSid;
+      finalStatus = result.status as OutboundStatus;
+    } catch (error) {
+      await withOrg(orgId, (tx) =>
+        tx
+          .update(messages)
+          .set({ status: "failed", errorCode: "PROVIDER_ERROR" })
+          .where(eq(messages.id, queued.id)),
+      );
+      throw new DomainError(
+        "SEND_FAILED",
+        error instanceof Error ? error.message : "The email provider rejected the message.",
         502,
       );
     }
@@ -843,11 +869,34 @@ export async function ensureConversationForContact(
   channelKind: "sms" | "email" | "webchat",
 ): Promise<string> {
   return withOrg(orgId, async (tx) => {
-    const [channel] = await tx
+    let [channel] = await tx
       .select({ id: channels.id, locationId: channels.locationId })
       .from(channels)
       .where(and(eq(channels.orgId, orgId), eq(channels.kind, channelKind)))
       .limit(1);
+
+    if (!channel) {
+      // Lazily provision a channel so review requests work on workspaces that
+      // predate a given channel kind. The provider falls back to its mock when
+      // no credentials are configured.
+      const [location] = await tx
+        .select({ locationId: channels.locationId })
+        .from(channels)
+        .where(eq(channels.orgId, orgId))
+        .limit(1);
+      const [created] = await tx
+        .insert(channels)
+        .values({
+          orgId,
+          locationId: location?.locationId ?? null,
+          kind: channelKind,
+          provider: channelKind === "webchat" ? "appolo" : "mock",
+          status: "active",
+        })
+        .returning({ id: channels.id, locationId: channels.locationId });
+      channel = created ?? undefined;
+    }
+
     return ensureConversation(tx, orgId, contactId, channel?.id ?? null, channel?.locationId ?? null);
   });
 }

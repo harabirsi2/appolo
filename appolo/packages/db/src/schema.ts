@@ -519,6 +519,8 @@ export const reviewRequests = pgTable(
     sentAt: timestamp("sent_at", { withTimezone: true }),
     clickedAt: timestamp("clicked_at", { withTimezone: true }),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    followUpCount: integer("follow_up_count").notNull().default(0),
+    lastFollowUpAt: timestamp("last_follow_up_at", { withTimezone: true }),
     platformKind: reviewPlatformKindEnum("platform_kind"),
     campaignId: uuid("campaign_id"),
     createdAt: createdAt(),
