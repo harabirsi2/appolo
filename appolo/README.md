@@ -6,7 +6,8 @@ Reviews, shared inbox, AI employee, contacts, reporting — **no payments.**
 > **Status:** Phase 0 (foundations), Phase 1 (contacts + inbox), Phase 2
 > (review requests + landing pages), and Phase 3 (review management,
 > automations, campaigns, reporting) are implemented, verified, and committed.
-> See `ROADMAP.md` for what comes next.
+> The first Phase 4 slice — a grounded **AI employee** with human handoff — is
+> implemented and verified. See `ROADMAP.md` for what comes next.
 
 ## Documents
 
@@ -154,6 +155,28 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
 - **Verification:** `pnpm smoke` covers the filters, AI draft, publish,
   assignment/flag, widget + JSON-LD, reports, CSV export, keyword auto-reply,
   campaign send with consent, the audit log, and the contact timeline.
+
+## What the Phase 4 preview ships (AI employee)
+
+- **Grounded auto-answers:** the AI employee reads one article from the org
+  knowledge base per inbound SMS or webchat message. It only replies when a
+  knowledge article is a confident match; every answer is quoted from the
+  article, never invented.
+- **Deterministic guardrails:** escalation keywords, blocked topics, and a
+  confidence threshold are enforced in `@appolo/core` *before* anything is sent,
+  so behaviour never depends on a model provider. No match (or a blocked topic /
+  escalation keyword) becomes a human handoff.
+- **Human handoff:** an escalation marks the AI conversation `handoff` and drops
+  an internal note on the thread so a teammate can pick it up. Every reply and
+  escalation is audited (`ai.replied` / `ai.escalated`).
+- **Knowledge base UI:** `/app/ai` shows AI volume, replies, and handoffs, an
+  editable guardrail form, and knowledge-article CRUD. Enabled/paused state,
+  greeting, keyword lists, and threshold all live in one place.
+- **API:** `/api/ai/agent` (GET/PATCH) and `/api/ai/knowledge` (+ `/[id]`
+  DELETE) behind the `ai:manage` capability.
+- **Verification:** `pnpm smoke` enables the AI employee, confirms a grounded
+  knowledge reply, confirms an escalation keyword produces a handoff note, and
+  restores the seeded disabled state.
 
 ## Commands
 

@@ -387,6 +387,15 @@ scheduler (every 15 min, per connected platform)
 
 ## 9. AI subsystem
 
+> **Implemented (Phase 4 preview):** the inbound path calls `decideAiAction` in
+> `@appolo/core` **before** any model call. Guardrails (escalation keywords,
+> blocked topics, confidence threshold) and keyword retrieval run
+> deterministically over one knowledge article per doc; the reply quotes the
+> matched article verbatim. A confident match replies as `sender_type = ai`; a
+> blocked topic, escalation keyword, or low-confidence miss writes an internal
+> note, sets the `ai_conversation` to `handoff`, and audits the outcome. The
+> gateway/orchestrator/tools/evals below are the target design.
+
 ### 9.1 Components
 
 - **Gateway** — one `generate()` / `embed()` interface; provider adapters;

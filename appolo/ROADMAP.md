@@ -92,6 +92,11 @@ automations and broadcasts run with consent and caps.
 
 **Goal:** answer, qualify, book, hand off.
 
+> **Status:** first slice shipped — grounded SMS/webchat answers from an org
+> knowledge base with deterministic guardrails and human handoff. See the
+> "Phase 4 preview" section of `README.md`. Calendar booking, playbooks,
+> provider-agnostic model gateway, evals, and connectors remain.
+
 - AI gateway with provider adapters, budgets, caching.
 - Orchestrator + tools + guardrails. (AI-01, AI-02, AI-12)
 - Knowledge base ingestion + RAG with citations. (AI-06)

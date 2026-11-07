@@ -3,6 +3,7 @@ import { firstIssue, webchatCustomerSchema } from "@appolo/core";
 import { apiError, jsonError } from "@/lib/api";
 import { getWebchatMessages, receiveWebchatMessage } from "@/lib/services/messaging";
 import { runKeywordAutomations } from "@/lib/services/automations";
+import { answerInboundMessage } from "@/lib/services/ai-employee";
 
 export const dynamic = "force-dynamic";
 
@@ -24,14 +25,29 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
 
     const result = await receiveWebchatMessage(key, parsed.data);
     if (result.contactId) {
+      let automationSent = false;
       try {
-        await runKeywordAutomations(result.orgId, {
+        const automation = await runKeywordAutomations(result.orgId, {
           contactId: result.contactId,
           channel: "webchat",
           body: parsed.data.body,
         });
+        automationSent = automation.sent;
       } catch (automationError) {
         console.error("[webchat] automation failed:", automationError);
+      }
+
+      if (!automationSent) {
+        try {
+          await answerInboundMessage(result.orgId, {
+            contactId: result.contactId,
+            channel: "webchat",
+            body: parsed.data.body,
+            conversationId: result.conversationId,
+          });
+        } catch (aiError) {
+          console.error("[webchat] ai employee failed:", aiError);
+        }
       }
     }
     return NextResponse.json(result, { status: 201 });

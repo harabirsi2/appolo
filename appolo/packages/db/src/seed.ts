@@ -42,6 +42,9 @@ const {
   campaignRecipients,
   tags,
   contactTags,
+  aiAgents,
+  aiKnowledgeDocs,
+  aiKnowledgeChunks,
 } = schema;
 
 const db = getAdminDb();
@@ -681,6 +684,63 @@ async function main(): Promise<void> {
             status: "pending",
           })),
         );
+      }
+    }
+  });
+
+  // --- Phase 4 fixtures: AI employee (disabled by default) + knowledge base ---
+  await withOrgAdmin(orgId, async (tx) => {
+    const agentCount = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(aiAgents)
+      .where(eq(aiAgents.orgId, orgId));
+    if ((agentCount[0]?.n ?? 0) === 0) {
+      await tx.insert(aiAgents).values({
+        orgId,
+        name: "AI Employee",
+        enabled: false,
+        voiceProfile: {
+          enabled: false,
+          greeting: "Thanks for reaching out!",
+          escalationKeywords: ["human", "manager", "refund", "complaint"],
+          blockedTopics: ["medical advice", "legal advice"],
+          confidenceThreshold: 0.34,
+        },
+      });
+    }
+
+    const docCount = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(aiKnowledgeDocs)
+      .where(eq(aiKnowledgeDocs.orgId, orgId));
+    if ((docCount[0]?.n ?? 0) === 0) {
+      const docs = [
+        {
+          title: "Business hours",
+          content: "We are open Monday to Friday, 9am to 6pm, and Saturday 10am to 4pm. We are closed on Sundays.",
+        },
+        {
+          title: "Location and parking",
+          content: "We are at 100 Main Street. Free parking is available behind the building, enter from Oak Avenue.",
+        },
+      ];
+      for (const doc of docs) {
+        const [created] = await tx
+          .insert(aiKnowledgeDocs)
+          .values({
+            orgId,
+            title: doc.title,
+            sourceType: "text",
+            status: "ready",
+            checksum: Buffer.from(doc.content).toString("base64url").slice(0, 32),
+          })
+          .returning({ id: aiKnowledgeDocs.id });
+        await tx.insert(aiKnowledgeChunks).values({
+          orgId,
+          docId: created!.id,
+          content: doc.content,
+          tokenCount: Math.ceil(doc.content.length / 4),
+        });
       }
     }
   });

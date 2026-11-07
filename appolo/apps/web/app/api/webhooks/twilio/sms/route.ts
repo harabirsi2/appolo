@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { verifyTwilioSignature } from "@/lib/services/providers";
 import { receiveInboundSms } from "@/lib/services/messaging";
 import { runKeywordAutomations } from "@/lib/services/automations";
+import { answerInboundMessage } from "@/lib/services/ai-employee";
 import { isDomainError } from "@/lib/services/errors";
 
 export const dynamic = "force-dynamic";
@@ -55,14 +56,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Keyword automations are best-effort: a failure must not make Twilio
     // retry, and STOP/HELP/START are handled above (action != "message").
     if (result.action === "message" && result.contactId) {
+      let automationSent = false;
       try {
-        await runKeywordAutomations(result.orgId, {
+        const automation = await runKeywordAutomations(result.orgId, {
           contactId: result.contactId,
           channel: "sms",
           body,
         });
+        automationSent = automation.sent;
       } catch (automationError) {
         console.error("[twilio/sms] automation failed:", automationError);
+      }
+
+      // The AI employee only answers when no keyword automation already did.
+      if (!automationSent) {
+        try {
+          await answerInboundMessage(result.orgId, {
+            contactId: result.contactId,
+            channel: "sms",
+            body,
+            conversationId: result.conversationId ?? undefined,
+          });
+        } catch (aiError) {
+          console.error("[twilio/sms] ai employee failed:", aiError);
+        }
       }
     }
 

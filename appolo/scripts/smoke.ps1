@@ -651,6 +651,49 @@ foreach ($p3page in $p3pages) {
     Remove-Item $pageOut -Force -ErrorAction SilentlyContinue
 }
 
+# --- Phase 4: AI employee (grounded replies + human handoff) ---
+Write-Host ""
+Write-Host "Phase 4: AI employee"
+
+$aiAgent = P3-Get "$Base/api/ai/agent"
+T "ai agent endpoint returns a config" ($aiAgent.code -eq 200 -and $null -ne $aiAgent.json.agent.config)
+T "ai agent ships disabled" ($aiAgent.json.agent.config.enabled -eq $false)
+
+$aiDocs = P3-Get "$Base/api/ai/knowledge"
+$hasHoursDoc = (@(@($aiDocs.json.docs) | Where-Object { $_.title -eq "Business hours" })).Count -ge 1
+T "knowledge base is seeded" ($aiDocs.code -eq 200 -and $hasHoursDoc)
+
+$aiHtml = Join-Path $env:TEMP "appolo_p4_ai.html"
+$aiStatus = (curl.exe -s -b $p3jar -o $aiHtml -w "%{http_code}" "$Base/app/ai").Trim()
+$aiContent = Get-Content -Raw $aiHtml -ErrorAction SilentlyContinue
+T "AI employee page renders" ($aiStatus -eq "200" -and $aiContent -match "Knowledge base")
+Remove-Item $aiHtml -Force -ErrorAction SilentlyContinue
+
+# Enable the AI employee for the behaviour checks, then restore the seed state.
+$aiEnable = P3-Patch "$Base/api/ai/agent" @{ enabled = $true }
+T "ai agent can be enabled" ($aiEnable.code -eq 200 -and $aiEnable.json.agent.config.enabled -eq $true)
+
+# A confident knowledge match gets a grounded reply from the AI.
+$p4visitor = "smoke-ai-$p3stamp"
+$p4ask = P3-Post "$Base/api/webchat/demo-webchat/messages" @{ visitorId = $p4visitor; body = "What time do you close on Saturday?"; name = "AI Smoke" }
+T "ai webchat inbound accepted" ($p4ask.code -eq 201)
+$p4contactId = $p4ask.json.contactId
+$p4detail = P3-Get "$Base/api/conversations/$($p4ask.json.conversationId)"
+$p4reply = @(@($p4detail.json.messages) | Where-Object { $_.direction -eq "outbound" -and $_.senderType -eq "ai" })[0]
+T "ai answers from the knowledge base" ($null -ne $p4reply -and $p4reply.body -match "Saturday")
+
+# An escalation keyword hands off to a human with an internal note.
+$p4escVisitor = "smoke-ai-esc-$p3stamp"
+$p4esc = P3-Post "$Base/api/webchat/demo-webchat/messages" @{ visitorId = $p4escVisitor; body = "I want to speak to a human"; name = "AI Smoke" }
+$p4escContactId = $p4esc.json.contactId
+$p4escDetail = P3-Get "$Base/api/conversations/$($p4esc.json.conversationId)"
+$p4note = @(@($p4escDetail.json.notes) | Where-Object { $_.body -match "AI escalated" })[0]
+T "ai escalates to a human with a note" ($null -ne $p4note)
+
+# Restore the seeded disabled state.
+$aiDisable = P3-Patch "$Base/api/ai/agent" @{ enabled = $false }
+T "ai agent restored to disabled" ($aiDisable.code -eq 200 -and $aiDisable.json.agent.config.enabled -eq $false)
+
 Remove-Item $p3jar, $p3resp, $p3body, $embedHtml, $csvPath, $auditHtml, $timelineHtml -Force -ErrorAction SilentlyContinue
 
 # --- logout clears the session ---
@@ -684,7 +727,7 @@ try {
     if (-not $dbUrl) { $dbUrl = "postgresql://appolo@127.0.0.1:55432/appolo" }
 
     if ($psqlExe -and (Test-Path $psqlExe)) {
-        $smokeIds = @(@($contactId, $inboundContactId, $wcContactId, $p3AutoContactId) + @($reviewContactIds)) |
+        $smokeIds = @(@($contactId, $inboundContactId, $wcContactId, $p3AutoContactId, $p4contactId, $p4escContactId) + @($reviewContactIds)) |
             Where-Object { $_ -and $_ -match '^[0-9a-fA-F-]{36}$' } |
             Select-Object -Unique
         $contactDelete = ""
@@ -710,6 +753,10 @@ delete from review_templates where name like 'Smoke Review %';
 delete from campaigns where name like 'Smoke Campaign %';
 delete from automations where name like 'Smoke Automation %';
 delete from tags where name like 'smoke-seg-%';
+delete from ai_knowledge_docs where title like 'Smoke KB %';
+delete from contacts where name = 'AI Smoke';
+update ai_agents set enabled = false,
+  voice_profile = jsonb_set(voice_profile, '{enabled}', 'false'::jsonb);
 $reviewReset
 $contactDelete
 "@

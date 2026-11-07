@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   automationSchema,
+  aiAgentConfigSchema,
   bulkReviewRequestSchema,
   campaignSchema,
   can,
@@ -59,6 +60,12 @@ import {
   updateAutomation,
 } from "./services/automations";
 import { createCampaign, deleteCampaign, sendCampaign } from "./services/campaigns";
+import {
+  createKnowledgeDoc,
+  deleteKnowledgeDoc,
+  ensureAiAgent,
+  updateAiAgent,
+} from "./services/ai-employee";
 import { isDomainError } from "./services/errors";
 import { requireSession } from "./session";
 import { withOrg, schema } from "./db";
@@ -996,4 +1003,88 @@ export async function deleteCampaignAction(formData: FormData): Promise<void> {
 
   revalidatePath("/app/campaigns");
   redirect("/app/campaigns?ok=Campaign%20deleted");
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 4 — AI employee                                               */
+/* ------------------------------------------------------------------ */
+
+function listField(formData: FormData, name: string): string[] {
+  const raw = stringField(formData, name);
+  if (!raw) return [];
+  return raw
+    .split(/[;,\n]/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+export async function updateAiAgentAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "ai:manage")) {
+    redirect(`/app/ai?error=${encodeURIComponent("Your role cannot manage the AI employee.")}`);
+  }
+
+  const current = await ensureAiAgent(session.org.id);
+  const thresholdRaw = stringField(formData, "confidenceThreshold");
+
+  const parsed = aiAgentConfigSchema.safeParse({
+    enabled: formData.get("enabled") === "on",
+    greeting: stringField(formData, "greeting") ?? "",
+    escalationKeywords: listField(formData, "escalationKeywords"),
+    blockedTopics: listField(formData, "blockedTopics"),
+    confidenceThreshold: thresholdRaw ? Number(thresholdRaw) : current.config.confidenceThreshold,
+  });
+  if (!parsed.success) {
+    redirect(`/app/ai?error=${encodeURIComponent(firstIssue(parsed.error))}`);
+  }
+
+  try {
+    await updateAiAgent(session.org.id, parsed.data, session.user.id);
+  } catch (error) {
+    fail("/app/ai", error);
+  }
+
+  revalidatePath("/app/ai");
+  redirect(parsed.data.enabled ? "/app/ai?ok=AI%20employee%20enabled" : "/app/ai?ok=AI%20employee%20saved");
+}
+
+export async function createKnowledgeDocAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "ai:manage")) {
+    redirect(`/app/ai?error=${encodeURIComponent("Your role cannot manage the knowledge base.")}`);
+  }
+
+  const title = stringField(formData, "title");
+  const content = stringField(formData, "content");
+  if (!title || !content) {
+    redirect(`/app/ai?error=${encodeURIComponent("Enter a title and some content.")}`);
+  }
+
+  try {
+    await createKnowledgeDoc(session.org.id, { title, content }, session.user.id);
+  } catch (error) {
+    fail("/app/ai", error);
+  }
+
+  revalidatePath("/app/ai");
+  redirect("/app/ai?ok=Knowledge%20added");
+}
+
+export async function deleteKnowledgeDocAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!can(session.membership.role, "ai:manage")) {
+    redirect(`/app/ai?error=${encodeURIComponent("Your role cannot manage the knowledge base.")}`);
+  }
+
+  const id = stringField(formData, "docId");
+  if (!id) redirect("/app/ai");
+
+  try {
+    await deleteKnowledgeDoc(session.org.id, id, session.user.id);
+  } catch (error) {
+    fail("/app/ai", error);
+  }
+
+  revalidatePath("/app/ai");
+  redirect("/app/ai?ok=Knowledge%20removed");
 }

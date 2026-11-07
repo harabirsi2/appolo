@@ -37,7 +37,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <Badge tone="brand">{session.org.planTier}</Badge>
             </div>
           </div>
-          <p className="px-1 text-[11px] text-muted-2">Phase 3 · review management</p>
+          <p className="px-1 text-[11px] text-muted-2">Phase 4 · AI employee preview</p>
         </div>
       </aside>
 
