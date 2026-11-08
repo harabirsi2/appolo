@@ -32,7 +32,7 @@ export default async function PersonPage({ params }: Params) {
             href={`/app/item/${item.id}`}
             className="overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.04] transition-transform active:scale-[0.99]"
           >
-            <MediaArt kind={item.kind} title={item.title} className="aspect-[2/3] w-full" />
+            <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="aspect-[2/3] w-full" />
             <div className="p-2.5">
               <p className="truncate text-[13px] font-medium text-ink">{item.title}</p>
               <p className="truncate text-[11px] text-muted-2">{item.subtitle}</p>

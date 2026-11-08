@@ -212,6 +212,56 @@ function spotifyLink(item: CatalogSeed): string | null {
   return null;
 }
 
+async function fetchCoverUrl(item: { kind: string; title: string; subtitle: string }): Promise<string | null> {
+  try {
+    if (item.kind === "book") {
+      return `https://covers.openlibrary.org/b/title/${encodeURIComponent(item.title)}-L.jpg`;
+    }
+    const mediaMap: Record<string, string> = { music: "music", podcast: "podcast" };
+    if (item.kind === "movie" || item.kind === "tv" || item.kind === "game") {
+      try {
+        const wikiRes = await fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(item.title.replace(/ /g, "_")), { signal: AbortSignal.timeout(8000) });
+        if (wikiRes.ok) {
+          const wikiData = (await wikiRes.json()) as { thumbnail?: { source?: string } };
+          if (wikiData.thumbnail?.source) return wikiData.thumbnail.source;
+        }
+      } catch {
+        // fall through
+      }
+    }
+    const media = mediaMap[item.kind];
+    if (!media) return null;
+    const entity = item.kind === "music" ? "album" : item.kind === "podcast" ? "podcast" : "movie";
+    const term = item.kind === "music" ? `${item.title} ${item.subtitle}` : item.title;
+    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=${media}&entity=${entity}&limit=1`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { results?: Array<Record<string, unknown>> };
+    const row = data.results?.[0];
+    if (!row) return null;
+    const art = (row.artworkUrl600 as string) || (row.artworkUrl100 as string) || "";
+    if (!art) return null;
+    return art.replace("100x100bb", "600x600bb");
+  } catch {
+    return null;
+  }
+}
+
+async function enrichCoverImages(rows: Array<{ id: string; kind: string; title: string; subtitle: string; imageUrl: string | null }>): Promise<void> {
+  const missing = rows.filter((row) => !row.imageUrl);
+  const concurrency = 6;
+  for (let i = 0; i < missing.length; i += concurrency) {
+    const batch = missing.slice(i, i + concurrency);
+    await Promise.all(
+      batch.map(async (row) => {
+        const url = await fetchCoverUrl(row);
+        if (!url) return;
+        await db.update(catalogItems).set({ imageUrl: url }).where(eq(catalogItems.id, row.id));
+      }),
+    );
+  }
+}
+
 /** Seed the shared catalog and, on first run, a demo org's taste profile. */
 async function seedMedia(orgId: string): Promise<void> {
   await db
@@ -246,9 +296,12 @@ async function seedMedia(orgId: string): Promise<void> {
     });
 
   const rows = await db
-    .select({ id: catalogItems.id, kind: catalogItems.kind, title: catalogItems.title })
+    .select({ id: catalogItems.id, kind: catalogItems.kind, title: catalogItems.title, subtitle: catalogItems.subtitle, imageUrl: catalogItems.imageUrl })
     .from(catalogItems);
   const idByKey = new Map(rows.map((row) => [`${row.kind}:${row.title}`, row.id]));
+
+  // Fetch real cover art from public, keyless providers (best effort, cached in DB).
+  await enrichCoverImages(rows);
 
   // Cast & crew links behind actor/director/artist pages.
   for (const [title, credits] of Object.entries(CREDITS)) {

@@ -93,7 +93,7 @@ export default async function HomePage() {
                 className="w-[118px] shrink-0"
               >
                 <div className="relative">
-                  <MediaArt kind={item.kind} title={item.title} className="aspect-square w-full rounded-xl" />
+                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="aspect-square w-full rounded-xl" />
                   <span className="absolute left-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-[11px] font-bold text-white backdrop-blur">
                     {RANKS[index]}
                   </span>
@@ -145,7 +145,7 @@ export default async function HomePage() {
           <div className="-mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
             {popular.map((item) => (
               <Link key={item.id} href={`/app/item/${item.id}`} className="w-[116px] shrink-0">
-                <MediaArt kind={item.kind} title={item.title} className="aspect-square w-full rounded-xl" />
+                <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="aspect-square w-full rounded-xl" />
                 <p className="mt-2 truncate text-[13px] font-medium text-ink">{item.title}</p>
                 <p className="truncate text-[11px] text-muted-2">
                   {item.average.toFixed(1)} · {item.ratings} ratings

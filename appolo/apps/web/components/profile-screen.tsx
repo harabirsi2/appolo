@@ -156,7 +156,7 @@ export function ProfileScreen({
                     <span className="grid w-6 shrink-0 place-items-center text-[18px] font-extrabold text-white/25">
                       {RANKS[index]}
                     </span>
-                    <MediaArt kind={item.kind} title={item.title} className="h-12 w-12 rounded-lg" />
+                    <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="h-12 w-12 rounded-lg" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[14px] font-semibold text-ink">{item.title}</p>
                       <p className="truncate text-[11px] text-muted-2">
@@ -188,7 +188,7 @@ export function ProfileScreen({
               {ratings.map((item) => (
                 <Link key={item.id} href={`/app/item/${item.id}`} className="group">
                   <div className="relative">
-                    <MediaArt kind={item.kind} title={item.title} className="aspect-square w-full rounded-lg" />
+                    <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="aspect-square w-full rounded-lg" />
                     <span className="absolute bottom-1 right-1 rounded bg-black/75 px-1 py-0.5 text-[10px] font-bold text-brand backdrop-blur">
                       {item.score.toFixed(1)}
                     </span>
@@ -212,7 +212,7 @@ export function ProfileScreen({
             <div className="grid grid-cols-2 gap-3">
               {watchlist.map((item) => (
                 <Link key={item.id} href={`/app/item/${item.id}`} className="group">
-                  <MediaArt kind={item.kind} title={item.title} className="aspect-square w-full rounded-xl" />
+                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="aspect-square w-full rounded-xl" />
                   <p className="mt-2 truncate text-[13px] font-medium text-ink">{item.title}</p>
                   <p className="truncate text-[11px] text-muted-2">{item.subtitle}</p>
                 </Link>
