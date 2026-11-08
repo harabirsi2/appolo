@@ -47,10 +47,15 @@ const {
   aiKnowledgeChunks,
   catalogItems,
   itemRatings,
+  catalogCredits,
   profiles,
   follows,
   pods,
   podItems,
+  watchlist,
+  ratingEvents,
+  searchHistory,
+  socialNotifications,
 } = schema;
 
 const db = getAdminDb();
@@ -60,11 +65,13 @@ const email = (process.env.SEED_EMAIL ?? "owner@appolo.test").trim().toLowerCase
 const password = process.env.SEED_PASSWORD ?? "appolo-demo-1234";
 
 type CatalogSeed = {
-  kind: "movie" | "tv" | "music" | "podcast" | "book";
+  kind: "movie" | "tv" | "music" | "podcast" | "book" | "game";
   title: string;
   subtitle: string;
   year: number;
   tags: string[];
+  genres?: string[];
+  trailerUrl?: string;
   /** Demo taste profile: pre-rated items for the seeded org. */
   elo?: number;
   matches?: number;
@@ -133,6 +140,13 @@ const MEDIA_CATALOG: CatalogSeed[] = [
   { kind: "book", title: "East of Eden", subtitle: "John Steinbeck", year: 1952, tags: ["classic", "literary"] },
   { kind: "book", title: "The Remains of the Day", subtitle: "Kazuo Ishiguro", year: 1989, tags: ["literary", "historical"] },
   { kind: "book", title: "Project Hail Mary", subtitle: "Andy Weir", year: 2021, tags: ["sci-fi", "adventure"] },
+  // games
+  { kind: "game", title: "Hollow Knight", subtitle: "Team Cherry", year: 2017, tags: ["metroidvania", "indie"], genres: ["Action", "Adventure", "Indie"], elo: 1760, matches: 13, wins: 11, losses: 2 },
+  { kind: "game", title: "Elden Ring", subtitle: "FromSoftware", year: 2022, tags: ["rpg", "open world"], genres: ["Action", "RPG"] },
+  { kind: "game", title: "Hades", subtitle: "Supergiant Games", year: 2020, tags: ["roguelike", "indie"], genres: ["Action", "Indie"], elo: 1710, matches: 10, wins: 8, losses: 2 },
+  { kind: "game", title: "Disco Elysium", subtitle: "ZA/UM", year: 2019, tags: ["rpg", "narrative"], genres: ["RPG", "Adventure"] },
+  { kind: "game", title: "The Legend of Zelda: Breath of the Wild", subtitle: "Nintendo", year: 2017, tags: ["adventure", "open world"], genres: ["Adventure", "Action"] },
+  { kind: "game", title: "Portal 2", subtitle: "Valve", year: 2011, tags: ["puzzle", "co-op"], genres: ["Puzzle", "Adventure"], elo: 1690, matches: 9, wins: 7, losses: 2 },
 ];
 
 /** Short, original overview blurbs (factual metadata only). */
@@ -156,6 +170,34 @@ const DESCRIPTIONS: Record<string, string> = {
   Beloved: "Toni Morrison's Pulitzer-winning novel about slavery, memory, and a haunting.",
   Dune: "Frank Herbert's desert epic of politics, ecology, and prophecy on the planet Arrakis.",
   "Project Hail Mary": "Andy Weir's lone-astronaut problem-solving adventure across the stars.",
+};
+
+const CREDITS: Record<string, Array<{ name: string; slug: string; role: string; character?: string }>> = {
+  "The Godfather": [
+    { name: "Marlon Brando", slug: "marlon-brando", role: "actor", character: "Don Vito Corleone" },
+    { name: "Al Pacino", slug: "al-pacino", role: "actor", character: "Michael Corleone" },
+    { name: "Francis Ford Coppola", slug: "francis-ford-coppola", role: "director" },
+  ],
+  "Parasite": [
+    { name: "Song Kang-ho", slug: "song-kang-ho", role: "actor", character: "Ki Taek" },
+    { name: "Bong Joon-ho", slug: "bong-joon-ho", role: "director" },
+  ],
+  "Spirited Away": [
+    { name: "Rumi Hiiragi", slug: "rumi-hiiragi", role: "actor", character: "Chihiro (voice)" },
+    { name: "Hayao Miyazaki", slug: "hayao-miyazaki", role: "director" },
+  ],
+  "Breaking Bad": [
+    { name: "Bryan Cranston", slug: "bryan-cranston", role: "actor", character: "Walter White" },
+    { name: "Aaron Paul", slug: "aaron-paul", role: "actor", character: "Jesse Pinkman" },
+    { name: "Vince Gilligan", slug: "vince-gilligan", role: "creator" },
+  ],
+  "Blonde": [{ name: "Frank Ocean", slug: "frank-ocean", role: "artist" }],
+  "To Pimp a Butterfly": [{ name: "Kendrick Lamar", slug: "kendrick-lamar", role: "artist" }],
+  "Beloved": [{ name: "Toni Morrison", slug: "toni-morrison", role: "author" }],
+  "Dune": [{ name: "Frank Herbert", slug: "frank-herbert", role: "author" }],
+  "Piranesi": [{ name: "Susanna Clarke", slug: "susanna-clarke", role: "author" }],
+  "Hollow Knight": [{ name: "Team Cherry", slug: "team-cherry", role: "developer" }],
+  "Elden Ring": [{ name: "FromSoftware", slug: "fromsoftware", role: "developer" }],
 };
 
 function slugify(value: string): string {
@@ -185,6 +227,8 @@ async function seedMedia(orgId: string): Promise<void> {
           externalRef: `demo:${item.kind}:${slugify(item.title)}`,
           description: DESCRIPTIONS[item.title] ?? null,
           links: spotify ? { spotify } : {},
+          genres: item.genres ?? [],
+          trailerUrl: item.trailerUrl ?? (item.kind === "movie" || item.kind === "tv" ? `https://www.youtube.com/results?search_query=${encodeURIComponent(item.title + " trailer")}` : null),
           tags: item.tags,
         };
       }),
@@ -195,6 +239,8 @@ async function seedMedia(orgId: string): Promise<void> {
         description: sql`excluded.description`,
         links: sql`excluded.links`,
         tags: sql`excluded.tags`,
+        genres: sql`excluded.genres`,
+        trailerUrl: sql`excluded.trailer_url`,
       },
     });
 
@@ -202,6 +248,26 @@ async function seedMedia(orgId: string): Promise<void> {
     .select({ id: catalogItems.id, kind: catalogItems.kind, title: catalogItems.title })
     .from(catalogItems);
   const idByKey = new Map(rows.map((row) => [`${row.kind}:${row.title}`, row.id]));
+
+  // Cast & crew links behind actor/director/artist pages.
+  for (const [title, credits] of Object.entries(CREDITS)) {
+    const itemRow = rows.find((row) => row.title === title);
+    if (!itemRow) continue;
+    for (let index = 0; index < credits.length; index += 1) {
+      const credit = credits[index]!;
+      await db
+        .insert(catalogCredits)
+        .values({
+          itemId: itemRow.id,
+          personName: credit.name,
+          personSlug: credit.slug,
+          role: credit.role,
+          character: credit.character ?? null,
+          position: index,
+        })
+        .onConflictDoNothing();
+    }
+  }
 
   await withOrgAdmin(orgId, async (tx) => {
     for (const item of MEDIA_CATALOG) {
@@ -223,7 +289,7 @@ async function seedMedia(orgId: string): Promise<void> {
   });
 }
 
-type CommunityRating = { title: string; score: number; tags: string[]; text: string };
+type CommunityRating = { title: string; score: number; tags: string[]; text: string; spoiler?: boolean; favoriteCharacter?: string; favoriteTracks?: string[] };
 type CommunityMember = {
   username: string;
   displayName: string;
@@ -243,7 +309,7 @@ const COMMUNITY: CommunityMember[] = [
     ratings: [
       { title: "Blonde", score: 8.9, tags: ["r&b"], text: "Endlessly replayable — the back half is the whole point." },
       { title: "To Pimp a Butterfly", score: 9.4, tags: ["hip-hop"], text: "A history lesson that also bangs." },
-      { title: "Spirited Away", score: 9.2, tags: ["animation"], text: "Still the most beautiful thing Ghibli ever made." },
+      { title: "Spirited Away", score: 9.2, tags: ["animation"], text: "Still the most beautiful thing Ghibli ever made.", spoiler: true, favoriteCharacter: "No-Face" },
       { title: "Fleabag", score: 8.8, tags: ["comedy"], text: "The fourth wall never gets old." },
       { title: "Kid A", score: 8.1, tags: ["electronic"], text: "Cold on the surface, warm underneath." },
     ],
@@ -364,6 +430,9 @@ async function seedCommunity(ownerOrgId: string, ownerName: string): Promise<voi
             losses: 2,
             reviewText: rating.text,
             reviewTags: rating.tags,
+            spoiler: rating.spoiler ?? false,
+            favoriteCharacter: rating.favoriteCharacter ?? null,
+            favoriteTracks: rating.favoriteTracks ?? [],
           })
           .onConflictDoNothing();
       }
@@ -1111,6 +1180,87 @@ async function main(): Promise<void> {
   // --- Media catalog (shared) + demo taste profile (org-scoped) ---
   await seedMedia(orgId);
   await seedCommunity(orgId, "Demo Profile");
+
+  // --- Podiums-parity demo data: pinned review, manual mode, watchlist,
+  //     history, notifications, search history ---------------------------
+  await withOrgAdmin(orgId, async (tx) => {
+    const profileRow = (await tx.select().from(profiles).where(eq(profiles.orgId, orgId)).limit(1))[0];
+    if (!profileRow) return;
+
+    // manual mode + connected services + pinned review
+    const breakingBadRating = (
+      await tx
+        .select({ id: itemRatings.id })
+        .from(itemRatings)
+        .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
+        .where(and(eq(itemRatings.orgId, orgId), eq(catalogItems.title, "Breaking Bad")))
+        .limit(1)
+    )[0];
+    await tx
+      .update(profiles)
+      .set({
+        manualMode: true,
+        spotifyConnected: true,
+        appleMusicConnected: false,
+        language: "en",
+        pinnedRatingId: breakingBadRating?.id ?? null,
+        bio: "Building my podium.",
+      })
+      .where(eq(profiles.orgId, orgId));
+
+    // watchlist
+    const watchTitles = ["Elden Ring", "Disco Elysium", "The Legend of Zelda: Breath of the Wild"];
+    const allItems = await tx.select({ id: catalogItems.id, title: catalogItems.title }).from(catalogItems);
+    const idByTitle = new Map(allItems.map((row) => [row.title, row.id]));
+    for (const title of watchTitles) {
+      const itemId = idByTitle.get(title);
+      if (!itemId) continue;
+      await tx.insert(watchlist).values({ orgId, itemId }).onConflictDoNothing();
+    }
+
+    // rating history events
+    const ratedRows = await tx
+      .select({ itemId: itemRatings.itemId, elo: itemRatings.elo })
+      .from(itemRatings)
+      .where(eq(itemRatings.orgId, orgId))
+      .limit(5);
+    for (const row of ratedRows) {
+      await tx.insert(ratingEvents).values({ orgId, itemId: row.itemId, kind: "rated", detail: "Rated" }).onConflictDoNothing();
+    }
+
+    // notifications from community
+    const cartOrg = (await tx.select().from(orgs).where(eq(orgs.slug, "cart")).limit(1))[0];
+    if (cartOrg) {
+      const cartRating = (
+        await tx
+          .select({ id: itemRatings.id, itemId: itemRatings.itemId })
+          .from(itemRatings)
+          .where(eq(itemRatings.orgId, cartOrg.id))
+          .limit(1)
+      )[0];
+      if (cartRating) {
+        await tx.insert(socialNotifications).values({
+          orgId,
+          actorOrgId: cartOrg.id,
+          kind: "follow",
+          body: "cart started following you",
+        });
+        await tx.insert(socialNotifications).values({
+          orgId,
+          actorOrgId: cartOrg.id,
+          kind: "reaction",
+          itemId: cartRating.itemId,
+          ratingId: cartRating.id,
+          body: "🔥",
+        });
+      }
+    }
+
+    // search history
+    for (const q of ["sci-fi", "Hollow Knight", "Frank Ocean"]) {
+      await tx.insert(searchHistory).values({ orgId, query: q }).onConflictDoNothing();
+    }
+  });
 
   console.log("");
   console.log("  seed complete");

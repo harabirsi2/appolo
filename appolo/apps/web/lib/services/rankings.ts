@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   START_ELO,
+  clamp,
   nextElo,
   scoreForElo,
   selectOpponent,
@@ -11,7 +12,7 @@ import {
 import { getDb, withOrg, schema, type Tx } from "@/lib/db";
 import { DomainError } from "./errors";
 
-const { catalogItems, itemRatings, itemMatchups } = schema;
+const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, catalogCredits } = schema;
 
 export interface CatalogItem {
   id: string;
@@ -22,10 +23,13 @@ export interface CatalogItem {
   imageUrl: string | null;
   description: string | null;
   links: Record<string, string>;
+  genres: string[];
+  trailerUrl: string | null;
   tags: string[];
 }
 
 export interface RankedItem extends CatalogItem {
+  ratingId: string;
   elo: number;
   matches: number;
   wins: number;
@@ -34,6 +38,10 @@ export interface RankedItem extends CatalogItem {
   score: number;
   reviewText: string | null;
   reviewTags: string[];
+  spoiler: boolean;
+  photoUrl: string | null;
+  favoriteCharacter: string | null;
+  favoriteTracks: string[];
   position: number;
 }
 
@@ -60,11 +68,13 @@ function toScore(elo: number): number {
 export async function listCatalog(options: {
   kind?: string;
   q?: string;
+  genre?: string;
   limit?: number;
 } = {}): Promise<CatalogItem[]> {
   const db = getDb();
   const filters = [];
   if (options.kind) filters.push(eq(catalogItems.kind, options.kind as MediaKind));
+  if (options.genre) filters.push(sql`${options.genre} = any(${catalogItems.genres})`);
   if (options.q) {
     const like = `%${options.q}%`;
     filters.push(sql`(${catalogItems.title} ilike ${like} or ${catalogItems.subtitle} ilike ${like})`);
@@ -96,6 +106,8 @@ function mapCatalogItem(row: typeof catalogItems.$inferSelect): CatalogItem {
     imageUrl: row.imageUrl ?? null,
     description: row.description ?? null,
     links: (row.links ?? {}) as Record<string, string>,
+    genres: row.genres ?? [],
+    trailerUrl: row.trailerUrl ?? null,
     tags: row.tags ?? [],
   };
 }
@@ -123,6 +135,7 @@ export async function rankedRatings(orgId: string, options: { kind?: string; lim
     const ranked = withPositions(
       rows.map(({ item, rating }) => ({
         ...mapCatalogItem(item),
+        ratingId: rating.id,
         elo: rating.elo,
         matches: rating.matches,
         wins: rating.wins,
@@ -131,6 +144,10 @@ export async function rankedRatings(orgId: string, options: { kind?: string; lim
         score: toScore(rating.elo),
         reviewText: rating.reviewText ?? null,
         reviewTags: rating.reviewTags ?? [],
+        spoiler: rating.spoiler,
+        photoUrl: rating.photoUrl ?? null,
+        favoriteCharacter: rating.favoriteCharacter ?? null,
+        favoriteTracks: rating.favoriteTracks ?? [],
         position: 0,
       })),
     );
@@ -154,6 +171,7 @@ export async function getRating(orgId: string, itemId: string): Promise<RankedIt
     if (!row) return null;
     return {
       ...mapCatalogItem(row.item),
+      ratingId: row.rating.id,
       elo: row.rating.elo,
       matches: row.rating.matches,
       wins: row.rating.wins,
@@ -161,6 +179,10 @@ export async function getRating(orgId: string, itemId: string): Promise<RankedIt
       skips: row.rating.skips,
       reviewText: row.rating.reviewText ?? null,
       reviewTags: row.rating.reviewTags ?? [],
+      spoiler: row.rating.spoiler,
+      photoUrl: row.rating.photoUrl ?? null,
+      favoriteCharacter: row.rating.favoriteCharacter ?? null,
+      favoriteTracks: row.rating.favoriteTracks ?? [],
       score: toScore(row.rating.elo),
       position: 0,
     };
@@ -278,9 +300,10 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
     const row = opponentItem[0]!;
 
     return {
-      item: { ...item, elo: rating.elo, matches: rating.matches, wins: rating.wins, losses: rating.losses, skips: rating.skips, score: toScore(rating.elo), position: 0, reviewText: rating.reviewText ?? null, reviewTags: rating.reviewTags ?? [] },
+      item: { ...item, ratingId: "", elo: rating.elo, matches: rating.matches, wins: rating.wins, losses: rating.losses, skips: rating.skips, score: toScore(rating.elo), position: 0, reviewText: rating.reviewText ?? null, reviewTags: rating.reviewTags ?? [], spoiler: false, photoUrl: null, favoriteCharacter: null, favoriteTracks: [] },
       opponent: {
         ...mapCatalogItem(row),
+        ratingId: "",
         elo: opponent.elo,
         matches: 0,
         wins: 0,
@@ -290,6 +313,10 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
         position: 0,
         reviewText: null,
         reviewTags: [],
+        spoiler: false,
+        photoUrl: null,
+        favoriteCharacter: null,
+        favoriteTracks: [],
       },
     };
   });
@@ -372,8 +399,8 @@ export async function submitVote(
     return {
       result,
       itemDelta: counted ? after.a - before.item : 0,
-      item: { ...item, elo: updatedItem.elo, matches: updatedItem.matches, wins: updatedItem.wins, losses: updatedItem.losses, skips: updatedItem.skips, score: toScore(updatedItem.elo), position: 0, reviewText: updatedItem.reviewText ?? null, reviewTags: updatedItem.reviewTags ?? [] },
-      opponent: { ...opponent, elo: updatedOpponent.elo, matches: updatedOpponent.matches, wins: updatedOpponent.wins, losses: updatedOpponent.losses, skips: updatedOpponent.skips, score: toScore(updatedOpponent.elo), position: 0, reviewText: updatedOpponent.reviewText ?? null, reviewTags: updatedOpponent.reviewTags ?? [] },
+      item: { ...item, ratingId: updatedItem.id, elo: updatedItem.elo, matches: updatedItem.matches, wins: updatedItem.wins, losses: updatedItem.losses, skips: updatedItem.skips, score: toScore(updatedItem.elo), position: 0, reviewText: updatedItem.reviewText ?? null, reviewTags: updatedItem.reviewTags ?? [], spoiler: updatedItem.spoiler, photoUrl: updatedItem.photoUrl ?? null, favoriteCharacter: updatedItem.favoriteCharacter ?? null, favoriteTracks: updatedItem.favoriteTracks ?? [] },
+      opponent: { ...opponent, ratingId: updatedOpponent.id, elo: updatedOpponent.elo, matches: updatedOpponent.matches, wins: updatedOpponent.wins, losses: updatedOpponent.losses, skips: updatedOpponent.skips, score: toScore(updatedOpponent.elo), position: 0, reviewText: updatedOpponent.reviewText ?? null, reviewTags: updatedOpponent.reviewTags ?? [], spoiler: updatedOpponent.spoiler, photoUrl: updatedOpponent.photoUrl ?? null, favoriteCharacter: updatedOpponent.favoriteCharacter ?? null, favoriteTracks: updatedOpponent.favoriteTracks ?? [] },
     };
   });
 }
@@ -413,4 +440,192 @@ export async function catalogByIds(ids: string[]): Promise<CatalogItem[]> {
   const db = getDb();
   const rows = await db.select().from(catalogItems).where(inArray(catalogItems.id, ids));
   return rows.map(mapCatalogItem);
+}
+
+/* ------------------------------------------------------------------ */
+/* manual mode, watchlist, history, discovery                          */
+/* ------------------------------------------------------------------ */
+
+/** Set an exact 0–10 score without playing the matchup game. */
+export async function setManualRating(orgId: string, itemId: string, score: number): Promise<RankedItem> {
+  const item = await getCatalogItem(itemId);
+  if (!item) throw new DomainError("ITEM_NOT_FOUND", "That item is not in the catalog.", 404);
+  const elo = Math.round(1200 + clamp(score, 0, 10) * 60);
+
+  return withOrg(orgId, async (tx) => {
+    const [row] = await tx
+      .insert(itemRatings)
+      .values({ orgId, itemId, elo })
+      .onConflictDoUpdate({
+        target: [itemRatings.orgId, itemRatings.itemId],
+        set: { elo, updatedAt: new Date() },
+      })
+      .returning();
+    await tx.insert(ratingEvents).values({
+      orgId,
+      itemId,
+      kind: "manual",
+      detail: `Set to ${clamp(score, 0, 10).toFixed(1)}`,
+    });
+    const saved = row!;
+    return {
+      ...item,
+      ratingId: saved.id,
+      elo: saved.elo,
+      matches: saved.matches,
+      wins: saved.wins,
+      losses: saved.losses,
+      skips: saved.skips,
+      score: toScore(saved.elo),
+      reviewText: saved.reviewText ?? null,
+      reviewTags: saved.reviewTags ?? [],
+      spoiler: saved.spoiler,
+      photoUrl: saved.photoUrl ?? null,
+      favoriteCharacter: saved.favoriteCharacter ?? null,
+      favoriteTracks: saved.favoriteTracks ?? [],
+      position: 0,
+    };
+  });
+}
+
+/** Add or remove an item from the org's watchlist. */
+export async function toggleWatchlist(orgId: string, itemId: string): Promise<{ watching: boolean }> {
+  return withOrg(orgId, async (tx) => {
+    const existing = await tx
+      .select({ id: watchlist.id })
+      .from(watchlist)
+      .where(and(eq(watchlist.orgId, orgId), eq(watchlist.itemId, itemId)))
+      .limit(1);
+    if (existing[0]) {
+      await tx.delete(watchlist).where(eq(watchlist.id, existing[0].id));
+      return { watching: false };
+    }
+    await tx.insert(watchlist).values({ orgId, itemId }).onConflictDoNothing();
+    return { watching: true };
+  });
+}
+
+export async function isWatchlisted(orgId: string, itemId: string): Promise<boolean> {
+  return withOrg(orgId, async (tx) => {
+    const rows = await tx
+      .select({ id: watchlist.id })
+      .from(watchlist)
+      .where(and(eq(watchlist.orgId, orgId), eq(watchlist.itemId, itemId)))
+      .limit(1);
+    return Boolean(rows[0]);
+  });
+}
+
+export async function watchlistFor(orgId: string): Promise<Array<CatalogItem & { addedAt: Date }>> {
+  return withOrg(orgId, async (tx) => {
+    const rows = await tx
+      .select({ item: catalogItems, addedAt: watchlist.createdAt })
+      .from(watchlist)
+      .innerJoin(catalogItems, eq(catalogItems.id, watchlist.itemId))
+      .where(eq(watchlist.orgId, orgId))
+      .orderBy(desc(watchlist.createdAt));
+    return rows.map((row) => ({ ...mapCatalogItem(row.item), addedAt: row.addedAt }));
+  });
+}
+
+export interface HistoryEntry {
+  id: string;
+  kind: string;
+  detail: string | null;
+  createdAt: Date;
+  item: CatalogItem;
+}
+
+export async function ratingHistory(orgId: string, limit = 60): Promise<HistoryEntry[]> {
+  return withOrg(orgId, async (tx) => {
+    const rows = await tx
+      .select({ event: ratingEvents, item: catalogItems })
+      .from(ratingEvents)
+      .innerJoin(catalogItems, eq(catalogItems.id, ratingEvents.itemId))
+      .where(eq(ratingEvents.orgId, orgId))
+      .orderBy(desc(ratingEvents.createdAt))
+      .limit(limit);
+    return rows.map((row) => ({
+      id: row.event.id,
+      kind: row.event.kind,
+      detail: row.event.detail ?? null,
+      createdAt: row.event.createdAt,
+      item: mapCatalogItem(row.item),
+    }));
+  });
+}
+
+export interface PopularItem extends CatalogItem {
+  average: number;
+  ratings: number;
+}
+
+/** Community's most-rated items over the last seven days. */
+export async function popularThisWeek(limit = 8): Promise<PopularItem[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      item: catalogItems,
+      ratings: sql<number>`count(*)::int`,
+      avgElo: sql<number>`coalesce(avg(${itemRatings.elo}), ${START_ELO})::float`,
+    })
+    .from(itemRatings)
+    .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
+    .where(sql`${itemRatings.updatedAt} > now() - interval '7 days'`)
+    .groupBy(catalogItems.id)
+    .orderBy(sql`count(*) desc`)
+    .limit(limit);
+  return rows.map((row) => ({
+    ...mapCatalogItem(row.item),
+    average: toScore(row.avgElo),
+    ratings: row.ratings,
+  }));
+}
+
+export interface Credit {
+  id: string;
+  personName: string;
+  personSlug: string;
+  role: string;
+  character: string | null;
+}
+
+export async function creditsForItem(itemId: string): Promise<Credit[]> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(catalogCredits)
+    .where(eq(catalogCredits.itemId, itemId))
+    .orderBy(catalogCredits.position);
+  return rows.map((row) => ({
+    id: row.id,
+    personName: row.personName,
+    personSlug: row.personSlug,
+    role: row.role,
+    character: row.character ?? null,
+  }));
+}
+
+export interface PersonPage {
+  name: string;
+  slug: string;
+  roles: string[];
+  works: CatalogItem[];
+}
+
+export async function personBySlug(slug: string): Promise<PersonPage | null> {
+  const db = getDb();
+  const rows = await db
+    .select({ credit: catalogCredits, item: catalogItems })
+    .from(catalogCredits)
+    .innerJoin(catalogItems, eq(catalogItems.id, catalogCredits.itemId))
+    .where(eq(catalogCredits.personSlug, slug))
+    .orderBy(desc(catalogItems.year));
+  if (rows.length === 0) return null;
+  return {
+    name: rows[0]!.credit.personName,
+    slug,
+    roles: [...new Set(rows.map((row) => row.credit.role))],
+    works: rows.map((row) => mapCatalogItem(row.item)),
+  };
 }

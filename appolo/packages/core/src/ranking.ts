@@ -11,7 +11,7 @@ import { z } from "zod";
  * by the API, the worker, and tests alike.
  */
 
-export const MEDIA_KINDS = ["movie", "tv", "music", "podcast", "book"] as const;
+export const MEDIA_KINDS = ["movie", "tv", "music", "podcast", "book", "game"] as const;
 export type MediaKind = (typeof MEDIA_KINDS)[number];
 export const mediaKindSchema = z.enum(MEDIA_KINDS);
 
@@ -21,6 +21,7 @@ export const MEDIA_KIND_LABELS: Record<MediaKind, string> = {
   music: "Music",
   podcast: "Podcasts",
   book: "Books",
+  game: "Video games",
 };
 
 export const MEDIA_KIND_SINGULAR: Record<MediaKind, string> = {
@@ -29,6 +30,17 @@ export const MEDIA_KIND_SINGULAR: Record<MediaKind, string> = {
   music: "Album",
   podcast: "Podcast",
   book: "Book",
+  game: "Video game",
+};
+
+/** Curated genres shown on the Add/Browse page, grouped by media kind. */
+export const GENRES: Record<MediaKind, string[]> = {
+  movie: ["Action", "Comedy", "Drama", "Horror", "Sci-Fi", "Thriller", "Romance", "Animation", "Documentary"],
+  tv: ["Drama", "Comedy", "Sci-Fi", "Reality", "Crime", "Animation", "Anime", "Documentary"],
+  music: ["Pop", "Hip-Hop", "R&B", "Rock", "Electronic", "Indie", "Jazz", "Country"],
+  podcast: ["True Crime", "News", "Comedy", "Culture", "Science", "History", "Technology"],
+  book: ["Fiction", "Fantasy", "Sci-Fi", "Nonfiction", "Mystery", "Romance", "Biography", "Poetry"],
+  game: ["Action", "Adventure", "RPG", "Shooter", "Strategy", "Indie", "Sports", "Horror"],
 };
 
 /** Elo every item begins at before its first matchup. */

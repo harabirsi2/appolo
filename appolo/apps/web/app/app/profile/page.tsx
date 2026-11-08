@@ -7,8 +7,13 @@ import { ProfileScreen } from "@/components/profile-screen";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Profile" };
 
-export default async function ProfilePage() {
+export default async function ProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const session = await requireSession();
+  const { tab } = await searchParams;
   const profile =
     (await getProfileByOrgId(session.org.id)) ??
     (await ensureProfile(session.org.id, session.org.name, session.org.slug));
@@ -19,6 +24,7 @@ export default async function ProfilePage() {
       bundle={bundle}
       viewerOrgId={session.org.id}
       following={false}
+      tab={tab}
       footer={
         <form action={logoutAction}>
           <Button variant="ghost" size="sm" type="submit">

@@ -7,6 +7,7 @@ const KIND_GLYPH: Record<MediaKind, string> = {
   music: "🎵",
   podcast: "🎙️",
   book: "📚",
+  game: "🎮",
 };
 
 function hashString(value: string): number {

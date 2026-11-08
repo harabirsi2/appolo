@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import {
   getProfileByUsername,
   isFollowing,
+  matchPercent,
   profileBundle,
 } from "@/lib/services/social";
 import { ProfileScreen } from "@/components/profile-screen";
@@ -18,17 +19,25 @@ export async function generateMetadata({ params }: Params) {
   return { title: profile ? `${profile.displayName} (@${profile.username})` : "Profile" };
 }
 
-export default async function PublicProfilePage({ params }: Params) {
+export default async function PublicProfilePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ username: string }>;
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const { username } = await params;
+  const { tab } = await searchParams;
   const profile = await getProfileByUsername(decodeURIComponent(username));
   if (!profile) notFound();
 
   const session = await getSession();
   if (session && session.org.id === profile.orgId) redirect("/app/profile");
 
-  const [bundle, following] = await Promise.all([
+  const [bundle, following, match] = await Promise.all([
     profileBundle(profile),
     session ? isFollowing(session.org.id, profile.orgId) : Promise.resolve(false),
+    session ? matchPercent(session.org.id, profile.orgId) : Promise.resolve(null),
   ]);
 
   return (
@@ -44,7 +53,13 @@ export default async function PublicProfilePage({ params }: Params) {
           {session ? "Open app" : "Sign in"}
         </Link>
       </div>
-      <ProfileScreen bundle={bundle} viewerOrgId={session?.org.id ?? null} following={following} />
+      <ProfileScreen
+        bundle={bundle}
+        viewerOrgId={session?.org.id ?? null}
+        following={following}
+        tab={tab}
+        matchPercent={match}
+      />
     </div>
   );
 }

@@ -2,11 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MEDIA_KIND_LABELS, MEDIA_KIND_SINGULAR } from "@appolo/core";
 import { requireSession } from "@/lib/session";
-import { getCatalogItem, getRating } from "@/lib/services/rankings";
+import { getCatalogItem, getRating, creditsForItem, isWatchlisted } from "@/lib/services/rankings";
 import { itemCommunity } from "@/lib/services/social";
 import { MediaArt, mediaHue } from "@/components/media-art";
 import { Icon, RatingCurve, ReviewCard, ScoreText } from "@/components/podiums";
 import { ItemActions } from "@/components/item-actions";
+import { WatchlistButton } from "@/components/watchlist-button";
 import { BackButton } from "@/components/back-button";
 
 export const dynamic = "force-dynamic";
@@ -25,9 +26,11 @@ export default async function ItemPage({ params }: Params) {
   const item = await getCatalogItem(id);
   if (!item) notFound();
 
-  const [community, rating] = await Promise.all([
-    itemCommunity(item.id),
+  const [community, rating, credits, watching] = await Promise.all([
+    itemCommunity(item.id, 12, session.org.id),
     getRating(session.org.id, item.id),
+    creditsForItem(item.id),
+    isWatchlisted(session.org.id, item.id),
   ]);
 
   const hue = mediaHue(item.title);
@@ -63,7 +66,10 @@ export default async function ItemPage({ params }: Params) {
             .join(" · ")}
         </p>
 
-        <ItemActions title={item.title} itemId={item.id} />
+        <div className="mt-3 flex flex-wrap gap-2">
+          <ItemActions title={item.title} itemId={item.id} />
+          <WatchlistButton itemId={item.id} initial={watching} />
+        </div>
 
         <div className="mt-6 rounded-2xl border border-white/[0.06] bg-[#141416] px-4 pb-3 pt-4">
           <div className="flex items-end justify-between">
@@ -114,6 +120,19 @@ export default async function ItemPage({ params }: Params) {
               ))}
             </div>
           ) : null}
+          {item.genres.length > 0 ? (
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {item.genres.map((genre) => (
+                <Link
+                  key={genre}
+                  href={`/app/search?genre=${encodeURIComponent(genre)}&kind=${item.kind}`}
+                  className="rounded-full border border-brand/30 bg-brand/10 px-2.5 py-1 text-[11px] text-brand hover:bg-brand/20"
+                >
+                  {genre}
+                </Link>
+              ))}
+            </div>
+          ) : null}
           {item.description ? (
             <p className="mt-3 text-[13px] leading-relaxed text-muted">{item.description}</p>
           ) : (
@@ -129,8 +148,35 @@ export default async function ItemPage({ params }: Params) {
               Listen in Spotify <Icon name="spotify" className="h-4 w-4" />
             </a>
           ) : null}
+          {item.trailerUrl ? (
+            <a
+              href={item.trailerUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="mt-3 inline-flex items-center gap-2 text-[13px] font-medium text-ink hover:text-brand"
+            >
+              Watch trailer
+            </a>
+          ) : null}
         </section>
 
+        {credits.length > 0 ? (
+          <section className="mt-6">
+            <h2 className="text-[15px] font-semibold text-ink">Cast & crew</h2>
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {credits.map((credit) => (
+                <Link
+                  key={credit.id}
+                  href={`/app/person/${credit.personSlug}`}
+                  className="rounded-full border border-white/15 bg-white/[0.06] px-2.5 py-1 text-[11px] text-ink hover:bg-white/10"
+                >
+                  {credit.personName}
+                  {credit.character ? <span className="text-muted-2"> - {credit.character}</span> : null}
+                </Link>
+              ))}
+            </div>
+          </section>
+        ) : null}
         {rating && (rating.reviewText || rating.reviewTags.length > 0) ? (
           <section className="mt-6 rounded-2xl border border-brand/25 bg-brand/[0.07] p-4">
             <div className="flex items-center justify-between">

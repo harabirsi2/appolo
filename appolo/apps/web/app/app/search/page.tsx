@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { MEDIA_KIND_LABELS, MEDIA_KINDS, type MediaKind } from "@appolo/core";
+import { MEDIA_KIND_LABELS, MEDIA_KINDS, GENRES, type MediaKind } from "@appolo/core/ranking";
 import { requireSession } from "@/lib/session";
 import { listCatalog, rankedRatings } from "@/lib/services/rankings";
 import {
   ensureProfile,
   followingOrgIds,
   getProfileByOrgId,
+  recordSearch,
+  searchHistoryFor,
   searchProfiles,
   suggestedProfiles,
 } from "@/lib/services/social";
@@ -19,26 +21,31 @@ export const metadata = { title: "Search" };
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; kind?: string; people?: string }>;
+  searchParams: Promise<{ q?: string; kind?: string; people?: string; genre?: string }>;
 }) {
   const session = await requireSession();
-  const { q, kind, people: peopleParam } = await searchParams;
+  const { q, kind, people: peopleParam, genre } = await searchParams;
   const query = q?.trim() ?? "";
   const activeKind = MEDIA_KINDS.includes(kind as MediaKind) ? (kind as MediaKind) : undefined;
   const showPeople = peopleParam === "1";
-  const browsing = query.length > 0 || Boolean(activeKind);
+  const browsing = query.length > 0 || Boolean(activeKind) || Boolean(genre);
   const searching = browsing || showPeople;
 
   const profile =
     (await getProfileByOrgId(session.org.id)) ??
     (await ensureProfile(session.org.id, session.org.name, session.org.slug));
 
-  const [ratings, items, people, suggestions, following] = await Promise.all([
+  if (query.length >= 2) {
+    await recordSearch(session.org.id, query);
+  }
+
+  const [ratings, items, people, suggestions, following, recentSearches] = await Promise.all([
     rankedRatings(session.org.id),
-    browsing ? listCatalog({ kind: activeKind, q: query || undefined, limit: 60 }) : Promise.resolve([]),
+    browsing ? listCatalog({ kind: activeKind, q: query || undefined, genre: genre || undefined, limit: 60 }) : Promise.resolve([]),
     query ? searchProfiles(query, 6) : showPeople ? suggestedProfiles(session.org.id, 12) : Promise.resolve([]),
     suggestedProfiles(session.org.id, 3),
     followingOrgIds(session.org.id),
+    searchHistoryFor(session.org.id),
   ]);
 
   const followingSet = new Set(following);
@@ -80,6 +87,31 @@ export default async function SearchPage({
               {MEDIA_KIND_LABELS[k]}
             </Link>
           ))}
+        </div>
+      ) : null}
+      {activeKind && GENRES[activeKind]?.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {GENRES[activeKind].map((g) => (
+            <Link
+              key={g}
+              href={`/app/search?kind=${activeKind}&genre=${encodeURIComponent(g)}`}
+              className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                genre === g
+                  ? "border-brand/40 bg-brand/15 text-brand"
+                  : "border-white/10 bg-white/5 text-muted hover:text-ink"
+              }`}
+            >
+              {g}
+            </Link>
+          ))}
+          {genre ? (
+            <Link
+              href={`/app/search?kind=${activeKind}`}
+              className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-muted hover:text-ink"
+            >
+              Clear genre
+            </Link>
+          ) : null}
         </div>
       ) : null}
 
@@ -169,6 +201,24 @@ export default async function SearchPage({
         </div>
       ) : (
         <div className="mt-6 space-y-8">
+          {recentSearches.length > 0 ? (
+            <section>
+              <div className="mb-3 flex items-end justify-between">
+                <h2 className="text-[17px] font-semibold text-ink">Recent searches</h2>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {recentSearches.map((q) => (
+                  <Link
+                    key={q}
+                    href={`/app/search?q=${encodeURIComponent(q)}`}
+                    className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-muted hover:text-ink"
+                  >
+                    {q}
+                  </Link>
+                ))}
+              </div>
+            </section>
+          ) : null}
           {recentlyRated.length > 0 ? (
             <section>
               <div className="mb-3 flex items-end justify-between">
@@ -195,7 +245,7 @@ export default async function SearchPage({
           ) : null}
 
           <section>
-            <h2 className="mb-3 text-[17px] font-semibold text-ink">Browse what’s popular</h2>
+            <h2 className="mb-3 text-[17px] font-semibold text-ink">Browse whats popular</h2>
             <div className="grid grid-cols-2 gap-3">
               {MEDIA_KINDS.map((k) => (
                 <CategoryTile key={k} kind={k} href={`/app/search?kind=${k}`} label={MEDIA_KIND_LABELS[k]} />

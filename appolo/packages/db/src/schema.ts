@@ -1029,7 +1029,7 @@ export const jobLocks = pgTable("job_locks", {
 /* media catalog & head-to-head rankings                               */
 /* ------------------------------------------------------------------ */
 
-export const mediaKindEnum = pgEnum("media_kind", ["movie", "tv", "music", "podcast", "book"]);
+export const mediaKindEnum = pgEnum("media_kind", ["movie", "tv", "music", "podcast", "book", "game"]);
 
 /**
  * The shared catalog. It is intentionally NOT tenant-scoped: everyone browses
@@ -1046,6 +1046,8 @@ export const catalogItems = pgTable(
     imageUrl: text("image_url"),
     description: text("description"),
     links: jsonb("links").notNull().default(emptyJson()),
+    genres: text("genres").array().notNull().default(emptyTextArray()),
+    trailerUrl: text("trailer_url"),
     externalRef: text("external_ref"),
     tags: text("tags").array().notNull().default(emptyTextArray()),
     createdAt: createdAt(),
@@ -1071,6 +1073,10 @@ export const itemRatings = pgTable(
     skips: integer("skips").notNull().default(0),
     reviewText: text("review_text"),
     reviewTags: text("review_tags").array().notNull().default(emptyTextArray()),
+    spoiler: boolean("spoiler").notNull().default(false),
+    photoUrl: text("photo_url"),
+    favoriteCharacter: text("favorite_character"),
+    favoriteTracks: text("favorite_tracks").array().notNull().default(emptyTextArray()),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1118,6 +1124,11 @@ export const profiles = pgTable(
     displayName: text("display_name").notNull(),
     bio: text("bio"),
     avatarHue: integer("avatar_hue").notNull().default(245),
+    pinnedRatingId: uuid("pinned_rating_id"),
+    manualMode: boolean("manual_mode").notNull().default(false),
+    spotifyConnected: boolean("spotify_connected").notNull().default(false),
+    appleMusicConnected: boolean("apple_music_connected").notNull().default(false),
+    language: text("language").notNull().default("en"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1172,5 +1183,115 @@ export const podItems = pgTable(
   (t) => ({
     podItemUq: uniqueIndex("pod_items_pod_item_uq").on(t.podId, t.itemId),
     podIdx: index("pod_items_pod_idx").on(t.podId, t.position),
+  }),
+);
+
+/** Cast and crew links behind actor/director/artist pages. */
+export const catalogCredits = pgTable(
+  "catalog_credits",
+  {
+    id: pk(),
+    itemId: uuid("item_id").notNull().references(() => catalogItems.id, { onDelete: "cascade" }),
+    personName: text("person_name").notNull(),
+    personSlug: text("person_slug").notNull(),
+    role: text("role").notNull().default("actor"),
+    character: text("character"),
+    position: integer("position").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    itemIdx: index("catalog_credits_item_idx").on(t.itemId, t.position),
+    personIdx: index("catalog_credits_person_idx").on(t.personSlug),
+  }),
+);
+
+/** Emoji reactions on a review. */
+export const ratingReactions = pgTable(
+  "rating_reactions",
+  {
+    id: pk(),
+    ratingId: uuid("rating_id").notNull().references(() => itemRatings.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    reactionUq: uniqueIndex("rating_reactions_uq").on(t.ratingId, t.orgId, t.emoji),
+  }),
+);
+
+/** Threaded comments (single level) on a review. */
+export const ratingComments = pgTable(
+  "rating_comments",
+  {
+    id: pk(),
+    ratingId: uuid("rating_id").notNull().references(() => itemRatings.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    ratingIdx: index("rating_comments_rating_idx").on(t.ratingId, t.createdAt),
+  }),
+);
+
+/** Items a profile wants to get to later. */
+export const watchlist = pgTable(
+  "watchlist",
+  {
+    id: pk(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").notNull().references(() => catalogItems.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    orgItemUq: uniqueIndex("watchlist_org_item_uq").on(t.orgId, t.itemId),
+  }),
+);
+
+/** Append-only timeline of rating activity, powering My History. */
+export const ratingEvents = pgTable(
+  "rating_events",
+  {
+    id: pk(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").notNull().references(() => catalogItems.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().default("rated"),
+    detail: text("detail"),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    orgIdx: index("rating_events_org_idx").on(t.orgId, t.createdAt),
+  }),
+);
+
+export const searchHistory = pgTable(
+  "search_history",
+  {
+    id: pk(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    query: text("query").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    orgQueryUq: uniqueIndex("search_history_org_query_uq").on(t.orgId, t.query),
+  }),
+);
+
+export const socialNotifications = pgTable(
+  "social_notifications",
+  {
+    id: pk(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    actorOrgId: uuid("actor_org_id").references(() => orgs.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    itemId: uuid("item_id").references(() => catalogItems.id, { onDelete: "cascade" }),
+    ratingId: uuid("rating_id").references(() => itemRatings.id, { onDelete: "cascade" }),
+    body: text("body").notNull().default(""),
+    read: boolean("read").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    orgIdx: index("social_notifications_org_idx").on(t.orgId, t.createdAt),
   }),
 );

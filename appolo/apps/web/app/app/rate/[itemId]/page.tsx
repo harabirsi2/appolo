@@ -60,6 +60,10 @@ export default async function RateItemPage({ params }: Params) {
         score: rating?.score ?? matchup.item.score,
         reviewText: rating?.reviewText ?? "",
         reviewTags: rating?.reviewTags ?? [],
+        spoiler: rating?.spoiler ?? false,
+        photoUrl: rating?.photoUrl ?? null,
+        favoriteCharacter: rating?.favoriteCharacter ?? null,
+        favoriteTracks: rating?.favoriteTracks ?? [],
       }}
       initialOpponent={{
         id: matchup.opponent.id,
@@ -69,6 +73,7 @@ export default async function RateItemPage({ params }: Params) {
       kindLabel={MEDIA_KIND_LABELS[item.kind]}
       suggestedTags={suggestedTags}
       pods={pods.map((pod) => ({ id: pod.id, title: pod.title }))}
+      manualMode={profile?.manualMode ?? false}
     />
   );
 }

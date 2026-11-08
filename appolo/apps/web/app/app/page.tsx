@@ -3,12 +3,14 @@ import { Button } from "@appolo/ui";
 import { MEDIA_KIND_LABELS } from "@appolo/core";
 import { requireSession } from "@/lib/session";
 import { tasteStats, topFive } from "@/lib/services/rankings";
+import { popularThisWeek } from "@/lib/services/rankings";
 import {
   ensureProfile,
-  followFeed,
+  feedForYou,
   getProfileByOrgId,
   podsForProfile,
   suggestedProfiles,
+  unreadNotificationCount,
 } from "@/lib/services/social";
 import { MediaArt } from "@/components/media-art";
 import { Avatar, PodRow, ReviewCard } from "@/components/podiums";
@@ -25,12 +27,14 @@ export default async function HomePage() {
     (await getProfileByOrgId(session.org.id)) ??
     (await ensureProfile(session.org.id, session.org.name, session.org.slug));
 
-  const [stats, top, feed, suggestions, pods] = await Promise.all([
+  const [stats, top, feed, suggestions, pods, popular, unread] = await Promise.all([
     tasteStats(session.org.id),
     topFive(session.org.id),
-    followFeed(session.org.id, 6),
+    feedForYou(session.org.id, 6),
     suggestedProfiles(session.org.id, 4),
     podsForProfile(profile.orgId, profile.username, profile.displayName),
+    popularThisWeek(8),
+    unreadNotificationCount(session.org.id),
   ]);
 
   return (
@@ -39,9 +43,19 @@ export default async function HomePage() {
         <Link href="/app" className="text-[26px] font-extrabold tracking-tight text-ink">
           appolo
         </Link>
-        <Link href="/app/profile" aria-label="Your profile">
-          <Avatar name={profile.displayName} hue={profile.avatarHue} size={36} />
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link href="/app/notifications" aria-label="Notifications" className="relative">
+            <span className="text-[20px]">🔔</span>
+            {unread > 0 ? (
+              <span className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-brand text-[9px] font-bold text-black">
+                {unread > 9 ? "9+" : unread}
+              </span>
+            ) : null}
+          </Link>
+          <Link href="/app/profile" aria-label="Your profile">
+            <Avatar name={profile.displayName} hue={profile.avatarHue} size={36} />
+          </Link>
+        </div>
       </header>
 
       <p className="mt-4 text-[13px] text-muted">
@@ -113,6 +127,27 @@ export default async function HomePage() {
           <div className="-mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
             {pods.map((pod) => (
               <PodRow key={pod.id} pod={pod} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="mt-8">
+        <div className="mb-3 flex items-end justify-between">
+          <h2 className="text-[17px] font-semibold text-ink">Popular this week</h2>
+        </div>
+        {popular.length === 0 ? (
+          <p className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 text-[13px] text-muted">No ratings yet.</p>
+        ) : (
+          <div className="-mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
+            {popular.map((item) => (
+              <Link key={item.id} href={`/app/item/${item.id}`} className="w-[116px] shrink-0">
+                <MediaArt kind={item.kind} title={item.title} className="aspect-square w-full rounded-xl" />
+                <p className="mt-2 truncate text-[13px] font-medium text-ink">{item.title}</p>
+                <p className="truncate text-[11px] text-muted-2">
+                  {item.average.toFixed(1)} · {item.ratings} ratings
+                </p>
+              </Link>
             ))}
           </div>
         )}

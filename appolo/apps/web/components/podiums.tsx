@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cn } from "@appolo/ui";
+import { ReviewEngagement } from "./review-engagement";
 import type { MediaKind } from "@appolo/core/ranking";
 import { MediaArt } from "./media-art";
 
@@ -223,6 +224,7 @@ const TILE_ART: Record<MediaKind, string[]> = {
   music: ["Blonde", "Kid A", "In Rainbows"],
   podcast: ["Serial", "Hardcore History", "The Daily"],
   book: ["Beloved", "Piranesi", "Project Hail Mary"],
+  game: ["Hollow Knight", "Elden Ring", "Hades"],
 };
 
 export function CategoryTile({
@@ -280,6 +282,12 @@ export interface ReviewCardData {
   score: number;
   text: string | null;
   tags: string[];
+  spoiler?: boolean;
+  photoUrl?: string | null;
+  favoriteCharacter?: string | null;
+  favoriteTracks?: string[];
+  reactions?: Array<{ emoji: string; count: number; mine: boolean }>;
+  commentCount?: number;
 }
 
 export function ReviewCard({ review, className }: { review: ReviewCardData; className?: string }) {
@@ -299,7 +307,16 @@ export function ReviewCard({ review, className }: { review: ReviewCardData; clas
       </p>
       <p className="text-[11px] text-muted-2">{review.itemSubtitle || review.kind}</p>
       {review.text ? (
-        <p className="mt-2 line-clamp-6 whitespace-pre-line text-[13px] leading-relaxed text-muted">{review.text}</p>
+        <p className="mt-2 line-clamp-6 whitespace-pre-line text-[13px] leading-relaxed text-muted">
+          {review.spoiler ? <span className="mr-1 rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-red-300">Spoiler</span> : null}
+          {review.text}
+        </p>
+      ) : null}
+      {review.favoriteCharacter ? (
+        <p className="mt-1.5 text-[11px] text-muted-2">Fav character: <span className="text-ink">{review.favoriteCharacter}</span></p>
+      ) : null}
+      {review.favoriteTracks && review.favoriteTracks.length > 0 ? (
+        <p className="mt-0.5 text-[11px] text-muted-2">Fav tracks: <span className="text-ink">{review.favoriteTracks.join(", ")}</span></p>
       ) : null}
       {review.tags.length > 0 ? (
         <div className="mt-auto flex flex-wrap gap-1 pt-2.5">
@@ -310,6 +327,23 @@ export function ReviewCard({ review, className }: { review: ReviewCardData; clas
           ))}
         </div>
       ) : null}
+      {review.reactions && review.reactions.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {review.reactions.map((reaction) => (
+            <span key={reaction.emoji} className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-muted">
+              {reaction.emoji} {reaction.count}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {review.commentCount ? (
+        <p className="mt-1 text-[10px] text-muted-2">{review.commentCount} comment{review.commentCount === 1 ? "" : "s"}</p>
+      ) : null}
+      <ReviewEngagement
+        ratingId={review.id}
+        initialReactions={review.reactions ?? []}
+        initialCommentCount={review.commentCount ?? 0}
+      />
     </article>
   );
 }

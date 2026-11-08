@@ -18,6 +18,10 @@ interface RatingSide {
   score: number;
   reviewText: string;
   reviewTags: string[];
+  spoiler: boolean;
+  photoUrl: string | null;
+  favoriteCharacter: string | null;
+  favoriteTracks: string[];
 }
 
 interface OpponentSide {
@@ -32,12 +36,14 @@ export function FinishRating({
   kindLabel,
   suggestedTags,
   pods,
+  manualMode,
 }: {
   initialItem: RatingSide;
   initialOpponent: OpponentSide;
   kindLabel: string;
   suggestedTags: string[];
   pods: Array<{ id: string; title: string }>;
+  manualMode: boolean;
 }) {
   const router = useRouter();
   const [item, setItem] = useState(initialItem);
@@ -45,11 +51,18 @@ export function FinishRating({
   const [tags, setTags] = useState<string[]>(initialItem.reviewTags);
   const [podIds, setPodIds] = useState<string[]>([]);
   const [text, setText] = useState(initialItem.reviewText);
+  const [spoiler, setSpoiler] = useState(initialItem.spoiler);
+  const [photoUrl, setPhotoUrl] = useState(initialItem.photoUrl ?? "");
+  const [favoriteCharacter, setFavoriteCharacter] = useState(initialItem.favoriteCharacter ?? "");
+  const [favoriteTracks, setFavoriteTracks] = useState<string[]>(initialItem.favoriteTracks);
+  const [trackInput, setTrackInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [votes, setVotes] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [manualScore, setManualScore] = useState(initialItem.score);
+  const [manualBusy, setManualBusy] = useState(false);
 
   function toggleTag(tag: string) {
     setTags((current) =>
@@ -102,6 +115,29 @@ export function FinishRating({
     }
   }
 
+  async function setManual() {
+    setManualBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/rankings/${item.id}/manual`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ score: manualScore }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not set score.");
+      }
+      const outcome = (await response.json()) as { rating: { score: number } };
+      setItem((current) => ({ ...current, score: outcome.rating.score }));
+      setMessage(`Set to ${outcome.rating.score.toFixed(1)} / 10.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Something went wrong.");
+    } finally {
+      setManualBusy(false);
+    }
+  }
+
   async function save() {
     setSaving(true);
     setError(null);
@@ -109,7 +145,15 @@ export function FinishRating({
       const response = await fetch(`/api/rankings/${item.id}/review`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: text || null, tags, podIds }),
+        body: JSON.stringify({
+          text: text || null,
+          tags,
+          podIds,
+          spoiler,
+          photoUrl: photoUrl || null,
+          favoriteCharacter: favoriteCharacter || null,
+          favoriteTracks,
+        }),
       });
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { error?: string };
@@ -223,11 +267,91 @@ export function FinishRating({
         <textarea
           value={text}
           onChange={(event) => setText(event.target.value)}
-          maxLength={1000}
+          maxLength={10000}
           rows={3}
           placeholder="“One of the greatest movies of the year...”"
           className="mt-4 w-full resize-none rounded-xl border border-white/[0.06] bg-black/40 px-3 py-2.5 text-[13px] italic leading-relaxed text-ink placeholder:text-muted-2 focus:border-white/20 focus:outline-none"
         />
+
+        <div className="mt-4 space-y-3">
+          <label className="flex items-center gap-2 text-[12px] text-muted">
+            <input type="checkbox" checked={spoiler} onChange={(e) => setSpoiler(e.target.checked)} />
+            Contains spoilers
+          </label>
+          <input
+            value={photoUrl}
+            onChange={(e) => setPhotoUrl(e.target.value)}
+            placeholder="Photo URL (optional)"
+            className="h-10 w-full rounded-xl border border-white/[0.06] bg-[#1a1a1d] px-3 text-[13px] text-ink focus:border-white/20 focus:outline-none"
+          />
+          <input
+            value={favoriteCharacter}
+            onChange={(e) => setFavoriteCharacter(e.target.value)}
+            placeholder="Favorite character"
+            className="h-10 w-full rounded-xl border border-white/[0.06] bg-[#1a1a1d] px-3 text-[13px] text-ink focus:border-white/20 focus:outline-none"
+          />
+          <div className="flex gap-2">
+            <input
+              value={trackInput}
+              onChange={(e) => setTrackInput(e.target.value)}
+              placeholder="Favorite track"
+              className="h-10 flex-1 rounded-xl border border-white/[0.06] bg-[#1a1a1d] px-3 text-[13px] text-ink focus:border-white/20 focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const v = trackInput.trim();
+                if (!v) return;
+                if (favoriteTracks.includes(v)) return;
+                setFavoriteTracks((prev) => [...prev, v].slice(0, 10));
+                setTrackInput("");
+              }}
+              className="rounded-full border border-white/10 px-3 text-[12px] text-muted hover:text-ink"
+            >
+              Add
+            </button>
+          </div>
+          {favoriteTracks.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {favoriteTracks.map((track) => (
+                <button
+                  key={track}
+                  type="button"
+                  onClick={() => setFavoriteTracks((prev) => prev.filter((t) => t !== track))}
+                  className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-muted hover:text-ink"
+                >
+                  {track} ×
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        {manualMode ? (
+          <div className="mt-4 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-3">
+            <p className="text-[12px] font-semibold text-ink">Manual mode</p>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="range"
+                min={0}
+                max={10}
+                step={0.1}
+                value={manualScore}
+                onChange={(e) => setManualScore(Number(e.target.value))}
+                className="flex-1"
+              />
+              <span className="w-10 text-right text-[13px] text-ink">{manualScore.toFixed(1)}</span>
+              <button
+                type="button"
+                onClick={setManual}
+                disabled={manualBusy}
+                className="rounded-full border border-white/10 px-3 py-1 text-[12px] text-muted hover:text-ink disabled:opacity-60"
+              >
+                Set
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-5">
           <p className="text-center text-[13px] font-semibold text-ink">Which is better?</p>
