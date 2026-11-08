@@ -20,6 +20,8 @@ export interface CatalogItem {
   subtitle: string;
   year: number | null;
   imageUrl: string | null;
+  description: string | null;
+  links: Record<string, string>;
   tags: string[];
 }
 
@@ -30,6 +32,8 @@ export interface RankedItem extends CatalogItem {
   losses: number;
   skips: number;
   score: number;
+  reviewText: string | null;
+  reviewTags: string[];
   position: number;
 }
 
@@ -90,6 +94,8 @@ function mapCatalogItem(row: typeof catalogItems.$inferSelect): CatalogItem {
     subtitle: row.subtitle,
     year: row.year ?? null,
     imageUrl: row.imageUrl ?? null,
+    description: row.description ?? null,
+    links: (row.links ?? {}) as Record<string, string>,
     tags: row.tags ?? [],
   };
 }
@@ -108,7 +114,11 @@ export async function rankedRatings(orgId: string, options: { kind?: string; lim
       })
       .from(itemRatings)
       .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
-      .where(options.kind ? eq(catalogItems.kind, options.kind as MediaKind) : undefined);
+      .where(
+        options.kind
+          ? and(eq(itemRatings.orgId, orgId), eq(catalogItems.kind, options.kind as MediaKind))
+          : eq(itemRatings.orgId, orgId),
+      );
 
     const ranked = withPositions(
       rows.map(({ item, rating }) => ({
@@ -119,6 +129,8 @@ export async function rankedRatings(orgId: string, options: { kind?: string; lim
         losses: rating.losses,
         skips: rating.skips,
         score: toScore(rating.elo),
+        reviewText: rating.reviewText ?? null,
+        reviewTags: rating.reviewTags ?? [],
         position: 0,
       })),
     );
@@ -136,7 +148,7 @@ export async function getRating(orgId: string, itemId: string): Promise<RankedIt
       .select({ item: catalogItems, rating: itemRatings })
       .from(itemRatings)
       .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
-      .where(eq(itemRatings.itemId, itemId))
+      .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, itemId)))
       .limit(1);
     const row = rows[0];
     if (!row) return null;
@@ -147,6 +159,8 @@ export async function getRating(orgId: string, itemId: string): Promise<RankedIt
       wins: row.rating.wins,
       losses: row.rating.losses,
       skips: row.rating.skips,
+      reviewText: row.rating.reviewText ?? null,
+      reviewTags: row.rating.reviewTags ?? [],
       score: toScore(row.rating.elo),
       position: 0,
     };
@@ -161,7 +175,8 @@ export async function tasteStats(orgId: string): Promise<TasteStats> {
         matchups: sql<number>`coalesce(sum(${itemRatings.matches}), 0)::int`,
         avgElo: sql<number>`coalesce(avg(${itemRatings.elo}), ${START_ELO})::float`,
       })
-      .from(itemRatings);
+      .from(itemRatings)
+      .where(eq(itemRatings.orgId, orgId));
 
     const kindRows = await tx
       .select({
@@ -170,6 +185,7 @@ export async function tasteStats(orgId: string): Promise<TasteStats> {
       })
       .from(itemRatings)
       .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
+      .where(eq(itemRatings.orgId, orgId))
       .groupBy(catalogItems.kind)
       .orderBy(sql`count(*) desc`)
       .limit(1);
@@ -223,7 +239,7 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
           .from(itemRatings)
           .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, itemId)))
           .limit(1)
-      )[0] ?? { elo: START_ELO, matches: 0, wins: 0, losses: 0, skips: 0 };
+      )[0] ?? { elo: START_ELO, matches: 0, wins: 0, losses: 0, skips: 0, reviewText: null, reviewTags: [] };
 
     const poolRows = await tx
       .select({
@@ -231,13 +247,16 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
         elo: sql<number>`coalesce(${itemRatings.elo}, ${START_ELO})::int`,
       })
       .from(catalogItems)
-      .leftJoin(itemRatings, eq(itemRatings.itemId, catalogItems.id))
+      .leftJoin(
+        itemRatings,
+        and(eq(itemRatings.itemId, catalogItems.id), eq(itemRatings.orgId, orgId)),
+      )
       .where(eq(catalogItems.kind, item.kind));
 
     const recentRows = await tx
       .select({ opponentId: itemMatchups.opponentId })
       .from(itemMatchups)
-      .where(eq(itemMatchups.itemId, itemId))
+      .where(and(eq(itemMatchups.orgId, orgId), eq(itemMatchups.itemId, itemId)))
       .orderBy(desc(itemMatchups.createdAt))
       .limit(5);
     const recentIds = recentRows.map((r) => r.opponentId);
@@ -259,7 +278,7 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
     const row = opponentItem[0]!;
 
     return {
-      item: { ...item, elo: rating.elo, matches: rating.matches, wins: rating.wins, losses: rating.losses, skips: rating.skips, score: toScore(rating.elo), position: 0 },
+      item: { ...item, elo: rating.elo, matches: rating.matches, wins: rating.wins, losses: rating.losses, skips: rating.skips, score: toScore(rating.elo), position: 0, reviewText: rating.reviewText ?? null, reviewTags: rating.reviewTags ?? [] },
       opponent: {
         ...mapCatalogItem(row),
         elo: opponent.elo,
@@ -269,6 +288,8 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
         skips: 0,
         score: toScore(opponent.elo),
         position: 0,
+        reviewText: null,
+        reviewTags: [],
       },
     };
   });
@@ -351,8 +372,8 @@ export async function submitVote(
     return {
       result,
       itemDelta: counted ? after.a - before.item : 0,
-      item: { ...item, elo: updatedItem.elo, matches: updatedItem.matches, wins: updatedItem.wins, losses: updatedItem.losses, skips: updatedItem.skips, score: toScore(updatedItem.elo), position: 0 },
-      opponent: { ...opponent, elo: updatedOpponent.elo, matches: updatedOpponent.matches, wins: updatedOpponent.wins, losses: updatedOpponent.losses, skips: updatedOpponent.skips, score: toScore(updatedOpponent.elo), position: 0 },
+      item: { ...item, elo: updatedItem.elo, matches: updatedItem.matches, wins: updatedItem.wins, losses: updatedItem.losses, skips: updatedItem.skips, score: toScore(updatedItem.elo), position: 0, reviewText: updatedItem.reviewText ?? null, reviewTags: updatedItem.reviewTags ?? [] },
+      opponent: { ...opponent, elo: updatedOpponent.elo, matches: updatedOpponent.matches, wins: updatedOpponent.wins, losses: updatedOpponent.losses, skips: updatedOpponent.skips, score: toScore(updatedOpponent.elo), position: 0, reviewText: updatedOpponent.reviewText ?? null, reviewTags: updatedOpponent.reviewTags ?? [] },
     };
   });
 }
@@ -372,7 +393,7 @@ export async function recentMatchups(orgId: string, itemId: string, limit = 10) 
       })
       .from(itemMatchups)
       .innerJoin(catalogItems, eq(catalogItems.id, itemMatchups.opponentId))
-      .where(eq(itemMatchups.itemId, itemId))
+      .where(and(eq(itemMatchups.orgId, orgId), eq(itemMatchups.itemId, itemId)))
       .orderBy(desc(itemMatchups.createdAt))
       .limit(limit);
     return rows;
@@ -382,7 +403,7 @@ export async function recentMatchups(orgId: string, itemId: string, limit = 10) 
 /** Ids of items the org has ranked, useful for "already rated" badges. */
 export async function ratedItemIds(orgId: string): Promise<string[]> {
   return withOrg(orgId, async (tx) => {
-    const rows = await tx.select({ itemId: itemRatings.itemId }).from(itemRatings);
+    const rows = await tx.select({ itemId: itemRatings.itemId }).from(itemRatings).where(eq(itemRatings.orgId, orgId));
     return rows.map((r) => r.itemId);
   });
 }

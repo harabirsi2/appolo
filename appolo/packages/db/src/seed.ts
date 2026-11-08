@@ -47,6 +47,10 @@ const {
   aiKnowledgeChunks,
   catalogItems,
   itemRatings,
+  profiles,
+  follows,
+  pods,
+  podItems,
 } = schema;
 
 const db = getAdminDb();
@@ -131,6 +135,29 @@ const MEDIA_CATALOG: CatalogSeed[] = [
   { kind: "book", title: "Project Hail Mary", subtitle: "Andy Weir", year: 2021, tags: ["sci-fi", "adventure"] },
 ];
 
+/** Short, original overview blurbs (factual metadata only). */
+const DESCRIPTIONS: Record<string, string> = {
+  "The Godfather": "Francis Ford Coppola's crime saga follows the Corleone family across a decade of loyalty, power, and loss.",
+  "Spirited Away": "Hayao Miyazaki's coming-of-age fantasy sends a young girl into a spirit world of bathhouses, gods, and quiet courage.",
+  Parasite: "Bong Joon-ho's genre-bending thriller about two families and the slippery gap between them.",
+  "Mad Max: Fury Road": "George Miller's chase film: two hours of roaring engines, practical stunts, and a rebellion at speed.",
+  "Breaking Bad": "A chemistry teacher turns to making meth to provide for his family, and keeps going far past that.",
+  "The Bear": "A fine-dining chef inherits his brother's chaotic Chicago sandwich shop.",
+  Fleabag: "Phoebe Waller-Bridge's comedy about grief, family, and talking straight to the audience.",
+  Severance: "Employees at Lumon agree to surgically separate their work and personal memories.",
+  "Better Call Saul": "The slow, careful tragedy of how Jimmy McGill became Saul Goodman.",
+  Blonde: "Frank Ocean's lush, shape-shifting album about memory, queerness, and growing up.",
+  "To Pimp a Butterfly": "Kendrick Lamar's dense, jazz-soaked record about race, fame, and self-worth.",
+  "Kid A": "Radiohead's turn toward electronics: cold textures around warm, uneasy songs.",
+  "In Rainbows": "Radiohead at their most direct, built on restless rhythms and quiet dread.",
+  Serial: "Sarah Koenig reopens a 1999 murder case across a season of investigative reporting.",
+  "Hardcore History": "Dan Carlin's long-form history, often longer than the events themselves.",
+  Piranesi: "Susanna Clarke's strange, gentle mystery set inside an endless house.",
+  Beloved: "Toni Morrison's Pulitzer-winning novel about slavery, memory, and a haunting.",
+  Dune: "Frank Herbert's desert epic of politics, ecology, and prophecy on the planet Arrakis.",
+  "Project Hail Mary": "Andy Weir's lone-astronaut problem-solving adventure across the stars.",
+};
+
 function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -138,21 +165,38 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+function spotifyLink(item: CatalogSeed): string | null {
+  if (item.kind === "music") return `https://open.spotify.com/search/${encodeURIComponent(item.title)}`;
+  return null;
+}
+
 /** Seed the shared catalog and, on first run, a demo org's taste profile. */
 async function seedMedia(orgId: string): Promise<void> {
   await db
     .insert(catalogItems)
     .values(
-      MEDIA_CATALOG.map((item) => ({
-        kind: item.kind,
-        title: item.title,
-        subtitle: item.subtitle,
-        year: item.year,
-        externalRef: `demo:${item.kind}:${slugify(item.title)}`,
-        tags: item.tags,
-      })),
+      MEDIA_CATALOG.map((item) => {
+        const spotify = spotifyLink(item);
+        return {
+          kind: item.kind,
+          title: item.title,
+          subtitle: item.subtitle,
+          year: item.year,
+          externalRef: `demo:${item.kind}:${slugify(item.title)}`,
+          description: DESCRIPTIONS[item.title] ?? null,
+          links: spotify ? { spotify } : {},
+          tags: item.tags,
+        };
+      }),
     )
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: catalogItems.externalRef,
+      set: {
+        description: sql`excluded.description`,
+        links: sql`excluded.links`,
+        tags: sql`excluded.tags`,
+      },
+    });
 
   const rows = await db
     .select({ id: catalogItems.id, kind: catalogItems.kind, title: catalogItems.title })
@@ -177,6 +221,199 @@ async function seedMedia(orgId: string): Promise<void> {
         .onConflictDoNothing();
     }
   });
+}
+
+type CommunityRating = { title: string; score: number; tags: string[]; text: string };
+type CommunityMember = {
+  username: string;
+  displayName: string;
+  hue: number;
+  bio: string;
+  ratings: CommunityRating[];
+  pod?: { title: string; slug: string; description: string; items: string[] };
+};
+
+/** Other taste profiles so the social surface has real content to show. */
+const COMMUNITY: CommunityMember[] = [
+  {
+    username: "cart",
+    displayName: "Cart",
+    hue: 150,
+    bio: "poptimist. albums > everything.",
+    ratings: [
+      { title: "Blonde", score: 8.9, tags: ["r&b"], text: "Endlessly replayable — the back half is the whole point." },
+      { title: "To Pimp a Butterfly", score: 9.4, tags: ["hip-hop"], text: "A history lesson that also bangs." },
+      { title: "Spirited Away", score: 9.2, tags: ["animation"], text: "Still the most beautiful thing Ghibli ever made." },
+      { title: "Fleabag", score: 8.8, tags: ["comedy"], text: "The fourth wall never gets old." },
+      { title: "Kid A", score: 8.1, tags: ["electronic"], text: "Cold on the surface, warm underneath." },
+    ],
+    pod: { title: "2026 bangers", slug: "2026-bangers", description: "The records I cannot stop playing.", items: ["Blonde", "To Pimp a Butterfly", "Kid A"] },
+  },
+  {
+    username: "noah",
+    displayName: "Noah",
+    hue: 25,
+    bio: "movies, records, the occasional book.",
+    ratings: [
+      { title: "The Godfather", score: 9.3, tags: ["crime"], text: "Every frame is a poster." },
+      { title: "Breaking Bad", score: 9.5, tags: ["drama"], text: "Perfect television, start to finish." },
+      { title: "Parasite", score: 8.8, tags: ["thriller"], text: "Moves like a trapdoor." },
+      { title: "Piranesi", score: 8.7, tags: ["fantasy"], text: "Quiet and strange and perfect." },
+      { title: "In Rainbows", score: 8.5, tags: ["rock"], text: "Their warmest record." },
+    ],
+    pod: { title: "all-timers", slug: "all-timers", description: "No notes.", items: ["The Godfather", "Breaking Bad", "Parasite"] },
+  },
+  {
+    username: "ava",
+    displayName: "Ava",
+    hue: 300,
+    bio: "books, pods, and long walks.",
+    ratings: [
+      { title: "Beloved", score: 9.0, tags: ["literary"], text: "Devastating in the best way." },
+      { title: "Serial", score: 8.4, tags: ["true crime"], text: "The one that started it all." },
+      { title: "Severance", score: 8.6, tags: ["sci-fi"], text: "Cold, gripping, immaculate." },
+      { title: "Dune", score: 7.9, tags: ["sci-fi"], text: "Worth it for the world-building." },
+      { title: "The Bear", score: 8.2, tags: ["drama"], text: "Anxiety as television." },
+    ],
+    pod: { title: "comfort listens", slug: "comfort-listens", description: "For a slow weekend.", items: ["Serial", "The Bear"] },
+  },
+];
+
+async function seedCommunity(ownerOrgId: string, ownerName: string): Promise<void> {
+  const catalogRows = await db
+    .select({ id: catalogItems.id, title: catalogItems.title })
+    .from(catalogItems);
+  const idByTitle = new Map(catalogRows.map((row) => [row.title, row.id]));
+
+  await db
+    .insert(profiles)
+    .values({ orgId: ownerOrgId, username: "demo", displayName: ownerName, bio: "Building my podium.", avatarHue: 250 })
+    .onConflictDoNothing();
+
+  const demoPod: NonNullable<CommunityMember["pod"]> = {
+    title: "podium staples",
+    slug: "podium-staples",
+    description: "The five I keep coming back to.",
+    items: ["Breaking Bad", "Spirited Away", "To Pimp a Butterfly", "The Godfather", "Piranesi"],
+  };
+  let demoPodRow = (
+    await db
+      .select()
+      .from(pods)
+      .where(and(eq(pods.orgId, ownerOrgId), eq(pods.slug, demoPod.slug)))
+      .limit(1)
+  )[0];
+  if (!demoPodRow) {
+    demoPodRow = (
+      await db
+        .insert(pods)
+        .values({
+          orgId: ownerOrgId,
+          title: demoPod.title,
+          slug: demoPod.slug,
+          description: demoPod.description,
+          visibility: "public",
+        })
+        .returning()
+    )[0]!;
+  }
+  for (let index = 0; index < demoPod.items.length; index += 1) {
+    const itemId = idByTitle.get(demoPod.items[index]!);
+    if (!itemId) continue;
+    await db
+      .insert(podItems)
+      .values({ podId: demoPodRow.id, itemId, position: index })
+      .onConflictDoNothing();
+  }
+
+  for (const member of COMMUNITY) {
+    let orgRow = (await db.select().from(orgs).where(eq(orgs.slug, member.username)).limit(1))[0];
+    if (!orgRow) {
+      orgRow = (
+        await db
+          .insert(orgs)
+          .values({ name: member.displayName, slug: member.username, planTier: "free" })
+          .returning()
+      )[0]!;
+    }
+    const memberOrgId = orgRow.id;
+
+    await db
+      .insert(profiles)
+      .values({
+        orgId: memberOrgId,
+        username: member.username,
+        displayName: member.displayName,
+        bio: member.bio,
+        avatarHue: member.hue,
+      })
+      .onConflictDoNothing();
+
+    await withOrgAdmin(memberOrgId, async (tx) => {
+      for (const rating of member.ratings) {
+        const itemId = idByTitle.get(rating.title);
+        if (!itemId) continue;
+        await tx
+          .insert(itemRatings)
+          .values({
+            orgId: memberOrgId,
+            itemId,
+            elo: Math.round(1200 + rating.score * 60),
+            matches: 8,
+            wins: 6,
+            losses: 2,
+            reviewText: rating.text,
+            reviewTags: rating.tags,
+          })
+          .onConflictDoNothing();
+      }
+    });
+
+    if (member.pod) {
+      let podRow = (
+        await db
+          .select()
+          .from(pods)
+          .where(and(eq(pods.orgId, memberOrgId), eq(pods.slug, member.pod.slug)))
+          .limit(1)
+      )[0];
+      if (!podRow) {
+        podRow = (
+          await db
+            .insert(pods)
+            .values({
+              orgId: memberOrgId,
+              title: member.pod.title,
+              slug: member.pod.slug,
+              description: member.pod.description,
+              visibility: "public",
+            })
+            .returning()
+        )[0]!;
+      }
+      const items = member.pod.items;
+      for (let index = 0; index < items.length; index += 1) {
+        const itemId = idByTitle.get(items[index]!);
+        if (!itemId) continue;
+        await db
+          .insert(podItems)
+          .values({ podId: podRow.id, itemId, position: index })
+          .onConflictDoNothing();
+      }
+    }
+
+    // The demo profile follows the seeded community so the home feed is alive.
+    await db
+      .insert(follows)
+      .values({ followerOrgId: ownerOrgId, followeeOrgId: memberOrgId })
+      .onConflictDoNothing();
+    if (member.username === "cart") {
+      await db
+        .insert(follows)
+        .values({ followerOrgId: memberOrgId, followeeOrgId: ownerOrgId })
+        .onConflictDoNothing();
+    }
+  }
 }
 
 async function main(): Promise<void> {
@@ -873,6 +1110,7 @@ async function main(): Promise<void> {
 
   // --- Media catalog (shared) + demo taste profile (org-scoped) ---
   await seedMedia(orgId);
+  await seedCommunity(orgId, "Demo Profile");
 
   console.log("");
   console.log("  seed complete");

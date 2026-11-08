@@ -17,6 +17,11 @@ function hashString(value: string): number {
   return Math.abs(hash);
 }
 
+/** Deterministic cover hue, reused for ambient page glows. */
+export function mediaHue(title: string): number {
+  return hashString(title) % 360;
+}
+
 /**
  * A deterministic, offline-friendly cover tile. There are no external image
  * dependencies, so every item renders consistently in the demo catalog.
@@ -30,7 +35,7 @@ export function MediaArt({
   title: string;
   className?: string;
 }) {
-  const hue = hashString(title) % 360;
+  const hue = mediaHue(title);
   const initials = title
     .split(/\s+/)
     .filter((word) => /[a-z0-9]/i.test(word))

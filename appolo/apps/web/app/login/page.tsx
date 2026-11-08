@@ -19,7 +19,7 @@ export default async function LoginPage({
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-12">
       <Link href="/" className="mb-8 flex items-center gap-2">
-        <div className="grid h-8 w-8 place-items-center rounded-lg bg-brand text-sm font-bold text-white">A</div>
+        <div className="grid h-8 w-8 place-items-center rounded-lg bg-brand text-sm font-bold text-black">A</div>
         <span className="text-lg font-semibold tracking-tight">Appolo</span>
       </Link>
 

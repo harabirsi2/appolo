@@ -36,6 +36,13 @@
       "when": 1794093145136,
       "tag": "0004_motionless_earthquake",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794124433410,
+      "tag": "0005_shocking_maestro",
+      "breakpoints": true
     }
   ]
 }

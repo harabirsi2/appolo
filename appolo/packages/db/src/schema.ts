@@ -1044,6 +1044,8 @@ export const catalogItems = pgTable(
     subtitle: text("subtitle").notNull().default(""),
     year: integer("year"),
     imageUrl: text("image_url"),
+    description: text("description"),
+    links: jsonb("links").notNull().default(emptyJson()),
     externalRef: text("external_ref"),
     tags: text("tags").array().notNull().default(emptyTextArray()),
     createdAt: createdAt(),
@@ -1067,6 +1069,8 @@ export const itemRatings = pgTable(
     wins: integer("wins").notNull().default(0),
     losses: integer("losses").notNull().default(0),
     skips: integer("skips").notNull().default(0),
+    reviewText: text("review_text"),
+    reviewTags: text("review_tags").array().notNull().default(emptyTextArray()),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1094,5 +1098,79 @@ export const itemMatchups = pgTable(
   },
   (t) => ({
     orgItemIdx: index("item_matchups_org_item_idx").on(t.orgId, t.itemId, t.createdAt),
+  }),
+);
+
+/* ------------------------------------------------------------------ */
+/* social profile, follows, and pods                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The public face of a taste profile. `orgs` stays private (strict
+ * multi-tenant RLS); this table is world-readable and keyed by username.
+ */
+export const profiles = pgTable(
+  "profiles",
+  {
+    id: pk(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    username: text("username").notNull(),
+    displayName: text("display_name").notNull(),
+    bio: text("bio"),
+    avatarHue: integer("avatar_hue").notNull().default(245),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    orgUq: uniqueIndex("profiles_org_uq").on(t.orgId),
+    usernameUq: uniqueIndex("profiles_username_uq").on(t.username),
+  }),
+);
+
+export const follows = pgTable(
+  "follows",
+  {
+    id: pk(),
+    followerOrgId: uuid("follower_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    followeeOrgId: uuid("followee_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    pairUq: uniqueIndex("follows_pair_uq").on(t.followerOrgId, t.followeeOrgId),
+  }),
+);
+
+/** A shareable list ("pod") of catalog items. */
+export const pods = pgTable(
+  "pods",
+  {
+    id: pk(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    slug: text("slug").notNull(),
+    description: text("description"),
+    visibility: text("visibility").notNull().default("public"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    orgSlugUq: uniqueIndex("pods_org_slug_uq").on(t.orgId, t.slug),
+    orgIdx: index("pods_org_idx").on(t.orgId),
+  }),
+);
+
+export const podItems = pgTable(
+  "pod_items",
+  {
+    id: pk(),
+    podId: uuid("pod_id").notNull().references(() => pods.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").notNull().references(() => catalogItems.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    podItemUq: uniqueIndex("pod_items_pod_item_uq").on(t.podId, t.itemId),
+    podIdx: index("pod_items_pod_idx").on(t.podId, t.position),
   }),
 );

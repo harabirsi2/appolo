@@ -732,6 +732,36 @@ T "matchup count increments for both items" ($rankAfter.stats.matchups -eq ($mat
 
 $mediaDetail = Invoke-RestMethod "$Base/api/rankings/$($mediaTarget.id)" -WebSession $session -TimeoutSec 30
 T "rating detail returns the matchup history" ($null -ne $mediaDetail.rating -and @($mediaDetail.history).Count -ge 1)
+T "item detail exposes community distribution" (@($mediaDetail.community.distribution).Count -eq 10)
+
+$reviewBody = @{ text = "Smoke review text"; tags = @("smoke"); podIds = @() } | ConvertTo-Json
+$reviewSaved = Invoke-RestMethod "$Base/api/rankings/$($mediaTarget.id)/review" -Method Post -Body $reviewBody -ContentType "application/json" -WebSession $session -TimeoutSec 30
+T "review text and tags save to a rating" (
+    $reviewSaved.rating.reviewText -eq "Smoke review text" -and
+    @($reviewSaved.rating.reviewTags).Count -eq 1 -and
+    $reviewSaved.rating.reviewTags[0] -eq "smoke"
+)
+
+$cartProfile = Invoke-RestMethod "$Base/api/profiles/cart" -WebSession $session -TimeoutSec 30
+T "public profile returns top five and pods" (
+    $cartProfile.profile.username -eq "cart" -and
+    @($cartProfile.topFive).Count -eq 5 -and
+    @($cartProfile.pods).Count -ge 1
+)
+
+$followOn = Invoke-RestMethod "$Base/api/follow" -Method Post -Body (@{ username = "ava"; follow = $true } | ConvertTo-Json) -ContentType "application/json" -WebSession $session -TimeoutSec 30
+T "follow adds a profile to the feed" ($followOn.following -eq $true -and $followOn.followers -ge 1)
+$followOff = Invoke-RestMethod "$Base/api/follow" -Method Post -Body (@{ username = "ava"; follow = $false } | ConvertTo-Json) -ContentType "application/json" -WebSession $session -TimeoutSec 30
+T "unfollow removes the follow" ($followOff.following -eq $false)
+
+$podBody = @{ title = "Smoke Pod"; description = "Smoke test pod"; itemIds = @($mediaTarget.id) } | ConvertTo-Json
+$podCreated = Invoke-RestMethod "$Base/api/pods" -Method Post -Body $podBody -ContentType "application/json" -WebSession $session -TimeoutSec 30
+T "create pod returns a shareable slug" (
+    $podCreated.pod.title -eq "Smoke Pod" -and
+    $podCreated.pod.ownerUsername -eq "demo" -and
+    $podCreated.pod.slug -eq "smoke-pod"
+)
+$smokePodSlug = $podCreated.pod.slug
 
 # A fresh cookie jar for the HTML page checks (the earlier one was removed).
 $mediaJar = Join-Path $env:TEMP "appolo_smoke_media_cookies.txt"
@@ -754,12 +784,47 @@ $mediaGameStatus = (curl.exe -s -b $mediaJar -o $mediaGame -w "%{http_code}" "$B
 $mediaGameContent = Get-Content -Raw $mediaGame -ErrorAction SilentlyContinue
 T "mini-game page renders" ($mediaGameStatus -eq "200" -and $mediaGameContent -match "Which is better")
 
+$mediaSearch = Join-Path $env:TEMP "appolo_media_search.html"
+$mediaSearchStatus = (curl.exe -s -b $mediaJar -o $mediaSearch -w "%{http_code}" "$Base/app/search").Trim()
+$mediaSearchContent = Get-Content -Raw $mediaSearch -ErrorAction SilentlyContinue
+T "search page renders discover tiles" ($mediaSearchStatus -eq "200" -and $mediaSearchContent -match "Browse what" -and $mediaSearchContent -match "Movies")
+
+$mediaItem = Join-Path $env:TEMP "appolo_media_item.html"
+$mediaItemStatus = (curl.exe -s -b $mediaJar -o $mediaItem -w "%{http_code}" "$Base/app/item/$($mediaTarget.id)").Trim()
+$mediaItemContent = Get-Content -Raw $mediaItem -ErrorAction SilentlyContinue
+T "item detail renders rating curve and overview" (
+    $mediaItemStatus -eq "200" -and
+    $mediaItemContent -match "Avg rating" -and
+    $mediaItemContent -match "Overview" -and
+    $mediaItemContent -match [regex]::Escape($mediaTarget.title)
+)
+
+$mediaProfile = Join-Path $env:TEMP "appolo_media_profile.html"
+$mediaProfileStatus = (curl.exe -s -b $mediaJar -o $mediaProfile -w "%{http_code}" "$Base/app/profile").Trim()
+$mediaProfileContent = Get-Content -Raw $mediaProfile -ErrorAction SilentlyContinue
+T "profile page renders top five and pods" (
+    $mediaProfileStatus -eq "200" -and
+    $mediaProfileContent -match "@demo" -and
+    $mediaProfileContent -match "Top five" -and
+    $mediaProfileContent -match "Pods"
+)
+
+$publicProfile = Join-Path $env:TEMP "appolo_public_profile.html"
+$publicProfileStatus = (curl.exe -s -o $publicProfile -w "%{http_code}" "$Base/cart").Trim()
+$publicProfileContent = Get-Content -Raw $publicProfile -ErrorAction SilentlyContinue
+T "public profile is readable without a session" ($publicProfileStatus -eq "200" -and $publicProfileContent -match "@cart")
+
+$publicPod = Join-Path $env:TEMP "appolo_public_pod.html"
+$publicPodStatus = (curl.exe -s -o $publicPod -w "%{http_code}" "$Base/demo/$smokePodSlug").Trim()
+$publicPodContent = Get-Content -Raw $publicPod -ErrorAction SilentlyContinue
+T "public pod page is shareable" ($publicPodStatus -eq "200" -and $publicPodContent -match "Smoke Pod")
+
 $mediaRankings = Join-Path $env:TEMP "appolo_media_rankings.html"
 $mediaRankingsStatus = (curl.exe -s -b $mediaJar -o $mediaRankings -w "%{http_code}" "$Base/app/rankings").Trim()
 $mediaRankingsContent = Get-Content -Raw $mediaRankings -ErrorAction SilentlyContinue
 T "rankings page renders" ($mediaRankingsStatus -eq "200" -and $mediaRankingsContent -match "Rankings")
 
-Remove-Item $mediaHome, $mediaRate, $mediaGame, $mediaRankings, $mediaJar, $mediaBodyFile -Force -ErrorAction SilentlyContinue
+Remove-Item $mediaHome, $mediaRate, $mediaGame, $mediaRankings, $mediaSearch, $mediaItem, $mediaProfile, $publicProfile, $publicPod, $mediaJar, $mediaBodyFile -Force -ErrorAction SilentlyContinue
 
 # --- logout clears the session ---
 Invoke-RestMethod "$Base/api/auth/logout" -Method Post -WebSession $session -TimeoutSec 20 | Out-Null
@@ -820,6 +885,8 @@ delete from item_matchups where org_id = (select id from orgs where slug = 'demo
   and (item_id in ($mediaList) or opponent_id in ($mediaList));
 delete from item_ratings where org_id = (select id from orgs where slug = 'demo')
   and item_id in ($mediaList);
+delete from pods where title like 'Smoke Pod%'
+  and org_id = (select id from orgs where slug = 'demo');
 "@
         }
 

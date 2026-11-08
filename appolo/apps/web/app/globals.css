@@ -4,17 +4,17 @@
 @source "../../../packages/ui/src";
 
 @theme {
-  --color-bg: #0a0c10;
-  --color-surface: #10131a;
-  --color-surface-2: #161a23;
-  --color-border: #232a37;
-  --color-border-strong: #33405a;
-  --color-ink: #e8ecf4;
-  --color-muted: #98a2b3;
-  --color-muted-2: #6b7688;
-  --color-brand: #6366f1;
-  --color-brand-strong: #4f46e5;
-  --color-brand-soft: #a5b4fc;
+  --color-bg: #000000;
+  --color-surface: #101012;
+  --color-surface-2: #17171a;
+  --color-border: #242428;
+  --color-border-strong: #3a3a41;
+  --color-ink: #f6f6f7;
+  --color-muted: #a1a1aa;
+  --color-muted-2: #6f6f78;
+  --color-brand: #4ade80;
+  --color-brand-strong: #22c55e;
+  --color-brand-soft: #86efac;
   --color-success: #22c55e;
   --color-warn: #f59e0b;
   --color-danger: #ef4444;
