@@ -38,6 +38,9 @@ export function PodScreen({ pod, viewerUsername }: { pod: PodDetail; viewerUsern
                   {entry.year ? ` · ${entry.year}` : ""}
                 </p>
                 {entry.note ? <p className="mt-0.5 truncate text-[11px] text-muted">{entry.note}</p> : null}
+                {entry.addedByUsername ? (
+                  <p className="mt-0.5 truncate text-[10px] text-brand/80">{`added by @${entry.addedByUsername}`}</p>
+                ) : null}
               </div>
               <ScoreText score={entry.score} className="text-[15px]" />
             </Link>

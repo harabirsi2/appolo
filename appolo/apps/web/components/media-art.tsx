@@ -10,6 +10,15 @@ const KIND_GLYPH: Record<MediaKind, string> = {
   game: "🎮",
 };
 
+const KIND_LABEL: Record<MediaKind, string> = {
+  movie: "FILM",
+  tv: "TV",
+  music: "ALBUM",
+  podcast: "POD",
+  book: "BOOK",
+  game: "GAME",
+};
+
 function hashString(value: string): number {
   let hash = 0;
   for (let i = 0; i < value.length; i += 1) {
@@ -49,9 +58,16 @@ export function MediaArt({
 
   if (imageUrl) {
     return (
-      <div className={cn("relative shrink-0 overflow-hidden rounded-lg border border-border", className)} aria-hidden>
+      <div
+        className={cn(
+          "relative shrink-0 overflow-hidden rounded-lg border border-white/10 bg-elevated shadow-card",
+          className,
+        )}
+        aria-hidden
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={imageUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+        <span className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-inset ring-white/10" />
       </div>
     );
   }
@@ -59,16 +75,27 @@ export function MediaArt({
   return (
     <div
       className={cn(
-        "relative grid shrink-0 place-items-center overflow-hidden rounded-lg border border-border",
+        "relative isolate grid shrink-0 place-items-center overflow-hidden rounded-lg border border-white/10 shadow-card",
         className,
       )}
       style={{
-        background: `linear-gradient(135deg, hsl(${hue} 45% 30%), hsl(${(hue + 45) % 360} 45% 15%))`,
+        background: `linear-gradient(150deg, hsl(${hue} 52% 32%) 0%, hsl(${(hue + 28) % 360} 48% 17%) 52%, hsl(${(hue + 60) % 360} 40% 9%) 100%)`,
       }}
       aria-hidden
     >
-      <span className="text-3xl leading-none">{KIND_GLYPH[kind]}</span>
-      <span className="absolute bottom-0.5 left-1 text-[9px] font-bold tracking-tight text-white/70">{initials || "?"}</span>
+      <span
+        className="pointer-events-none absolute -right-6 -top-8 h-20 w-20 rotate-12 rounded-full blur-2xl"
+        style={{ background: `hsl(${(hue + 80) % 360} 70% 60% / 0.4)` }}
+      />
+      <span className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/55 to-transparent" />
+      <span className="relative text-[2.1em] leading-none drop-shadow-[0_2px_10px_rgba(0,0,0,0.45)]">{KIND_GLYPH[kind]}</span>
+      <span className="absolute left-1.5 top-1.5 rounded bg-black/35 px-1 py-0.5 text-[0.5em] font-bold tracking-[0.12em] text-white/70 backdrop-blur">
+        {KIND_LABEL[kind]}
+      </span>
+      <span className="absolute bottom-1 left-1.5 text-[0.62em] font-black leading-none tracking-tight text-white/85">
+        {initials || "?"}
+      </span>
+      <span className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-inset ring-white/10" />
     </div>
   );
 }

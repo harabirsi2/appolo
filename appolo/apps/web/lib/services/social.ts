@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
-import { scoreForElo, type MediaKind } from "@appolo/core";
+import { MEDIA_KINDS, mediaKindSchema, scoreForElo, type MediaKind } from "@appolo/core";
 import { getDb, withOrg, schema } from "@/lib/db";
 import { DomainError } from "./errors";
 import { rankedRatings, watchlistFor, type CatalogItem, type RankedItem } from "./rankings";
@@ -33,6 +33,8 @@ export interface ProfileSummary {
   appleMusicConnected: boolean;
   language: string;
   profileLayout: "list" | "grid";
+  /** Hand-curated top-five order per medium, when the profile set one. */
+  podiumOrder: Partial<Record<MediaKind, string[]>>;
 }
 
 export interface ReactionSummary {
@@ -85,7 +87,9 @@ export interface PodCard {
 }
 
 export interface PodDetail extends PodCard {
-  entries: Array<CatalogItem & { note: string | null; score: number | null }>;
+  entries: Array<
+    CatalogItem & { note: string | null; score: number | null; addedByUsername: string | null }
+  >;
 }
 
 const httpsUrl = z
@@ -130,6 +134,18 @@ export type ReviewInput = z.infer<typeof reviewInputSchema>;
 /* profiles                                                            */
 /* ------------------------------------------------------------------ */
 
+function parsePodiumOrder(value: unknown): Partial<Record<MediaKind, string[]>> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  const order: Partial<Record<MediaKind, string[]>> = {};
+  for (const kind of MEDIA_KINDS) {
+    const ids = source[kind];
+    if (!Array.isArray(ids)) continue;
+    order[kind] = ids.filter((id): id is string => typeof id === "string").slice(0, 5);
+  }
+  return order;
+}
+
 function toProfileSummary(
   row: typeof profiles.$inferSelect,
   counts: { followers: number; following: number },
@@ -148,6 +164,7 @@ function toProfileSummary(
     appleMusicConnected: row.appleMusicConnected,
     language: row.language,
     profileLayout: row.profileLayout === "grid" ? "grid" : "list",
+    podiumOrder: parsePodiumOrder(row.podiumOrder),
   };
 }
 
@@ -226,10 +243,18 @@ export async function setFollow(
 
   await withOrg(orgId, async (tx) => {
     if (follow) {
-      await tx
+      const inserted = await tx
         .insert(follows)
         .values({ followerOrgId: orgId, followeeOrgId: targetOrgId })
-        .onConflictDoNothing();
+        .onConflictDoNothing()
+        .returning({ id: follows.id });
+      if (inserted.length > 0) {
+        await tx.insert(notifications).values({
+          orgId: targetOrgId,
+          actorOrgId: orgId,
+          kind: "follow",
+        });
+      }
     } else {
       await tx
         .delete(follows)
@@ -289,10 +314,17 @@ export async function suggestedProfiles(orgId: string, limit = 8): Promise<Profi
 /* profile content                                                     */
 /* ------------------------------------------------------------------ */
 
+export interface KindPodium {
+  kind: MediaKind;
+  items: RankedItem[];
+}
+
 export interface ProfileBundle {
   profile: ProfileSummary;
   ratings: RankedItem[];
   topFive: RankedItem[];
+  /** The top five per media kind, so each category gets its own podium. */
+  podiums: KindPodium[];
   pods: PodCard[];
   watchlist: Array<CatalogItem & { addedAt: Date }>;
   pinnedReview: RankedItem | null;
@@ -311,6 +343,17 @@ export async function profileBundle(profile: ProfileSummary): Promise<ProfileBun
     profile,
     ratings,
     topFive: ratings.slice(0, 5),
+    podiums: MEDIA_KINDS.map((kind) => {
+      const items = ratings.filter((rating) => rating.kind === kind);
+      const saved = profile.podiumOrder?.[kind] ?? [];
+      const byId = new Map(items.map((item) => [item.id, item]));
+      const ordered = saved
+        .map((id) => byId.get(id))
+        .filter((item): item is RankedItem => Boolean(item));
+      const seen = new Set(ordered.map((item) => item.id));
+      const rest = items.filter((item) => !seen.has(item.id));
+      return { kind, items: [...ordered, ...rest].slice(0, 5) };
+    }),
     pods: podCards,
     watchlist,
     pinnedReview,
@@ -667,17 +710,35 @@ async function podDetail(
 ): Promise<PodDetail> {
   const rows = await withOrg(pod.orgId, (tx) =>
     tx
-      .select({ item: catalogItems, note: podItems.note, position: podItems.position })
+      .select({
+        item: catalogItems,
+        note: podItems.note,
+        position: podItems.position,
+        addedByOrgId: podItems.addedByOrgId,
+      })
       .from(podItems)
       .innerJoin(catalogItems, eq(catalogItems.id, podItems.itemId))
       .where(eq(podItems.podId, pod.id))
       .orderBy(podItems.position),
   );
 
+  const contributorIds = [
+    ...new Set(
+      rows
+        .map((row) => row.addedByOrgId)
+        .filter((id): id is string => Boolean(id) && id !== pod.orgId),
+    ),
+  ];
+  const contributorRows =
+    contributorIds.length > 0
+      ? await getDb().select().from(profiles).where(inArray(profiles.orgId, contributorIds))
+      : [];
+  const contributorByOrg = new Map(contributorRows.map((row) => [row.orgId, row.username]));
+
   const ratings = await rankedRatings(pod.orgId);
   const scoreById = new Map(ratings.map((rating) => [rating.id, rating.score]));
 
-  const entries = rows.map(({ item, note }) => ({
+  const entries = rows.map(({ item, note, addedByOrgId }) => ({
     id: item.id,
     kind: item.kind,
     title: item.title,
@@ -691,6 +752,7 @@ async function podDetail(
     tags: item.tags ?? [],
     note: note ?? null,
     score: scoreById.get(item.id) ?? null,
+    addedByUsername: addedByOrgId ? (contributorByOrg.get(addedByOrgId) ?? null) : null,
   }));
 
   return {
@@ -721,7 +783,7 @@ export async function createPod(orgId: string, input: PodInput): Promise<PodCard
 
   const base = slugify(input.title);
   const created = await withOrg(orgId, async (tx) => {
-    const existing = await tx.select({ slug: pods.slug }).from(pods);
+    const existing = await tx.select({ slug: pods.slug }).from(pods).where(eq(pods.orgId, orgId));
     const taken = new Set(existing.map((row) => row.slug));
     let slug = base;
     let n = 2;
@@ -769,13 +831,17 @@ export async function addItemToPod(orgId: string, podId: string, itemId: string)
   const pod = await withOrg(orgId, async (tx) => {
     const rows = await tx.select().from(pods).where(eq(pods.id, podId)).limit(1);
     if (!rows[0]) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
+    // Own pods accept edits always; someone else's pod only while it is public.
+    if (rows[0].orgId !== orgId && rows[0].visibility !== "public") {
+      throw new DomainError("POD_NOT_PUBLIC", "That pod is not open to contributions.", 403);
+    }
     const [countRow] = await tx
       .select({ next: sql<number>`coalesce(max(${podItems.position}), -1)::int + 1` })
       .from(podItems)
       .where(eq(podItems.podId, podId));
     await tx
       .insert(podItems)
-      .values({ podId, itemId, position: countRow?.next ?? 0 })
+      .values({ podId, itemId, addedByOrgId: orgId, position: countRow?.next ?? 0 })
       .onConflictDoNothing();
     return rows[0];
   });
@@ -783,6 +849,77 @@ export async function addItemToPod(orgId: string, podId: string, itemId: string)
   const detail = await podById(pod.id);
   if (!detail) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
   return detail;
+}
+
+/* ------------------------------------------------------------------ */
+/* collaborative pods: which pods can take this title                  */
+/* ------------------------------------------------------------------ */
+
+export interface AvailablePod {
+  id: string;
+  title: string;
+  ownerUsername: string;
+  /** True when the acting org owns the pod. */
+  owned: boolean;
+  contains: boolean;
+}
+
+/**
+ * Own pods plus public pods from people this profile follows. Public pods are
+ * open to contributions, which is what makes this list worth showing.
+ */
+export async function availablePodsFor(orgId: string, itemId: string): Promise<AvailablePod[]> {
+  const db = getDb();
+  const [owned, followed] = await Promise.all([
+    withOrg(orgId, async (tx) => {
+      const podRows = await tx.select().from(pods).where(eq(pods.orgId, orgId)).orderBy(desc(pods.createdAt));
+      const ids = podRows.map((row) => row.id);
+      const itemRows =
+        ids.length > 0
+          ? await tx
+              .select({ podId: podItems.podId })
+              .from(podItems)
+              .where(and(inArray(podItems.podId, ids), eq(podItems.itemId, itemId)))
+          : [];
+      return { podRows, contains: new Set(itemRows.map((row) => row.podId)) };
+    }),
+    followingOrgIds(orgId),
+  ]);
+
+  const followedPods =
+    followed.length > 0
+      ? await db
+          .select({ pod: pods, owner: profiles })
+          .from(pods)
+          .innerJoin(profiles, eq(profiles.orgId, pods.orgId))
+          .where(and(inArray(pods.orgId, followed), eq(pods.visibility, "public")))
+      : [];
+  const followedIds = followedPods.map((row) => row.pod.id);
+  const followedItems =
+    followedIds.length > 0
+      ? await db
+          .select({ podId: podItems.podId })
+          .from(podItems)
+          .where(and(inArray(podItems.podId, followedIds), eq(podItems.itemId, itemId)))
+      : [];
+  const followedContains = new Set(followedItems.map((row) => row.podId));
+
+  return [
+    ...owned.podRows.map((pod) => ({
+      id: pod.id,
+      title: pod.title,
+      ownerUsername: "you",
+      owned: true,
+      contains: owned.contains.has(pod.id),
+    })),
+    ...followedPods.map(({ pod, owner }) => ({
+      id: pod.id,
+      title: pod.title,
+      ownerUsername: owner.username,
+      owned: false,
+      contains: followedContains.has(pod.id),
+    })),
+  ];
 }
 
 /* ------------------------------------------------------------------ */
@@ -920,33 +1057,53 @@ export interface NotificationView {
 }
 
 export async function notificationsFor(orgId: string, limit = 40): Promise<NotificationView[]> {
-  const db = getDb();
-  const rows = await db
-    .select({
-      notification: notifications,
-      actor: profiles,
-      item: catalogItems,
-    })
-    .from(notifications)
-    .leftJoin(profiles, eq(profiles.orgId, notifications.actorOrgId))
-    .leftJoin(catalogItems, eq(catalogItems.id, notifications.itemId))
-    .where(eq(notifications.orgId, orgId))
-    .orderBy(desc(notifications.createdAt))
-    .limit(limit);
+  // The inbox is tenant-scoped, so read it with the org context set. Actor
+  // profiles and catalog titles are public and are joined outside that scope.
+  const rows = await withOrg(orgId, (tx) =>
+    tx
+      .select()
+      .from(notifications)
+      .where(eq(notifications.orgId, orgId))
+      .orderBy(desc(notifications.createdAt))
+      .limit(limit),
+  );
+  if (rows.length === 0) return [];
 
-  return rows.map(({ notification, actor, item }) => ({
-    id: notification.id,
-    kind: notification.kind,
-    body: notification.body,
-    read: notification.read,
-    createdAt: notification.createdAt,
-    actorUsername: actor?.username ?? null,
-    actorDisplayName: actor?.displayName ?? null,
-    actorAvatarHue: actor?.avatarHue ?? null,
-    itemId: notification.itemId ?? null,
-    itemTitle: item?.title ?? null,
-    ratingId: notification.ratingId ?? null,
-  }));
+  const db = getDb();
+  const actorIds = [...new Set(rows.map((row) => row.actorOrgId).filter((id): id is string => Boolean(id)))];
+  const itemIds = [...new Set(rows.map((row) => row.itemId).filter((id): id is string => Boolean(id)))];
+  const [actorRows, itemRows] = await Promise.all([
+    actorIds.length > 0
+      ? db.select().from(profiles).where(inArray(profiles.orgId, actorIds))
+      : Promise.resolve([]),
+    itemIds.length > 0
+      ? db
+          .select({ id: catalogItems.id, title: catalogItems.title })
+          .from(catalogItems)
+          .where(inArray(catalogItems.id, itemIds))
+      : Promise.resolve([]),
+  ]);
+
+  const actors = new Map(actorRows.map((row) => [row.orgId, row]));
+  const items = new Map(itemRows.map((row) => [row.id, row]));
+
+  return rows.map((notification) => {
+    const actor = notification.actorOrgId ? actors.get(notification.actorOrgId) : undefined;
+    const item = notification.itemId ? items.get(notification.itemId) : undefined;
+    return {
+      id: notification.id,
+      kind: notification.kind,
+      body: notification.body,
+      read: notification.read,
+      createdAt: notification.createdAt,
+      actorUsername: actor?.username ?? null,
+      actorDisplayName: actor?.displayName ?? null,
+      actorAvatarHue: actor?.avatarHue ?? null,
+      itemId: notification.itemId ?? null,
+      itemTitle: item?.title ?? null,
+      ratingId: notification.ratingId ?? null,
+    };
+  });
 }
 
 export async function unreadNotificationCount(orgId: string): Promise<number> {
@@ -1160,9 +1317,19 @@ export async function deletePod(orgId: string, podId: string): Promise<void> {
 
 export async function removeItemFromPod(orgId: string, podId: string, itemId: string): Promise<PodDetail> {
   await withOrg(orgId, async (tx) => {
-    const rows = await tx.select({ id: pods.id }).from(pods).where(eq(pods.id, podId)).limit(1);
+    const rows = await tx.select({ id: pods.id, orgId: pods.orgId }).from(pods).where(eq(pods.id, podId)).limit(1);
     if (!rows[0]) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
-    await tx.delete(podItems).where(and(eq(podItems.podId, podId), eq(podItems.itemId, itemId)));
+    await tx
+      .delete(podItems)
+      .where(
+        and(
+          eq(podItems.podId, podId),
+          eq(podItems.itemId, itemId),
+          rows[0].orgId === orgId
+            ? sql`true`
+            : eq(podItems.addedByOrgId, orgId),
+        ),
+      );
   });
   const detail = await podById(podId);
   if (!detail) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
@@ -1230,6 +1397,10 @@ export async function writtenReviewCount(orgId: string): Promise<number> {
 
 /** One public review by its rating id. */
 export async function reviewById(ratingId: string, viewerOrgId: string | null = null): Promise<ReviewView | null> {
+  // A non-UUID path segment would otherwise reach Postgres and raise 22P02.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ratingId)) {
+    return null;
+  }
   const db = getDb();
   const rows = await db
     .select(reviewSelect)
@@ -1242,4 +1413,171 @@ export async function reviewById(ratingId: string, viewerOrgId: string | null = 
   if (!row) return null;
   const [review] = await attachEngagement(viewerOrgId, [toReview(row)]);
   return review ?? null;
+}
+
+/* ------------------------------------------------------------------ */
+/* taste twins                                                         */
+/* ------------------------------------------------------------------ */
+
+export interface TasteTwin {
+  profile: ProfileSummary;
+  /** 0–100 agreement across shared titles. */
+  match: number;
+  shared: number;
+}
+
+/**
+ * People whose scores line up with yours. Only profiles that share at least
+ * three ranked titles qualify, so a single lucky match cannot top the list.
+ * Community ratings are world-readable, so this reads outside a tenant scope
+ * and keeps the viewer's own scores private on the server.
+ */
+export async function tasteTwins(orgId: string, limit = 6): Promise<TasteTwin[]> {
+  const mine = await rankedRatings(orgId);
+  if (mine.length === 0) return [];
+  const mineScores = new Map(mine.map((item) => [item.id, item.score]));
+  const db = getDb();
+
+  const rows = await db
+    .select({ orgId: itemRatings.orgId, itemId: itemRatings.itemId, elo: itemRatings.elo })
+    .from(itemRatings)
+    .where(ne(itemRatings.orgId, orgId))
+    .limit(5000);
+
+  const diffs = new Map<string, { total: number; shared: number }>();
+  for (const row of rows) {
+    const myScore = mineScores.get(row.itemId);
+    if (myScore === undefined) continue;
+    const entry = diffs.get(row.orgId) ?? { total: 0, shared: 0 };
+    entry.total += Math.abs(myScore - scoreForElo(row.elo));
+    entry.shared += 1;
+    diffs.set(row.orgId, entry);
+  }
+
+  const ranked = [...diffs.entries()]
+    .filter(([, entry]) => entry.shared >= 3)
+    .map(([otherOrgId, entry]) => ({
+      otherOrgId,
+      shared: entry.shared,
+      match: Math.max(0, Math.min(100, Math.round(100 - (entry.total / entry.shared) * 10))),
+    }))
+    .sort((a, b) => b.match - a.match || b.shared - a.shared)
+    .slice(0, limit);
+
+  if (ranked.length === 0) return [];
+  const profileRows = await db
+    .select()
+    .from(profiles)
+    .where(inArray(profiles.orgId, ranked.map((entry) => entry.otherOrgId)));
+  const byOrg = new Map(profileRows.map((row) => [row.orgId, row]));
+
+  const twins: TasteTwin[] = [];
+  for (const entry of ranked) {
+    const row = byOrg.get(entry.otherOrgId);
+    if (!row) continue;
+    twins.push({
+      profile: toProfileSummary(row, await followCounts(row.orgId)),
+      match: entry.match,
+      shared: entry.shared,
+    });
+  }
+  return twins;
+}
+
+/* ------------------------------------------------------------------ */
+/* curated podium order                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Persist the profile's own order for one medium's top five. Only titles the
+ * profile has actually ranked can be pinned, so the list can never contain
+ * something the account has not rated.
+ */
+export async function setPodiumOrder(
+  orgId: string,
+  kind: MediaKind,
+  itemIds: string[],
+): Promise<ProfileSummary> {
+  const unique = [...new Set(itemIds)].slice(0, 5);
+
+  await withOrg(orgId, async (tx) => {
+    const rated = await tx
+      .select({ itemId: itemRatings.itemId })
+      .from(itemRatings)
+      .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
+      .where(and(eq(itemRatings.orgId, orgId), eq(catalogItems.kind, kind)));
+    const valid = new Set(rated.map((row) => row.itemId));
+    const filtered = unique.filter((id) => valid.has(id));
+
+    const [current] = await tx
+      .select({ podiumOrder: profiles.podiumOrder })
+      .from(profiles)
+      .where(eq(profiles.orgId, orgId))
+      .limit(1);
+    const existing = (current?.podiumOrder ?? {}) as Record<string, unknown>;
+
+    await tx
+      .update(profiles)
+      .set({ podiumOrder: { ...existing, [kind]: filtered }, updatedAt: new Date() })
+      .where(eq(profiles.orgId, orgId));
+  });
+
+  const updated = await getProfileByOrgId(orgId);
+  if (!updated) throw new DomainError("PROFILE_MISSING", "Create a profile first.", 400);
+  return updated;
+}
+
+/* ------------------------------------------------------------------ */
+/* side-by-side taste comparison                                       */
+/* ------------------------------------------------------------------ */
+
+export interface CompareEntry {
+  item: CatalogItem;
+  mine: number;
+  theirs: number;
+  /** Positive means you rate the title higher than they do. */
+  gap: number;
+}
+
+export interface TasteComparison {
+  other: ProfileSummary;
+  match: number;
+  shared: number;
+  agreements: number;
+  entries: CompareEntry[];
+}
+
+/** Two profiles' scores for every title they have both ranked, biggest gaps first. */
+export async function compareTaste(orgId: string, otherOrgId: string): Promise<TasteComparison | null> {
+  if (orgId === otherOrgId) return null;
+  const [other, mine, theirs] = await Promise.all([
+    getProfileByOrgId(otherOrgId),
+    rankedRatings(orgId),
+    rankedRatings(otherOrgId),
+  ]);
+  if (!other) return null;
+
+  const theirScores = new Map(theirs.map((item) => [item.id, item.score]));
+  const entries: CompareEntry[] = mine
+    .filter((item) => theirScores.has(item.id))
+    .map((item) => {
+      const theirScore = theirScores.get(item.id) ?? 0;
+      return {
+        item,
+        mine: item.score,
+        theirs: theirScore,
+        gap: Math.round((item.score - theirScore) * 10) / 10,
+      };
+    })
+    .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
+
+  if (entries.length === 0) return { other, match: 0, shared: 0, agreements: 0, entries: [] };
+  const totalDiff = entries.reduce((sum, entry) => sum + Math.abs(entry.gap), 0);
+  return {
+    other,
+    match: Math.max(0, Math.min(100, Math.round(100 - (totalDiff / entries.length) * 10))),
+    shared: entries.length,
+    agreements: entries.filter((entry) => Math.abs(entry.gap) <= 0.5).length,
+    entries,
+  };
 }

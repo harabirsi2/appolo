@@ -4,7 +4,7 @@ import { MEDIA_KIND_LABELS } from "@appolo/core";
 import { requireSession } from "@/lib/session";
 import { tasteStats, topFive } from "@/lib/services/rankings";
 import { ratingStreak } from "@/lib/services/streaks";
-import { popularThisWeek } from "@/lib/services/rankings";
+import { popularThisWeek, weeklyMovers } from "@/lib/services/rankings";
 import {
   ensureProfile,
   feedForYou,
@@ -22,13 +22,20 @@ export const metadata = { title: "Home" };
 
 const RANKS = ["1", "2", "3", "4", "5"];
 
+function rankTone(index: number): string {
+  if (index === 0) return "bg-gold/20 text-gold ring-1 ring-gold/40";
+  if (index === 1) return "bg-silver/15 text-silver ring-1 ring-silver/30";
+  if (index === 2) return "bg-bronze/15 text-bronze ring-1 ring-bronze/30";
+  return "bg-black/70 text-white/60";
+}
+
 export default async function HomePage() {
   const session = await requireSession();
   const profile =
     (await getProfileByOrgId(session.org.id)) ??
     (await ensureProfile(session.org.id, session.org.name, session.org.slug));
 
-  const [stats, top, feed, suggestions, pods, popular, unread, streak] = await Promise.all([
+  const [stats, top, feed, suggestions, pods, popular, unread, streak, movers] = await Promise.all([
     tasteStats(session.org.id),
     topFive(session.org.id),
     feedForYou(session.org.id, 6),
@@ -37,43 +44,93 @@ export default async function HomePage() {
     popularThisWeek(8),
     unreadNotificationCount(session.org.id),
     ratingStreak(session.org.id),
+    weeklyMovers(session.org.id, 4),
   ]);
 
+  const firstName = profile.displayName.split(/\s+/)[0] ?? profile.displayName;
+
   return (
-    <div className="px-5 pt-6">
+    <div className="px-5 pt-5">
       <header className="flex items-center justify-between">
-        <Link href="/app" className="text-[26px] font-extrabold tracking-tight text-ink">
+        <Link href="/app" className="flex items-baseline gap-0.5 text-[24px] font-extrabold tracking-[-0.03em] text-ink">
           appolo
+          <span className="mb-1 h-1.5 w-1.5 rounded-full bg-brand" />
         </Link>
-        <div className="flex items-center gap-3">
-          <Link href="/app/notifications" aria-label="Notifications" className="relative">
-            <span className="text-[20px]">🔔</span>
+        <div className="flex items-center gap-2.5">
+          <Link
+            href="/app/notifications"
+            aria-label="Notifications"
+            className="relative grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-[16px] transition-colors hover:bg-white/[0.08]"
+          >
+            <span aria-hidden>🔔</span>
             {unread > 0 ? (
-              <span className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-brand text-[9px] font-bold text-black">
+              <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-brand px-1 text-[9px] font-bold text-black">
                 {unread > 9 ? "9+" : unread}
               </span>
             ) : null}
           </Link>
-          <Link href="/app/profile" aria-label="Your profile">
+          <Link href="/app/profile" aria-label="Your profile" className="rounded-full ring-2 ring-white/10 transition hover:ring-brand/50">
             <Avatar name={profile.displayName} hue={profile.avatarHue} size={36} />
           </Link>
         </div>
       </header>
 
-      <p className="mt-4 text-[13px] text-muted">
-        {stats.rated} ranked · {stats.matchups} matchups · {stats.averageScore.toFixed(1)} avg
-        {stats.topKind ? ` · mostly ${MEDIA_KIND_LABELS[stats.topKind].toLowerCase()}` : ""}
-        {streak.current > 0 ? ` · 🔥 ${streak.current}-day streak` : ""}
-      </p>
-
-      <section className="mt-7">
-        <div className="mb-3 flex items-end justify-between">
-          <h2 className="text-[17px] font-semibold text-ink">Your taste</h2>
-          <Link href="/app/rankings" className="text-xs text-muted-2 hover:text-ink">
-            All rankings
-          </Link>
+      <section className="relative mt-5 overflow-hidden rounded-3xl border border-white/[0.07] bg-gradient-to-br from-white/[0.07] via-white/[0.03] to-transparent p-4 shadow-card">
+        <div
+          className="pointer-events-none absolute -right-10 -top-16 h-40 w-40 rounded-full blur-3xl"
+          style={{ background: `hsl(${profile.avatarHue} 70% 45% / 0.28)` }}
+          aria-hidden
+        />
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.16em] text-muted-2">
+              {new Date().toLocaleDateString("en-US", { weekday: "long" })}
+            </p>
+            <h1 className="mt-1 text-[24px] font-bold leading-tight tracking-[-0.02em] text-ink">
+              Hey, {firstName}
+            </h1>
+            <p className="mt-0.5 text-[12px] text-muted">
+              {stats.rated === 0
+                ? "Your podium is waiting for its first title."
+                : `Mostly ${stats.topKind ? MEDIA_KIND_LABELS[stats.topKind] : "everything"} · ${stats.matchups} matchups played`}
+            </p>
+          </div>
+          <span
+            className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+              streak.current > 0
+                ? "border-brand/30 bg-brand/10 text-brand"
+                : "border-white/10 bg-white/5 text-muted-2"
+            }`}
+          >
+            {streak.current > 0 ? `🔥 ${streak.current}d` : "No streak"}
+          </span>
         </div>
 
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          {[
+            { label: "Ranked", value: String(stats.rated) },
+            { label: "Matchups", value: String(stats.matchups) },
+            { label: "Average", value: stats.rated === 0 ? "—" : stats.averageScore.toFixed(1) },
+          ].map((stat) => (
+            <div key={stat.label} className="rounded-2xl border border-white/[0.06] bg-black/25 px-3 py-2.5">
+              <p className="text-[18px] font-bold leading-none tabular-nums text-ink">{stat.value}</p>
+              <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-muted-2">{stat.label}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 flex gap-2">
+          <Link href="/app/rate" className="flex-1">
+            <Button size="md" className="w-full">Rate something</Button>
+          </Link>
+          <Link href="/app/taste">
+            <Button size="md" variant="secondary">Taste DNA</Button>
+          </Link>
+        </div>
+      </section>
+
+      <section className="mt-8">
+        <SectionHeader title="Your taste" href="/app/rankings" action="All rankings" />
         {top.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center">
             <p className="text-sm font-medium text-ink">Nothing ranked yet</p>
@@ -81,20 +138,18 @@ export default async function HomePage() {
               Play a few quick “which is better?” matchups and your top five builds itself.
             </p>
             <Link href="/app/rate" className="mt-4 inline-block">
-              <Button size="sm">Rate something</Button>
+              <Button size="sm">Start rating</Button>
             </Link>
           </div>
         ) : (
-          <div className="-mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
+          <div className="snap-rail no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
             {top.map((item, index) => (
-              <Link
-                key={item.id}
-                href={`/app/item/${item.id}`}
-                className="w-[118px] shrink-0"
-              >
+              <Link key={item.id} href={`/app/item/${item.id}`} className="w-[124px] shrink-0">
                 <div className="relative">
                   <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="aspect-square w-full rounded-xl" />
-                  <span className="absolute left-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-[11px] font-bold text-white backdrop-blur">
+                  <span
+                    className={`absolute left-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full text-[11px] font-extrabold backdrop-blur ${rankTone(index)}`}
+                  >
                     {RANKS[index]}
                   </span>
                   <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/75 px-1.5 py-0.5 text-[11px] font-bold text-brand backdrop-blur">
@@ -109,15 +164,36 @@ export default async function HomePage() {
         )}
       </section>
 
+      {movers.length > 0 ? (
+        <section className="mt-8">
+          <SectionHeader title="On the move" href="/app/browse" action="Browse all" />
+          <ol className="space-y-1.5">
+            {movers.map((item) => (
+              <li key={item.id}>
+                <Link
+                  href={`/app/item/${item.id}`}
+                  className="card-surface card-hover flex items-center gap-3 rounded-2xl p-2.5"
+                >
+                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="h-11 w-11 rounded-lg" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-semibold text-ink">{item.title}</p>
+                    <p className="truncate text-[11px] text-muted-2">{item.votes} decided matchups this week</p>
+                  </div>
+                  <span className={`text-[13px] font-bold tabular-nums ${item.delta >= 0 ? "text-brand" : "text-danger"}`}>
+                    {item.delta >= 0 ? "+" : ""}
+                    {item.delta}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+
       <section className="mt-8">
-        <div className="mb-3 flex items-end justify-between">
-          <h2 className="text-[17px] font-semibold text-ink">Your pods</h2>
-          <Link href={`/${profile.username}`} className="text-xs text-muted-2 hover:text-ink">
-            See all
-          </Link>
-        </div>
+        <SectionHeader title="Your pods" href={`/${profile.username}`} action="See all" />
         {pods.length === 0 ? (
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4">
+          <div className="card-surface flex items-center justify-between gap-3 rounded-2xl p-4">
             <div>
               <p className="text-sm font-medium text-ink">Make your first pod</p>
               <p className="text-[12px] text-muted">Shareable lists for any vibe.</p>
@@ -127,7 +203,7 @@ export default async function HomePage() {
             </Link>
           </div>
         ) : (
-          <div className="-mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
+          <div className="snap-rail no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
             {pods.map((pod) => (
               <PodRow key={pod.id} pod={pod} />
             ))}
@@ -136,13 +212,11 @@ export default async function HomePage() {
       </section>
 
       <section className="mt-8">
-        <div className="mb-3 flex items-end justify-between">
-          <h2 className="text-[17px] font-semibold text-ink">Popular this week</h2>
-        </div>
+        <SectionHeader title="Popular this week" href="/app/browse" action="Browse" />
         {popular.length === 0 ? (
-          <p className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 text-[13px] text-muted">No ratings yet.</p>
+          <p className="card-surface rounded-2xl p-4 text-[13px] text-muted">No ratings yet.</p>
         ) : (
-          <div className="-mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
+          <div className="snap-rail no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
             {popular.map((item) => (
               <Link key={item.id} href={`/app/item/${item.id}`} className="w-[116px] shrink-0">
                 <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="aspect-square w-full rounded-xl" />
@@ -157,12 +231,10 @@ export default async function HomePage() {
       </section>
 
       <section className="mt-8">
-        <div className="mb-3 flex items-end justify-between">
-          <h2 className="text-[17px] font-semibold text-ink">From people you follow</h2>
-        </div>
+        <SectionHeader title="From people you follow" href="/app/browse" action="Discover" />
         {feed.length === 0 ? (
-          <p className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 text-[13px] text-muted">
-            Follow someone below and their reviews will show up here.
+          <p className="card-surface rounded-2xl p-4 text-[13px] text-muted">
+            Follow someone below and their reviews show up here.
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-2.5">
@@ -175,13 +247,10 @@ export default async function HomePage() {
 
       {suggestions.length > 0 ? (
         <section className="mt-8">
-          <h2 className="mb-3 text-[17px] font-semibold text-ink">Find your people</h2>
-          <ul className="space-y-2">
+          <h2 className="mb-3 text-[17px] font-semibold tracking-[-0.01em] text-ink">Find your people</h2>
+          <ul className="space-y-1.5">
             {suggestions.map((person) => (
-              <li
-                key={person.orgId}
-                className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-3"
-              >
+              <li key={person.orgId} className="card-surface flex items-center gap-3 rounded-2xl p-3">
                 <Link href={`/${person.username}`} className="shrink-0">
                   <Avatar name={person.displayName} hue={person.avatarHue} size={40} />
                 </Link>
@@ -201,7 +270,7 @@ export default async function HomePage() {
         </section>
       ) : null}
 
-      <div className="mt-8 flex items-center justify-between rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4">
+      <div className="card-surface mt-8 flex items-center justify-between rounded-2xl p-4">
         <div>
           <p className="text-sm font-medium text-ink">{`@${profile.username}`}</p>
           <p className="text-[12px] text-muted-2">
@@ -213,9 +282,18 @@ export default async function HomePage() {
         </Link>
       </div>
 
-      <div className="mt-6 flex items-center justify-center gap-2 text-[11px] text-muted-2">
-        <span>Signed in as {session.user.email}</span>
-      </div>
+      <p className="mt-6 text-center text-[11px] text-muted-2">Signed in as {session.user.email}</p>
+    </div>
+  );
+}
+
+function SectionHeader({ title, href, action }: { title: string; href: string; action: string }) {
+  return (
+    <div className="mb-3 flex items-end justify-between">
+      <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-ink">{title}</h2>
+      <Link href={href} className="text-[11px] text-muted-2 transition-colors hover:text-ink">
+        {action}
+      </Link>
     </div>
   );
 }

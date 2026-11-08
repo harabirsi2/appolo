@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@appolo/ui";
@@ -26,8 +26,10 @@ interface RatingSide {
 
 interface OpponentSide {
   id: string;
+  kind: MediaKind;
   title: string;
   year: number | null;
+  imageUrl: string | null;
 }
 
 export function FinishRating({
@@ -97,11 +99,17 @@ export function FinishRating({
         throw new Error(body.error ?? "Could not load the next matchup.");
       }
       const next = (await nextResponse.json()) as {
-        opponent: { id: string; title: string; year: number | null };
+        opponent: { id: string; kind: MediaKind; title: string; year: number | null; imageUrl: string | null };
       };
 
       setItem((current) => ({ ...current, score: outcome.item.score }));
-      setOpponent({ id: next.opponent.id, title: next.opponent.title, year: next.opponent.year });
+      setOpponent({
+        id: next.opponent.id,
+        kind: next.opponent.kind,
+        title: next.opponent.title,
+        year: next.opponent.year,
+        imageUrl: next.opponent.imageUrl,
+      });
       setVotes((value) => value + 1);
       setMessage(
         result === "skip"
@@ -168,6 +176,19 @@ export function FinishRating({
   }
 
   const band = scoreBand(item.score);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (busy || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if (event.key === "1") void vote("win");
+      if (event.key === "2") void vote("loss");
+      if (event.key.toLowerCase() === "s") void vote("skip");
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   return (
     <div className="px-5 pt-4">
@@ -359,20 +380,30 @@ export function FinishRating({
             Pick one to keep fine-tuning your score.
           </p>
 
-          <div className="mt-3 grid grid-cols-2 gap-3">
+          <div className="relative mt-3 grid grid-cols-2 gap-3">
             <CompareCard
               title={item.title}
               year={item.year}
+              kind={item.kind}
+              imageUrl={item.photoUrl}
+              hint="1"
               disabled={busy}
               onPick={() => vote("win")}
             />
             <CompareCard
               title={opponent.title}
               year={opponent.year}
+              kind={opponent.kind}
+              imageUrl={opponent.imageUrl}
+              hint="2"
               disabled={busy}
               onPick={() => vote("loss")}
             />
+            <span className="pointer-events-none absolute left-1/2 top-1/2 z-10 grid h-7 w-7 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-black text-[9px] font-bold tracking-wide text-white/70">
+              VS
+            </span>
           </div>
+          <p className="mt-1.5 text-center text-[10px] text-muted-2">Tip: press 1, 2, or S</p>
 
           <div className="mt-2 flex items-center justify-between">
             <button
@@ -399,11 +430,17 @@ export function FinishRating({
 function CompareCard({
   title,
   year,
+  kind,
+  imageUrl,
+  hint,
   disabled,
   onPick,
 }: {
   title: string;
   year: number | null;
+  kind: MediaKind;
+  imageUrl: string | null;
+  hint: string;
   disabled: boolean;
   onPick: () => void;
 }) {
@@ -412,9 +449,11 @@ function CompareCard({
       type="button"
       disabled={disabled}
       onClick={onPick}
-      className="flex h-[104px] flex-col items-center justify-center gap-1 rounded-xl border border-white/15 bg-gradient-to-b from-[#3c3c40] to-[#232327] px-3 text-center shadow-inner transition-all hover:from-[#4a4a4f] hover:to-[#2b2b30] active:scale-[0.99] disabled:opacity-60"
+      className="group relative flex flex-col items-center gap-2 rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.09] to-white/[0.03] p-3 text-center shadow-card transition-all hover:border-brand/40 hover:from-brand/[0.12] active:scale-[0.98] disabled:opacity-60"
     >
-      <span className="text-[14px] font-medium leading-tight text-white">{title}</span>
+      <span className="absolute right-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[9px] font-bold text-white/50">{hint}</span>
+      <MediaArt kind={kind} title={title} imageUrl={imageUrl} className="h-[72px] w-[72px] rounded-xl" />
+      <span className="line-clamp-2 text-[13px] font-semibold leading-tight text-white">{title}</span>
       <span className="text-[11px] text-white/45">{year ?? "—"}</span>
     </button>
   );

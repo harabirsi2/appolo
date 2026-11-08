@@ -67,8 +67,10 @@ export default async function RateItemPage({ params }: Params) {
       }}
       initialOpponent={{
         id: matchup.opponent.id,
+        kind: matchup.opponent.kind,
         title: matchup.opponent.title,
         year: matchup.opponent.year,
+        imageUrl: matchup.opponent.imageUrl,
       }}
       kindLabel={MEDIA_KIND_LABELS[item.kind]}
       suggestedTags={suggestedTags}

@@ -47,7 +47,7 @@ export function Avatar({
   );
 }
 
-export function Icon({ name, className }: { name: "home" | "search" | "plus" | "person" | "back" | "share" | "bookmark" | "spotify" | "close"; className?: string }) {
+export function Icon({ name, className }: { name: "home" | "search" | "plus" | "person" | "back" | "share" | "bookmark" | "spotify" | "close" | "grid"; className?: string }) {
   const common = {
     viewBox: "0 0 24 24",
     fill: "none",
@@ -69,6 +69,15 @@ export function Icon({ name, className }: { name: "home" | "search" | "plus" | "
         <svg {...common}>
           <circle cx="11" cy="11" r="6.5" />
           <path d="m16 16 4 4" />
+        </svg>
+      );
+    case "grid":
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="7" height="7" rx="2" />
+          <rect x="13" y="4" width="7" height="7" rx="2" />
+          <rect x="4" y="13" width="7" height="7" rx="2" />
+          <rect x="13" y="13" width="7" height="7" rx="2" />
         </svg>
       );
     case "person":
@@ -294,12 +303,20 @@ export interface ReviewCardData {
 
 export function ReviewCard({ review, className }: { review: ReviewCardData; className?: string }) {
   return (
-    <article className={cn("flex flex-col rounded-2xl border border-white/[0.06] bg-white/[0.04] p-3.5", className)}>
+    <article
+      className={cn(
+        "card-surface card-hover flex flex-col rounded-2xl p-3.5 shadow-card",
+        className,
+      )}
+    >
       <div className="flex items-center gap-2">
         <Avatar name={review.displayName} hue={review.avatarHue} size={30} />
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink">
+        <Link href={`/${review.username}`} className="min-w-0 flex-1 truncate text-xs font-medium text-ink hover:underline">
           {`@${review.username}`}
-        </span>
+        </Link>
+        <Link href={`/review/${review.id}`} className="shrink-0 text-[10px] text-muted-2 hover:text-ink">
+          view
+        </Link>
         <ScoreText score={review.score} className="text-sm" />
       </div>
       <p className="mt-2.5 text-[13px] font-semibold leading-tight text-ink">

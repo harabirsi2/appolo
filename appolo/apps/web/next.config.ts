@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@appolo/config", "@appolo/core", "@appolo/db", "@appolo/ui"],
   serverExternalPackages: ["postgres"],
   poweredByHeader: false,
+  // Keep the preview clean; the dev overlay badge sits on top of the bottom nav.
+  devIndicators: false,
 };
 
 export default nextConfig;

@@ -96,6 +96,10 @@ export async function listCatalog(options: {
 }
 
 export async function getCatalogItem(itemId: string): Promise<CatalogItem | null> {
+  // Guard non-UUID path segments so Postgres does not raise a 22P02 error.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(itemId)) {
+    return null;
+  }
   const db = getDb();
   const rows = await db.select().from(catalogItems).where(eq(catalogItems.id, itemId)).limit(1);
   return rows[0] ? mapCatalogItem(rows[0]) : null;
@@ -658,4 +662,130 @@ export async function personBySlug(slug: string): Promise<PersonPage | null> {
     roles: [...new Set(rows.map((row) => row.credit.role))],
     works: rows.map((row) => mapCatalogItem(row.item)),
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* discovery: community leaderboard + weekly movers                    */
+/* ------------------------------------------------------------------ */
+
+export type LeaderboardSort = "top" | "rated" | "new";
+
+export interface CommunityItem extends CatalogItem {
+  /** Community average score, or null when nobody has rated it yet. */
+  average: number | null;
+  ratings: number;
+}
+
+/**
+ * The shared catalog ordered by community opinion rather than by one taste
+ * profile. `top` ranks by average score, `rated` by how many people weighed
+ * in, and `new` by the newest additions to the catalog.
+ */
+export async function catalogLeaderboard(
+  options: { kind?: MediaKind; genre?: string; sort?: LeaderboardSort; limit?: number } = {},
+): Promise<CommunityItem[]> {
+  const db = getDb();
+  const sort = options.sort ?? "top";
+  const filters = [];
+  if (options.kind) filters.push(eq(catalogItems.kind, options.kind));
+  if (options.genre) filters.push(sql`${options.genre} = any(${catalogItems.genres})`);
+
+  const ratings = sql<number>`count(${itemRatings.id})::int`;
+  const avgElo = sql<number>`coalesce(avg(${itemRatings.elo}), ${START_ELO})::float`;
+
+  const rows = await db
+    .select({ item: catalogItems, ratings, avgElo })
+    .from(catalogItems)
+    .leftJoin(itemRatings, eq(itemRatings.itemId, catalogItems.id))
+    .where(filters.length ? and(...filters) : undefined)
+    .groupBy(catalogItems.id)
+    .having(sort === "new" ? undefined : sql`count(${itemRatings.id}) > 0`)
+    .orderBy(
+      sort === "rated"
+        ? desc(sql`count(${itemRatings.id})`)
+        : sort === "new"
+          ? desc(catalogItems.createdAt)
+          : desc(sql`coalesce(avg(${itemRatings.elo}), 0)`),
+    )
+    .limit(Math.min(options.limit ?? 24, 60));
+
+  return rows.map((row) => ({
+    ...mapCatalogItem(row.item),
+    ratings: row.ratings,
+    average: row.ratings === 0 ? null : toScore(row.avgElo),
+  }));
+}
+
+export interface SimilarItem extends CommunityItem {
+  /** How many genres the two titles share. */
+  overlap: number;
+}
+
+/**
+ * Catalog titles that sit next to an item: same media kind, ranked by shared
+ * genres first and community score second. Used for the "more like this" rail.
+ */
+export async function similarItems(itemId: string, limit = 8): Promise<SimilarItem[]> {
+  const item = await getCatalogItem(itemId);
+  if (!item) return [];
+  const db = getDb();
+
+  const rows = await db
+    .select({
+      item: catalogItems,
+      ratings: sql<number>`count(${itemRatings.id})::int`,
+      avgElo: sql<number>`coalesce(avg(${itemRatings.elo}), ${START_ELO})::float`,
+    })
+    .from(catalogItems)
+    .leftJoin(itemRatings, eq(itemRatings.itemId, catalogItems.id))
+    .where(and(eq(catalogItems.kind, item.kind), sql`${catalogItems.id} <> ${itemId}`))
+    .groupBy(catalogItems.id)
+    .limit(120);
+
+  const wanted = new Set(item.genres.map((genre) => genre.toLowerCase()));
+  return rows
+    .map((row) => {
+      const overlap = row.item.genres.filter((genre) => wanted.has(genre.toLowerCase())).length;
+      return {
+        ...mapCatalogItem(row.item),
+        ratings: row.ratings,
+        average: row.ratings === 0 ? null : toScore(row.avgElo),
+        overlap,
+      };
+    })
+    .sort((a, b) => b.overlap - a.overlap || (b.average ?? 0) - (a.average ?? 0) || b.ratings - a.ratings)
+    .slice(0, limit);
+}
+
+export interface MoverItem extends CatalogItem {
+  /** Elo gained (or lost) across this profile's decided matchups this week. */
+  delta: number;
+  votes: number;
+}
+
+/** The profile's biggest gainers over the last seven days of matchups. */
+export async function weeklyMovers(orgId: string, limit = 5): Promise<MoverItem[]> {
+  return withOrg(orgId, async (tx) => {
+    const delta = sql<number>`coalesce(sum(${itemMatchups.itemEloAfter} - ${itemMatchups.itemEloBefore}), 0)::int`;
+    const rows = await tx
+      .select({ item: catalogItems, delta, votes: sql<number>`count(*)::int` })
+      .from(itemMatchups)
+      .innerJoin(catalogItems, eq(catalogItems.id, itemMatchups.itemId))
+      .where(
+        and(
+          eq(itemMatchups.orgId, orgId),
+          sql`${itemMatchups.result} <> 'skip'`,
+          sql`${itemMatchups.createdAt} > now() - interval '7 days'`,
+        ),
+      )
+      .groupBy(catalogItems.id)
+      .orderBy(desc(delta))
+      .limit(limit);
+
+    return rows.map((row) => ({
+      ...mapCatalogItem(row.item),
+      delta: row.delta,
+      votes: row.votes,
+    }));
+  });
 }
