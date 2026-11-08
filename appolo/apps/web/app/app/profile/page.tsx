@@ -10,10 +10,10 @@ export const metadata = { title: "Profile" };
 export default async function ProfilePage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; kind?: string }>;
 }) {
   const session = await requireSession();
-  const { tab } = await searchParams;
+  const { tab, kind } = await searchParams;
   const profile =
     (await getProfileByOrgId(session.org.id)) ??
     (await ensureProfile(session.org.id, session.org.name, session.org.slug));
@@ -25,6 +25,7 @@ export default async function ProfilePage({
       viewerOrgId={session.org.id}
       following={false}
       tab={tab}
+      podiumKind={kind}
       footer={
         <form action={logoutAction}>
           <Button variant="ghost" size="sm" type="submit">

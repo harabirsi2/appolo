@@ -1131,6 +1131,8 @@ export const profiles = pgTable(
     appleMusicConnected: boolean("apple_music_connected").notNull().default(false),
     language: text("language").notNull().default("en"),
     profileLayout: text("profile_layout").notNull().default("list"),
+    /** Hand-curated top-five order per media kind: { movie: [itemId, ...] }. */
+    podiumOrder: jsonb("podium_order").notNull().default(emptyJson()),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1178,6 +1180,8 @@ export const podItems = pgTable(
     id: pk(),
     podId: uuid("pod_id").notNull().references(() => pods.id, { onDelete: "cascade" }),
     itemId: uuid("item_id").notNull().references(() => catalogItems.id, { onDelete: "cascade" }),
+    /** Who contributed the title; null for rows predating collaborative pods. */
+    addedByOrgId: uuid("added_by_org_id").references(() => orgs.id, { onDelete: "set null" }),
     position: integer("position").notNull().default(0),
     note: text("note"),
     createdAt: createdAt(),

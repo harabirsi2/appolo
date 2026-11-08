@@ -7,6 +7,7 @@
   --color-bg: #000000;
   --color-surface: #101012;
   --color-surface-2: #17171a;
+  --color-elevated: #1c1c21;
   --color-border: #242428;
   --color-border-strong: #3a3a41;
   --color-ink: #f6f6f7;
@@ -18,7 +19,12 @@
   --color-success: #22c55e;
   --color-warn: #f59e0b;
   --color-danger: #ef4444;
+  --color-gold: #f5c451;
+  --color-silver: #c9ccd6;
+  --color-bronze: #d08a5a;
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.035) inset, 0 18px 40px -28px rgba(0, 0, 0, 0.95);
+  --shadow-float: 0 24px 60px -24px rgba(0, 0, 0, 0.9);
 }
 
 html,
@@ -30,13 +36,108 @@ body {
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background-image: radial-gradient(90% 45% at 50% -12%, rgba(74, 222, 128, 0.075), transparent 68%);
+  background-attachment: fixed;
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-brand) 40%, transparent);
+  background: color-mix(in srgb, var(--color-brand) 38%, transparent);
 }
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-border-strong) transparent;
+@layer base {
+  /* Kept in the base layer so .no-scrollbar in utilities can override it. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .snap-rail {
+    scroll-snap-type: x mandatory;
+    scroll-padding-left: 1.25rem;
+  }
+  .snap-rail > * {
+    scroll-snap-align: start;
+  }
+  .card-surface {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018));
+  }
+  .card-hover {
+    transition:
+      border-color 180ms ease,
+      transform 180ms ease,
+      background-color 180ms ease;
+  }
+  .card-hover:hover {
+    border-color: rgba(255, 255, 255, 0.14);
+    transform: translateY(-1px);
+  }
+  .hairline-top {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+  .text-glow {
+    text-shadow: 0 0 26px rgba(74, 222, 128, 0.3);
+  }
+  .safe-bottom {
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+  .animate-rise {
+    animation: rise 360ms cubic-bezier(0.22, 0.7, 0.3, 1) both;
+  }
+  .skeleton {
+    background: linear-gradient(100deg, #121215 0%, #1b1b20 45%, #121215 90%);
+    background-size: 220% 100%;
+    animation: shimmer 1.5s linear infinite;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -178,6 +178,45 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
   knowledge reply, confirms an escalation keyword produces a handoff note, and
   restores the seeded disabled state.
 
+## What the latest slice ships (podiums + discovery)
+
+- **Per-category podiums:** every profile now has a top five *per media kind* —
+  movies, TV, music, podcasts, books, and games — with the champion rendered as
+  a highlighted card and the rest ranked beneath it. The overall top five stays
+  visible as a shareable summary.
+- **Browse / discover:** `/app/browse` ranks the shared catalog by community
+  average, rating volume, or newest additions, filterable by media kind and
+  genre. Your own score is badged on anything you have already ranked.
+- **Shareable review permalinks:** every review has a full page at
+  `/app/review/[id]` and a public mirror at `/review/[id]`. Spoiler reviews stay
+  blurred behind a tap-to-reveal control, and the public page has its own
+  metadata for link previews.
+- **Taste twins:** profiles with at least three shared ranked titles are scored
+  on how closely their scores match yours and surfaced on the browse page.
+- **On the move:** the biggest Elo swings across your decided matchups in the
+  last seven days, shown on Home and Browse.
+- **Taste DNA:** `/app/taste` summarises one profile — average, score curve,
+  per-medium breakdown, top genres, streak, and "hot takes" where your score is
+  furthest from the community's.
+- **More like this:** item pages carry a rail of same-kind titles ordered by
+  shared genres, so discovery never dead-ends on one page.
+- **Notification fixes:** follows now create inbox entries, and the inbox reads
+  through the tenant scope instead of silently returning nothing under RLS.
+- **Curated podiums:** a profile can pin its own order for each medium's top
+  five (Eloe sets the score, the profile sets the story), saved per kind in
+  `profiles.podium_order`.
+- **Taste check:** `/app/compare/[username]` puts two profiles' scores side by
+  side for every shared title, ranked by disagreement, with shared/in-sync/clash
+  counts and the overall match percentage.
+- **Collaborative pods:** public pods accept contributions from any signed-in
+  profile. Each row records `added_by_org_id`, the pod page credits the
+  contributor, and the item page has a pod picker covering your own pods plus
+  public pods from people you follow.
+- **Design pass:** new elevation tokens, ambient background, gold/silver/bronze
+  podium ranks, generated cover art with kind labels, five-tab bottom nav with an
+  active pill, shimmer loading skeletons, a branded 404, and keyboard shortcuts
+  (1 / 2 / S) in the matchup game.
+
 ## Commands
 
 | Command | Purpose |

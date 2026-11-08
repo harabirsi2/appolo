@@ -245,7 +245,12 @@ export default async function SearchPage({
           ) : null}
 
           <section>
-            <h2 className="mb-3 text-[17px] font-semibold text-ink">Browse whats popular</h2>
+            <div className="mb-3 flex items-end justify-between">
+              <h2 className="text-[17px] font-semibold text-ink">Browse what&apos;s popular</h2>
+              <Link href="/app/browse" className="text-xs text-muted-2 hover:text-ink">
+                Browse all
+              </Link>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               {MEDIA_KINDS.map((k) => (
                 <CategoryTile key={k} kind={k} href={`/app/search?kind=${k}`} label={MEDIA_KIND_LABELS[k]} />

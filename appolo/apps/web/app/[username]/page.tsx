@@ -24,10 +24,10 @@ export default async function PublicProfilePage({
   searchParams,
 }: {
   params: Promise<{ username: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; kind?: string }>;
 }) {
   const { username } = await params;
-  const { tab } = await searchParams;
+  const { tab, kind } = await searchParams;
   const profile = await getProfileByUsername(decodeURIComponent(username));
   if (!profile) notFound();
 
@@ -58,6 +58,7 @@ export default async function PublicProfilePage({
         viewerOrgId={session?.org.id ?? null}
         following={following}
         tab={tab}
+        podiumKind={kind}
         matchPercent={match}
       />
     </div>
