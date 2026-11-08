@@ -56,7 +56,7 @@ export default async function ItemPage({ params }: Params) {
         </div>
 
         <div className="mt-5 flex justify-center">
-          <MediaArt kind={item.kind} title={item.title} className="aspect-square w-[248px] rounded-2xl shadow-2xl" />
+          <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="aspect-square w-[248px] rounded-2xl shadow-2xl" />
         </div>
 
         <h1 className="mt-6 text-[28px] font-bold leading-tight tracking-tight text-ink">{item.title}</h1>

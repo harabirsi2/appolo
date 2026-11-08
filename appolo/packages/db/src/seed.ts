@@ -229,6 +229,7 @@ async function seedMedia(orgId: string): Promise<void> {
           links: spotify ? { spotify } : {},
           genres: item.genres ?? [],
           trailerUrl: item.trailerUrl ?? (item.kind === "movie" || item.kind === "tv" ? `https://www.youtube.com/results?search_query=${encodeURIComponent(item.title + " trailer")}` : null),
+          imageUrl: item.kind === "book" ? `https://covers.openlibrary.org/b/title/${encodeURIComponent(item.title)}-L.jpg` : null,
           tags: item.tags,
         };
       }),

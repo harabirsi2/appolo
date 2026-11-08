@@ -30,10 +30,12 @@ export function mediaHue(title: string): number {
 export function MediaArt({
   kind,
   title,
+  imageUrl,
   className,
 }: {
   kind: MediaKind;
   title: string;
+  imageUrl?: string | null;
   className?: string;
 }) {
   const hue = mediaHue(title);
@@ -44,6 +46,15 @@ export function MediaArt({
     .map((word) => word[0])
     .join("")
     .toUpperCase();
+
+  if (imageUrl) {
+    return (
+      <div className={cn("relative shrink-0 overflow-hidden rounded-lg border border-border", className)} aria-hidden>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={imageUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -56,8 +67,8 @@ export function MediaArt({
       }}
       aria-hidden
     >
-      <span className="text-base font-bold tracking-tight text-white/90">{initials || "?"}</span>
-      <span className="absolute bottom-0.5 right-1 text-[10px] opacity-80">{KIND_GLYPH[kind]}</span>
+      <span className="text-3xl leading-none">{KIND_GLYPH[kind]}</span>
+      <span className="absolute bottom-0.5 left-1 text-[9px] font-bold tracking-tight text-white/70">{initials || "?"}</span>
     </div>
   );
 }
