@@ -212,21 +212,25 @@ function spotifyLink(item: CatalogSeed): string | null {
   return null;
 }
 
-async function fetchCoverUrl(item: { kind: string; title: string; subtitle: string }): Promise<string | null> {
+async function fetchCoverUrl(item: { kind: string; title: string; subtitle: string; year: number | null }): Promise<string | null> {
   try {
     if (item.kind === "book") {
       return `https://covers.openlibrary.org/b/title/${encodeURIComponent(item.title)}-L.jpg`;
     }
     const mediaMap: Record<string, string> = { music: "music", podcast: "podcast" };
     if (item.kind === "movie" || item.kind === "tv" || item.kind === "game") {
-      try {
-        const wikiRes = await fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(item.title.replace(/ /g, "_")), { signal: AbortSignal.timeout(8000) });
-        if (wikiRes.ok) {
-          const wikiData = (await wikiRes.json()) as { thumbnail?: { source?: string } };
-          if (wikiData.thumbnail?.source) return wikiData.thumbnail.source;
+      const suffixes = item.kind === "game" ? [" (video game)"] : item.kind === "tv" ? [" (TV series)", " (TV show)"] : [" (film)", " (movie)"];
+      const tries = [item.year ? item.title + " (" + item.year + " film)" : null, item.year ? item.title + " (" + item.year + ")" : null, ...suffixes.map((s) => item.title + s), item.title].filter(Boolean) as string[];
+      for (const cand of tries) {
+        try {
+          const wikiRes = await fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(cand.replace(/ /g, "_")), { signal: AbortSignal.timeout(8000) });
+          if (wikiRes.ok) {
+            const wikiData = (await wikiRes.json()) as { thumbnail?: { source?: string }; type?: string };
+            if (wikiData.type !== "disambiguation" && wikiData.thumbnail?.source) return wikiData.thumbnail.source;
+          }
+        } catch {
+          // fall through
         }
-      } catch {
-        // fall through
       }
     }
     const media = mediaMap[item.kind];
@@ -247,7 +251,7 @@ async function fetchCoverUrl(item: { kind: string; title: string; subtitle: stri
   }
 }
 
-async function enrichCoverImages(rows: Array<{ id: string; kind: string; title: string; subtitle: string; imageUrl: string | null }>): Promise<void> {
+async function enrichCoverImages(rows: Array<{ id: string; kind: string; title: string; subtitle: string; year: number | null; imageUrl: string | null }>): Promise<void> {
   const missing = rows.filter((row) => !row.imageUrl);
   const concurrency = 6;
   for (let i = 0; i < missing.length; i += concurrency) {
@@ -292,11 +296,12 @@ async function seedMedia(orgId: string): Promise<void> {
         tags: sql`excluded.tags`,
         genres: sql`excluded.genres`,
         trailerUrl: sql`excluded.trailer_url`,
+        imageUrl: sql`excluded.image_url`,
       },
     });
 
   const rows = await db
-    .select({ id: catalogItems.id, kind: catalogItems.kind, title: catalogItems.title, subtitle: catalogItems.subtitle, imageUrl: catalogItems.imageUrl })
+    .select({ id: catalogItems.id, kind: catalogItems.kind, title: catalogItems.title, subtitle: catalogItems.subtitle, year: catalogItems.year, imageUrl: catalogItems.imageUrl })
     .from(catalogItems);
   const idByKey = new Map(rows.map((row) => [`${row.kind}:${row.title}`, row.id]));
 
