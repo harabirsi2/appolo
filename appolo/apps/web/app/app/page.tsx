@@ -3,6 +3,7 @@ import { Button } from "@appolo/ui";
 import { MEDIA_KIND_LABELS } from "@appolo/core";
 import { requireSession } from "@/lib/session";
 import { tasteStats, topFive } from "@/lib/services/rankings";
+import { ratingStreak } from "@/lib/services/streaks";
 import { popularThisWeek } from "@/lib/services/rankings";
 import {
   ensureProfile,
@@ -27,7 +28,7 @@ export default async function HomePage() {
     (await getProfileByOrgId(session.org.id)) ??
     (await ensureProfile(session.org.id, session.org.name, session.org.slug));
 
-  const [stats, top, feed, suggestions, pods, popular, unread] = await Promise.all([
+  const [stats, top, feed, suggestions, pods, popular, unread, streak] = await Promise.all([
     tasteStats(session.org.id),
     topFive(session.org.id),
     feedForYou(session.org.id, 6),
@@ -35,6 +36,7 @@ export default async function HomePage() {
     podsForProfile(profile.orgId, profile.username, profile.displayName),
     popularThisWeek(8),
     unreadNotificationCount(session.org.id),
+    ratingStreak(session.org.id),
   ]);
 
   return (
@@ -61,6 +63,7 @@ export default async function HomePage() {
       <p className="mt-4 text-[13px] text-muted">
         {stats.rated} ranked · {stats.matchups} matchups · {stats.averageScore.toFixed(1)} avg
         {stats.topKind ? ` · mostly ${MEDIA_KIND_LABELS[stats.topKind].toLowerCase()}` : ""}
+        {streak.current > 0 ? ` · 🔥 ${streak.current}-day streak` : ""}
       </p>
 
       <section className="mt-7">

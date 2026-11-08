@@ -115,6 +115,37 @@ export function scoreForElo(elo: number): number {
   return Math.round(clamp(raw, 0, 10) * 10) / 10;
 }
 
+/**
+ * K-factor by how many decided matchups (wins + losses) an item has played.
+ * New items move faster so their score settles in fewer votes.
+ */
+export function kFactorFor(decidedMatches: number): number {
+  if (decidedMatches < 10) return K_FACTOR * 2;
+  if (decidedMatches < 20) return Math.round(K_FACTOR * 1.5);
+  return K_FACTOR;
+}
+
+/**
+ * Like nextElo, but each side uses its own K-factor, so a brand-new item can
+ * move quickly against a settled one without dragging the settled one far.
+ * Skipped matchups return both ratings unchanged.
+ */
+export function nextEloAdaptive(
+  a: number,
+  b: number,
+  outcome: MatchResult,
+  decidedA: number,
+  decidedB: number,
+): { a: number; b: number } {
+  if (outcome === "skip") return { a, b };
+  const expected = expectedWinProbability(a, b);
+  const actual = outcome === "win" ? 1 : 0;
+  return {
+    a: a + Math.round(kFactorFor(decidedA) * (actual - expected)),
+    b: b + Math.round(kFactorFor(decidedB) * (expected - actual)),
+  };
+}
+
 export interface ScoreBand {
   label: string;
   tone: "brand" | "success" | "warn" | "neutral" | "danger";

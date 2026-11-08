@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cn } from "@appolo/ui";
+import { videoEmbed } from "@/lib/video-embed";
 import { ReviewEngagement } from "./review-engagement";
 import type { MediaKind } from "@appolo/core/ranking";
 import { MediaArt } from "./media-art";
@@ -284,6 +285,7 @@ export interface ReviewCardData {
   tags: string[];
   spoiler?: boolean;
   photoUrl?: string | null;
+  videoUrl?: string | null;
   favoriteCharacter?: string | null;
   favoriteTracks?: string[];
   reactions?: Array<{ emoji: string; count: number; mine: boolean }>;
@@ -311,6 +313,19 @@ export function ReviewCard({ review, className }: { review: ReviewCardData; clas
           {review.spoiler ? <span className="mr-1 rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-red-300">Spoiler</span> : null}
           {review.text}
         </p>
+      ) : null}
+      {review.photoUrl ? (
+        <img src={review.photoUrl} alt="" className="mt-2 max-h-40 w-full rounded-lg object-cover" />
+      ) : null}
+      {review.videoUrl ? (
+        (() => {
+          const embed = videoEmbed(review.videoUrl);
+          return embed.kind === "iframe" ? (
+            <iframe src={embed.src} className="mt-2 aspect-video w-full rounded-lg" allowFullScreen />
+          ) : (
+            <video src={embed.src} controls className="mt-2 w-full rounded-lg" />
+          );
+        })()
       ) : null}
       {review.favoriteCharacter ? (
         <p className="mt-1.5 text-[11px] text-muted-2">Fav character: <span className="text-ink">{review.favoriteCharacter}</span></p>

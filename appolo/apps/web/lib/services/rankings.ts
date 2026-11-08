@@ -2,7 +2,6 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   START_ELO,
   clamp,
-  nextElo,
   scoreForElo,
   selectOpponent,
   withPositions,
@@ -11,6 +10,8 @@ import {
 } from "@appolo/core";
 import { getDb, withOrg, schema, type Tx } from "@/lib/db";
 import { DomainError } from "./errors";
+import { enrichCatalogFromProviders } from "./catalog-providers";
+import { nextEloAdaptive } from "@appolo/core/ranking";
 
 const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, catalogCredits } = schema;
 
@@ -40,6 +41,7 @@ export interface RankedItem extends CatalogItem {
   reviewTags: string[];
   spoiler: boolean;
   photoUrl: string | null;
+  videoUrl: string | null;
   favoriteCharacter: string | null;
   favoriteTracks: string[];
   position: number;
@@ -72,6 +74,9 @@ export async function listCatalog(options: {
   limit?: number;
 } = {}): Promise<CatalogItem[]> {
   const db = getDb();
+  if (options.q && options.q.trim().length >= 3) {
+    await enrichCatalogFromProviders(options.kind, options.q.trim());
+  }
   const filters = [];
   if (options.kind) filters.push(eq(catalogItems.kind, options.kind as MediaKind));
   if (options.genre) filters.push(sql`${options.genre} = any(${catalogItems.genres})`);
@@ -146,6 +151,7 @@ export async function rankedRatings(orgId: string, options: { kind?: string; lim
         reviewTags: rating.reviewTags ?? [],
         spoiler: rating.spoiler,
         photoUrl: rating.photoUrl ?? null,
+        videoUrl: rating.videoUrl ?? null,
         favoriteCharacter: rating.favoriteCharacter ?? null,
         favoriteTracks: rating.favoriteTracks ?? [],
         position: 0,
@@ -181,6 +187,7 @@ export async function getRating(orgId: string, itemId: string): Promise<RankedIt
       reviewTags: row.rating.reviewTags ?? [],
       spoiler: row.rating.spoiler,
       photoUrl: row.rating.photoUrl ?? null,
+      videoUrl: row.rating.videoUrl ?? null,
       favoriteCharacter: row.rating.favoriteCharacter ?? null,
       favoriteTracks: row.rating.favoriteTracks ?? [],
       score: toScore(row.rating.elo),
@@ -267,6 +274,7 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
       .select({
         id: catalogItems.id,
         elo: sql<number>`coalesce(${itemRatings.elo}, ${START_ELO})::int`,
+        rated: sql<boolean>`${itemRatings.id} is not null`,
       })
       .from(catalogItems)
       .leftJoin(
@@ -274,6 +282,11 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
         and(eq(itemRatings.itemId, catalogItems.id), eq(itemRatings.orgId, orgId)),
       )
       .where(eq(catalogItems.kind, item.kind));
+
+    // Compare against titles this account has already ranked. Fall back to the
+    // whole catalog only while it has nothing else to compare with.
+    const ratedPool = poolRows.filter((row) => row.rated && row.id !== item.id);
+    const pool = ratedPool.length > 0 ? ratedPool : poolRows;
 
     const recentRows = await tx
       .select({ opponentId: itemMatchups.opponentId })
@@ -285,7 +298,7 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
 
     const opponent = selectOpponent(
       { id: item.id, elo: rating.elo },
-      poolRows,
+      pool,
       { recentIds, seed: Date.now() & 0xffff },
     );
     if (!opponent) {
@@ -300,7 +313,7 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
     const row = opponentItem[0]!;
 
     return {
-      item: { ...item, ratingId: "", elo: rating.elo, matches: rating.matches, wins: rating.wins, losses: rating.losses, skips: rating.skips, score: toScore(rating.elo), position: 0, reviewText: rating.reviewText ?? null, reviewTags: rating.reviewTags ?? [], spoiler: false, photoUrl: null, favoriteCharacter: null, favoriteTracks: [] },
+      item: { ...item, ratingId: "", elo: rating.elo, matches: rating.matches, wins: rating.wins, losses: rating.losses, skips: rating.skips, score: toScore(rating.elo), position: 0, reviewText: rating.reviewText ?? null, reviewTags: rating.reviewTags ?? [], spoiler: false, photoUrl: null, videoUrl: null, favoriteCharacter: null, favoriteTracks: [] },
       opponent: {
         ...mapCatalogItem(row),
         ratingId: "",
@@ -315,6 +328,7 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
         reviewTags: [],
         spoiler: false,
         photoUrl: null,
+        videoUrl: null,
         favoriteCharacter: null,
         favoriteTracks: [],
       },
@@ -352,7 +366,13 @@ export async function submitVote(
     const opponentRating = await getOrInitRating(tx, orgId, opponentId);
 
     const before = { item: itemRating.elo, opponent: opponentRating.elo };
-    const after = nextElo(before.item, before.opponent, result);
+    const after = nextEloAdaptive(
+      before.item,
+      before.opponent,
+      result,
+      itemRating.wins + itemRating.losses,
+      opponentRating.wins + opponentRating.losses,
+    );
     const counted = result !== "skip";
 
     const updatedItem = (
@@ -396,11 +416,20 @@ export async function submitVote(
       opponentEloAfter: after.b,
     });
 
+    if (result !== "skip") {
+      await tx.insert(ratingEvents).values({
+        orgId,
+        itemId,
+        kind: "rated",
+        detail: `${result === "win" ? "Picked over" : "Lost to"} ${opponent.title}`,
+      });
+    }
+
     return {
       result,
       itemDelta: counted ? after.a - before.item : 0,
-      item: { ...item, ratingId: updatedItem.id, elo: updatedItem.elo, matches: updatedItem.matches, wins: updatedItem.wins, losses: updatedItem.losses, skips: updatedItem.skips, score: toScore(updatedItem.elo), position: 0, reviewText: updatedItem.reviewText ?? null, reviewTags: updatedItem.reviewTags ?? [], spoiler: updatedItem.spoiler, photoUrl: updatedItem.photoUrl ?? null, favoriteCharacter: updatedItem.favoriteCharacter ?? null, favoriteTracks: updatedItem.favoriteTracks ?? [] },
-      opponent: { ...opponent, ratingId: updatedOpponent.id, elo: updatedOpponent.elo, matches: updatedOpponent.matches, wins: updatedOpponent.wins, losses: updatedOpponent.losses, skips: updatedOpponent.skips, score: toScore(updatedOpponent.elo), position: 0, reviewText: updatedOpponent.reviewText ?? null, reviewTags: updatedOpponent.reviewTags ?? [], spoiler: updatedOpponent.spoiler, photoUrl: updatedOpponent.photoUrl ?? null, favoriteCharacter: updatedOpponent.favoriteCharacter ?? null, favoriteTracks: updatedOpponent.favoriteTracks ?? [] },
+      item: { ...item, ratingId: updatedItem.id, elo: updatedItem.elo, matches: updatedItem.matches, wins: updatedItem.wins, losses: updatedItem.losses, skips: updatedItem.skips, score: toScore(updatedItem.elo), position: 0, reviewText: updatedItem.reviewText ?? null, reviewTags: updatedItem.reviewTags ?? [], spoiler: updatedItem.spoiler, photoUrl: updatedItem.photoUrl ?? null, videoUrl: updatedItem.videoUrl ?? null, favoriteCharacter: updatedItem.favoriteCharacter ?? null, favoriteTracks: updatedItem.favoriteTracks ?? [] },
+      opponent: { ...opponent, ratingId: updatedOpponent.id, elo: updatedOpponent.elo, matches: updatedOpponent.matches, wins: updatedOpponent.wins, losses: updatedOpponent.losses, skips: updatedOpponent.skips, score: toScore(updatedOpponent.elo), position: 0, reviewText: updatedOpponent.reviewText ?? null, reviewTags: updatedOpponent.reviewTags ?? [], spoiler: updatedOpponent.spoiler, photoUrl: updatedOpponent.photoUrl ?? null, videoUrl: updatedOpponent.videoUrl ?? null, favoriteCharacter: updatedOpponent.favoriteCharacter ?? null, favoriteTracks: updatedOpponent.favoriteTracks ?? [] },
     };
   });
 }
@@ -481,6 +510,7 @@ export async function setManualRating(orgId: string, itemId: string, score: numb
       reviewTags: saved.reviewTags ?? [],
       spoiler: saved.spoiler,
       photoUrl: saved.photoUrl ?? null,
+      videoUrl: saved.videoUrl ?? null,
       favoriteCharacter: saved.favoriteCharacter ?? null,
       favoriteTracks: saved.favoriteTracks ?? [],
       position: 0,

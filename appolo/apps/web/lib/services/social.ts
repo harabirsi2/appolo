@@ -32,6 +32,7 @@ export interface ProfileSummary {
   spotifyConnected: boolean;
   appleMusicConnected: boolean;
   language: string;
+  profileLayout: "list" | "grid";
 }
 
 export interface ReactionSummary {
@@ -56,6 +57,7 @@ export interface ReviewView {
   text: string | null;
   spoiler: boolean;
   photoUrl: string | null;
+  videoUrl: string | null;
   favoriteCharacter: string | null;
   favoriteTracks: string[];
   reactions: ReactionSummary[];
@@ -86,12 +88,39 @@ export interface PodDetail extends PodCard {
   entries: Array<CatalogItem & { note: string | null; score: number | null }>;
 }
 
+const httpsUrl = z
+  .string()
+  .trim()
+  .max(500)
+  .refine((value) => {
+    if (value === "") return true;
+    try {
+      return new URL(value).protocol === "https:";
+    } catch {
+      return false;
+    }
+  }, "Use an https link.");
+
+/** Written reviews (text or video) an account needs before it can attach photos. */
+export const PHOTO_UNLOCK_REVIEWS = 20;
+
+/** Photo links: https, or an app-relative path like /uploads/x.jpg. Blocks javascript:, data: and //host URLs. */
+const mediaUrl = z
+  .string()
+  .trim()
+  .max(500)
+  .refine(
+    (value) => value === "" || /^https:\/\//i.test(value) || /^\/(?!\/)/.test(value),
+    "Use an https link or an app-relative path.",
+  );
+
 export const reviewInputSchema = z.object({
   text: z.string().trim().max(10000).optional().nullable(),
   tags: z.array(z.string().trim().min(1).max(32)).max(10).optional(),
   podIds: z.array(z.string().uuid()).max(8).optional(),
   spoiler: z.boolean().optional(),
-  photoUrl: z.string().trim().max(500).optional().nullable(),
+  photoUrl: mediaUrl.optional().nullable(),
+  videoUrl: httpsUrl.optional().nullable(),
   favoriteCharacter: z.string().trim().max(120).optional().nullable(),
   favoriteTracks: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
 });
@@ -118,6 +147,7 @@ function toProfileSummary(
     spotifyConnected: row.spotifyConnected,
     appleMusicConnected: row.appleMusicConnected,
     language: row.language,
+    profileLayout: row.profileLayout === "grid" ? "grid" : "list",
   };
 }
 
@@ -312,6 +342,7 @@ function toReview(row: {
     text: row.rating.reviewText ?? null,
     spoiler: row.rating.spoiler,
     photoUrl: row.rating.photoUrl ?? null,
+    videoUrl: row.rating.videoUrl ?? null,
     favoriteCharacter: row.rating.favoriteCharacter ?? null,
     favoriteTracks: row.rating.favoriteTracks ?? [],
     reactions: [],
@@ -417,7 +448,7 @@ export async function itemCommunity(
 
   const reviews = rows
     .map(toReview)
-    .filter((review) => Boolean(review.text) || review.tags.length > 0)
+    .filter((review) => Boolean(review.text) || Boolean(review.videoUrl) || review.tags.length > 0)
     .slice(0, limit);
 
   return { count: ratings.length, average, distribution, reviews: await attachEngagement(viewerOrgId, reviews) };
@@ -446,7 +477,7 @@ export async function followFeed(orgId: string, limit = 12): Promise<ReviewView[
 
   const reviews = rows
     .map(toReview)
-    .filter((review) => review.orgId !== orgId && (Boolean(review.text) || review.tags.length > 0))
+    .filter((review) => review.orgId !== orgId && (Boolean(review.text) || Boolean(review.videoUrl) || review.tags.length > 0))
     .slice(0, limit);
   return attachEngagement(orgId, reviews);
 }
@@ -468,12 +499,24 @@ export async function saveReview(
     .limit(1);
   if (!item[0]) throw new DomainError("ITEM_NOT_FOUND", "That item is not in the catalog.", 404);
 
+  if (input.photoUrl?.trim()) {
+    const written = await writtenReviewCount(orgId);
+    if (written < PHOTO_UNLOCK_REVIEWS) {
+      throw new DomainError(
+        "PHOTO_LOCKED",
+        `Photos unlock after ${PHOTO_UNLOCK_REVIEWS} reviews. You have ${written}.`,
+        403,
+      );
+    }
+  }
+
   await withOrg(orgId, async (tx) => {
     const values = {
       reviewText: input.text?.trim() ? input.text.trim() : null,
       reviewTags: input.tags ?? [],
       spoiler: input.spoiler ?? false,
       photoUrl: input.photoUrl?.trim() || null,
+      videoUrl: input.videoUrl?.trim() || null,
       favoriteCharacter: input.favoriteCharacter?.trim() || null,
       favoriteTracks: input.favoriteTracks ?? [],
     };
@@ -982,6 +1025,7 @@ export const profileUpdateSchema = z.object({
   spotifyConnected: z.boolean().optional(),
   appleMusicConnected: z.boolean().optional(),
   language: z.enum(["en", "es", "pt"]).optional(),
+  profileLayout: z.enum(["list", "grid"]).optional(),
 });
 export type ProfileUpdate = z.infer<typeof profileUpdateSchema>;
 
@@ -1008,6 +1052,7 @@ export async function updateProfile(orgId: string, input: ProfileUpdate): Promis
         spotifyConnected: input.spotifyConnected ?? current.spotifyConnected,
         appleMusicConnected: input.appleMusicConnected ?? current.appleMusicConnected,
         language: input.language ?? current.language,
+        profileLayout: input.profileLayout ?? current.profileLayout,
       })
       .where(eq(profiles.orgId, orgId));
   });
@@ -1071,7 +1116,7 @@ export async function feedForYou(orgId: string, limit = 12): Promise<ReviewView[
     .map(toReview)
     .filter(
       (review) =>
-        !seen.has(review.id) && (Boolean(review.text) || review.tags.length > 0),
+        !seen.has(review.id) && (Boolean(review.text) || Boolean(review.videoUrl) || review.tags.length > 0),
     )
     .slice(0, limit - followed.length);
 
@@ -1157,4 +1202,44 @@ export async function ownedPods(orgId: string): Promise<PodCard[]> {
     tx.select().from(pods).where(eq(pods.orgId, orgId)).orderBy(desc(pods.createdAt)),
   );
   return podCardsForRows(rows, { username: profile.username, displayName: profile.displayName });
+}
+
+/* ------------------------------------------------------------------ */
+/* written-review count (photo unlock)                                 */
+/* ------------------------------------------------------------------ */
+
+/** How many items this org has actually reviewed (written text or a video). */
+export async function writtenReviewCount(orgId: string): Promise<number> {
+  return withOrg(orgId, async (tx) => {
+    const [row] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(itemRatings)
+      .where(
+        and(
+          eq(itemRatings.orgId, orgId),
+          sql`(${itemRatings.reviewText} is not null or ${itemRatings.videoUrl} is not null)`,
+        ),
+      );
+    return row?.n ?? 0;
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* single review lookup (shared-review popup, deep links)              */
+/* ------------------------------------------------------------------ */
+
+/** One public review by its rating id. */
+export async function reviewById(ratingId: string, viewerOrgId: string | null = null): Promise<ReviewView | null> {
+  const db = getDb();
+  const rows = await db
+    .select(reviewSelect)
+    .from(itemRatings)
+    .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
+    .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
+    .where(eq(itemRatings.id, ratingId))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  const [review] = await attachEngagement(viewerOrgId, [toReview(row)]);
+  return review ?? null;
 }
