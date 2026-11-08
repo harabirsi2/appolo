@@ -13,6 +13,7 @@ import {
 } from "@/lib/services/social";
 import { MediaArt } from "@/components/media-art";
 import { Avatar, CategoryTile, Icon, ScoreText } from "@/components/podiums";
+import { KindIcon } from "@/components/kind-icon";
 import { FollowButton } from "@/components/follow-button";
 
 export const dynamic = "force-dynamic";
@@ -78,12 +79,13 @@ export default async function SearchPage({
             <Link
               key={k}
               href={`/app/search?kind=${k}`}
-              className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ${
                 activeKind === k
                   ? "border-brand/40 bg-brand/15 text-brand"
                   : "border-white/10 bg-white/5 text-muted hover:text-ink"
               }`}
             >
+              <KindIcon kind={k} className="h-3.5 w-3.5" />
               {MEDIA_KIND_LABELS[k]}
             </Link>
           ))}
@@ -95,12 +97,13 @@ export default async function SearchPage({
             <Link
               key={g}
               href={`/app/search?kind=${activeKind}&genre=${encodeURIComponent(g)}`}
-              className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ${
                 genre === g
                   ? "border-brand/40 bg-brand/15 text-brand"
                   : "border-white/10 bg-white/5 text-muted hover:text-ink"
               }`}
             >
+              {g === "Anime" ? <KindIcon kind="anime" className="h-3.5 w-3.5" /> : null}
               {g}
             </Link>
           ))}
@@ -160,7 +163,7 @@ export default async function SearchPage({
                 {items.map((item) => (
                   <Link key={item.id} href={`/app/item/${item.id}`} className="group">
                     <div className="relative">
-                      <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="aspect-square w-full rounded-xl" />
+                      <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} className="aspect-square w-full rounded-xl" />
                       {scoreById.has(item.id) ? (
                         <span className="absolute bottom-2 right-2 rounded-md bg-black/75 px-1.5 py-0.5 text-[11px] font-bold text-brand backdrop-blur">
                           {scoreById.get(item.id)!.toFixed(1)}
@@ -183,7 +186,7 @@ export default async function SearchPage({
                       href={`/app/item/${item.id}`}
                       className="flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-white/[0.04]"
                     >
-                      <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="h-12 w-12 rounded-lg" />
+                      <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} className="h-12 w-12 rounded-lg" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-ink">{item.title}</p>
                         <p className="truncate text-[12px] text-muted-2">
@@ -231,7 +234,7 @@ export default async function SearchPage({
                 {recentlyRated.map((item) => (
                   <Link key={item.id} href={`/app/item/${item.id}`} className="w-[116px] shrink-0">
                     <div className="relative">
-                      <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="aspect-square w-full rounded-xl" />
+                      <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} className="aspect-square w-full rounded-xl" />
                       <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/75 px-1.5 py-0.5 text-[11px] font-bold text-brand backdrop-blur">
                         {item.score.toFixed(1)}
                       </span>

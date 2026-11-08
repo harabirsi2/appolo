@@ -9,6 +9,7 @@ import { Icon, RatingCurve, ReviewCard, ScoreText } from "@/components/podiums";
 import { ItemActions } from "@/components/item-actions";
 import { WatchlistButton } from "@/components/watchlist-button";
 import { AddToPod } from "@/components/add-to-pod";
+import { KindIcon, isAnime } from "@/components/kind-icon";
 import { BackButton } from "@/components/back-button";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,7 @@ export default async function ItemPage({ params }: Params) {
   const spotify = item.links.spotify;
   const displayScore = community.average ?? rating?.score ?? null;
   const band = displayScore === null ? null : scoreBand(displayScore);
+  const anime = isAnime(item.kind, item.genres);
 
   return (
     <div className="relative">
@@ -58,8 +60,9 @@ export default async function ItemPage({ params }: Params) {
       <div className="relative px-5 pt-4">
         <div className="flex items-center justify-between">
           <BackButton fallback="/app/browse" />
-          <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/80 backdrop-blur">
-            {MEDIA_KIND_LABELS[item.kind]}
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/80 backdrop-blur">
+            <KindIcon kind={anime ? "anime" : item.kind} className="h-3.5 w-3.5" />
+            {anime ? "Anime" : MEDIA_KIND_LABELS[item.kind]}
           </span>
         </div>
 
@@ -68,6 +71,7 @@ export default async function ItemPage({ params }: Params) {
             kind={item.kind}
             title={item.title}
             imageUrl={item.imageUrl}
+            genres={item.genres}
             className="aspect-square w-[236px] rounded-3xl shadow-[0_30px_70px_-25px_rgba(0,0,0,0.95)] ring-1 ring-white/15"
           />
         </div>
@@ -77,7 +81,7 @@ export default async function ItemPage({ params }: Params) {
             {item.title}
           </h1>
           <p className="mt-1.5 text-[13px] text-muted">
-            {[item.subtitle, MEDIA_KIND_SINGULAR[item.kind], item.year ? String(item.year) : null]
+            {[item.subtitle, anime ? "Anime" : MEDIA_KIND_SINGULAR[item.kind], item.year ? String(item.year) : null]
               .filter(Boolean)
               .join(" · ")}
           </p>
@@ -201,7 +205,7 @@ export default async function ItemPage({ params }: Params) {
             <div className="snap-rail no-scrollbar -mx-5 mt-2.5 flex gap-3 overflow-x-auto px-5 pb-1">
               {similar.map((entry) => (
                 <Link key={entry.id} href={`/app/item/${entry.id}`} className="w-[104px] shrink-0">
-                  <MediaArt kind={entry.kind} title={entry.title} imageUrl={entry.imageUrl} className="aspect-square w-full rounded-xl" />
+                  <MediaArt kind={entry.kind} title={entry.title} imageUrl={entry.imageUrl} genres={entry.genres} className="aspect-square w-full rounded-xl" />
                   <p className="mt-1.5 truncate text-[12px] font-medium text-ink">{entry.title}</p>
                   <p className="truncate text-[10px] text-muted-2">
                     {entry.average === null ? "Unrated" : `${entry.average.toFixed(1)} avg`}

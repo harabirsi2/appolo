@@ -216,6 +216,10 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
   podium ranks, generated cover art with kind labels, five-tab bottom nav with an
   active pill, shimmer loading skeletons, a branded 404, and keyboard shortcuts
   (1 / 2 / S) in the matchup game.
+- **Kind icons:** every medium (movie, TV, music, podcast, book, game) has its
+  own line icon, used in filter chips, category tiles, item badges, and generated
+  covers. Titles tagged with the Anime genre get a distinct sparkle glyph and an
+  ANIME cover label instead of the TV icon.
 
 ## Commands
 

@@ -14,6 +14,7 @@ import {
   unreadNotificationCount,
 } from "@/lib/services/social";
 import { MediaArt } from "@/components/media-art";
+import { KindIcon, isAnime } from "@/components/kind-icon";
 import { Avatar, PodRow, ReviewCard } from "@/components/podiums";
 import { FollowButton } from "@/components/follow-button";
 
@@ -146,7 +147,7 @@ export default async function HomePage() {
             {top.map((item, index) => (
               <Link key={item.id} href={`/app/item/${item.id}`} className="w-[124px] shrink-0">
                 <div className="relative">
-                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="aspect-square w-full rounded-xl" />
+                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} className="aspect-square w-full rounded-xl" />
                   <span
                     className={`absolute left-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full text-[11px] font-extrabold backdrop-blur ${rankTone(index)}`}
                   >
@@ -157,7 +158,10 @@ export default async function HomePage() {
                   </span>
                 </div>
                 <p className="mt-2 truncate text-[13px] font-medium text-ink">{item.title}</p>
-                <p className="truncate text-[11px] text-muted-2">{MEDIA_KIND_LABELS[item.kind]}</p>
+                <p className="flex items-center gap-1 truncate text-[11px] text-muted-2">
+                  <KindIcon kind={isAnime(item.kind, item.genres) ? "anime" : item.kind} className="h-3 w-3 shrink-0" />
+                  {MEDIA_KIND_LABELS[item.kind]}
+                </p>
               </Link>
             ))}
           </div>
@@ -219,7 +223,7 @@ export default async function HomePage() {
           <div className="snap-rail no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
             {popular.map((item) => (
               <Link key={item.id} href={`/app/item/${item.id}`} className="w-[116px] shrink-0">
-                <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="aspect-square w-full rounded-xl" />
+                <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} className="aspect-square w-full rounded-xl" />
                 <p className="mt-2 truncate text-[13px] font-medium text-ink">{item.title}</p>
                 <p className="truncate text-[11px] text-muted-2">
                   {item.average.toFixed(1)} · {item.ratings} ratings

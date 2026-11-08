@@ -4,6 +4,7 @@ import { videoEmbed } from "@/lib/video-embed";
 import { ReviewEngagement } from "./review-engagement";
 import type { MediaKind } from "@appolo/core/ranking";
 import { MediaArt } from "./media-art";
+import { KindIcon } from "./kind-icon";
 
 /* ------------------------------------------------------------------ */
 /* avatars + icons                                                     */
@@ -252,7 +253,10 @@ export function CategoryTile({
       href={href}
       className="group relative isolate flex h-[124px] flex-col overflow-hidden rounded-2xl border border-white/5 bg-[#141416] px-3 pt-3 text-center transition-colors hover:border-white/15"
     >
-      <span className="relative z-10 text-[15px] font-semibold text-ink">{label}</span>
+      <span className="relative z-10 inline-flex items-center gap-1.5 self-center text-[15px] font-semibold text-ink">
+        <KindIcon kind={kind} className="h-4 w-4 text-brand" />
+        {label}
+      </span>
       <span className="pointer-events-none absolute inset-x-2 bottom-1 h-[86px]">
         {titles.map((title, index) => {
           const rotations = ["-rotate-6", "rotate-2", "rotate-8"];

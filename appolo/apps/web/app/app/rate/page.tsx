@@ -7,6 +7,7 @@ import { listCatalog, ratedItemIds } from "@/lib/services/rankings";
 import { MediaArt } from "@/components/media-art";
 import { BackButton } from "@/components/back-button";
 import { Icon } from "@/components/podiums";
+import { KindIcon } from "@/components/kind-icon";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Rate something" };
@@ -66,12 +67,13 @@ export default async function RatePage({
             key={k}
             href={`/app/rate?kind=${k}`}
             className={cn(
-              "rounded-full border px-3 py-1.5 text-xs transition-colors",
+              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors",
               activeKind === k
                 ? "border-brand/40 bg-brand/15 text-brand"
                 : "border-white/10 bg-white/5 text-muted hover:text-ink",
             )}
           >
+            <KindIcon kind={k} className="h-3.5 w-3.5" />
             {MEDIA_KIND_LABELS[k]}
           </Link>
         ))}
@@ -94,7 +96,7 @@ export default async function RatePage({
               <li key={item.id}>
                 <Link href={`/app/rate/${item.id}`} className="group block">
                   <div className="relative">
-                    <MediaArt kind={item.kind} title={item.title} className="aspect-square w-full rounded-lg" />
+                    <MediaArt kind={item.kind} title={item.title} genres={item.genres} className="aspect-square w-full rounded-lg" />
                     {ratedSet.has(item.id) ? (
                       <span className="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-black/70 text-[10px] text-brand backdrop-blur">
                         ✓

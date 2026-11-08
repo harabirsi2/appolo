@@ -5,6 +5,7 @@ import { catalogLeaderboard, rankedRatings, weeklyMovers, type LeaderboardSort }
 import { followingOrgIds, tasteTwins } from "@/lib/services/social";
 import { MediaArt } from "@/components/media-art";
 import { Avatar, ScoreText } from "@/components/podiums";
+import { KindIcon } from "@/components/kind-icon";
 import { FollowButton } from "@/components/follow-button";
 import { BackButton } from "@/components/back-button";
 
@@ -77,12 +78,13 @@ export default async function BrowsePage({
           <Link
             key={entry}
             href={browseHref({ kind: entry, genre: undefined })}
-            className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ${
               activeKind === entry
                 ? "border-brand/40 bg-brand/15 text-brand"
                 : "border-white/10 bg-white/5 text-muted hover:text-ink"
             }`}
           >
+            <KindIcon kind={entry} className="h-3.5 w-3.5" />
             {MEDIA_KIND_LABELS[entry]}
           </Link>
         ))}
@@ -94,12 +96,13 @@ export default async function BrowsePage({
             <Link
               key={entry}
               href={browseHref({ genre: activeGenre === entry ? undefined : entry })}
-              className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ${
                 activeGenre === entry
                   ? "border-brand/40 bg-brand/15 text-brand"
                   : "border-white/10 bg-white/5 text-muted hover:text-ink"
               }`}
             >
+              {entry === "Anime" ? <KindIcon kind="anime" className="h-3.5 w-3.5" /> : null}
               {entry}
             </Link>
           ))}
@@ -133,6 +136,7 @@ export default async function BrowsePage({
                   kind={item.kind}
                   title={item.title}
                   imageUrl={item.imageUrl}
+                  genres={item.genres}
                   className="aspect-square w-full rounded-xl"
                 />
                 {item.average !== null ? (
@@ -182,7 +186,7 @@ export default async function BrowsePage({
                   href={`/app/item/${item.id}`}
                   className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-2.5 transition-colors hover:border-white/15"
                 >
-                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="h-11 w-11 rounded-lg" />
+                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} className="h-11 w-11 rounded-lg" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-semibold text-ink">{item.title}</p>
                     <p className="truncate text-[11px] text-muted-2">{item.votes} decided matchups</p>

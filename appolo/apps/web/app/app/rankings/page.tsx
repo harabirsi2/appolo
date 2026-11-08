@@ -5,6 +5,7 @@ import { rankedRatings, tasteStats } from "@/lib/services/rankings";
 import { MediaArt } from "@/components/media-art";
 import { BackButton } from "@/components/back-button";
 import { ScoreText } from "@/components/podiums";
+import { KindIcon } from "@/components/kind-icon";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Rankings" };
@@ -52,12 +53,13 @@ export default async function RankingsPage({
           <Link
             key={k}
             href={`/app/rankings?kind=${k}`}
-            className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ${
               activeKind === k
                 ? "border-brand/40 bg-brand/15 text-brand"
                 : "border-white/10 bg-white/5 text-muted hover:text-ink"
             }`}
           >
+            <KindIcon kind={k} className="h-3.5 w-3.5" />
             {MEDIA_KIND_LABELS[k]}
           </Link>
         ))}
@@ -75,7 +77,7 @@ export default async function RankingsPage({
                 <span className="grid w-6 shrink-0 place-items-center text-[16px] font-extrabold text-white/25">
                   {index + 1}
                 </span>
-                <MediaArt kind={item.kind} title={item.title} className="h-12 w-12 rounded-lg" />
+                <MediaArt kind={item.kind} title={item.title} genres={item.genres} className="h-12 w-12 rounded-lg" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[14px] font-semibold text-ink">{item.title}</p>
                   <p className="truncate text-[11px] text-muted-2">

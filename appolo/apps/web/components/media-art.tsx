@@ -45,6 +45,7 @@ export function MediaArt({
   kind: MediaKind;
   title: string;
   imageUrl?: string | null;
+  genres?: readonly string[] | null;
   className?: string;
 }) {
   const hue = mediaHue(title);

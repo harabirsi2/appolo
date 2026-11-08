@@ -4,6 +4,7 @@ import { Button } from "@appolo/ui";
 import { MEDIA_KIND_LABELS, MEDIA_KINDS, type MediaKind } from "@appolo/core";
 import type { ProfileBundle } from "@/lib/services/social";
 import { MediaArt } from "./media-art";
+import { KindIcon } from "./kind-icon";
 import { Avatar, PodRow, ScoreText } from "./podiums";
 import { FollowButton } from "./follow-button";
 import { ShareButton } from "./share-button";
@@ -186,7 +187,7 @@ export function ProfileScreen({
                   key={kind}
                   href={`${profileHref}?tab=topfive&kind=${kind}`}
                   aria-current={active ? "page" : undefined}
-                  className={`shrink-0 rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ${
                     active
                       ? "border-brand/40 bg-brand/15 text-brand"
                       : count === 0
@@ -194,6 +195,7 @@ export function ProfileScreen({
                         : "border-white/10 bg-white/5 text-muted hover:text-ink"
                   }`}
                 >
+                  <KindIcon kind={kind} className="h-3.5 w-3.5" />
                   {MEDIA_KIND_LABELS[kind]}
                   {count > 0 ? <span className="ml-1 text-[10px] opacity-70">{count}</span> : null}
                 </Link>
@@ -216,7 +218,7 @@ export function ProfileScreen({
               {champion ? (
                 <Link
                   href={`/app/item/${champion.id}`}
-                  className="relative block overflow-hidden rounded-2xl border border-brand/35 bg-gradient-to-br from-brand/[0.16] to-transparent p-4"
+                  className="relative block overflow-hidden rounded-2xl border border-brand/35 bg-gradient-to-br from-brand/[0.16] to-transparent p-4 shadow-xl hover:shadow-2xl transition-shadow"
                 >
                   <div className="flex items-center gap-4">
                     <div className="relative">
@@ -224,6 +226,7 @@ export function ProfileScreen({
                         kind={champion.kind}
                         title={champion.title}
                         imageUrl={champion.imageUrl}
+                        genres={champion.genres}
                         className="h-24 w-24 rounded-xl"
                       />
                       <span className="absolute -left-1.5 -top-1.5 grid h-6 w-6 place-items-center rounded-full bg-brand text-[11px] font-extrabold text-black shadow">
