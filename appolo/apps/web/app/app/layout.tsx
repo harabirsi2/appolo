@@ -1,5 +1,6 @@
 import { requireSession } from "@/lib/session";
 import { BottomNav } from "@/components/bottom-nav";
+import { DesktopNav } from "@/components/desktop-nav";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   await requireSession();
@@ -14,9 +15,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         }}
         aria-hidden
       />
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[560px] flex-col border-x border-white/[0.05] bg-black/95 shadow-float">
-        <main className="flex-1 pb-28">{children}</main>
-        <BottomNav />
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[560px] flex-col border-x border-white/[0.05] bg-black/95 shadow-float lg:max-w-[1000px] lg:flex-row">
+        <DesktopNav />
+        <div className="flex min-h-screen w-full min-w-0 flex-1 flex-col lg:max-w-[768px]">
+          <main className="flex-1 pb-28 lg:pb-16">{children}</main>
+          <BottomNav />
+        </div>
       </div>
     </div>
   );

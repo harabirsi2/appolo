@@ -48,7 +48,27 @@ export function Avatar({
   );
 }
 
-export function Icon({ name, className }: { name: "home" | "search" | "plus" | "person" | "back" | "share" | "bookmark" | "spotify" | "close" | "grid"; className?: string }) {
+export function Icon({
+  name,
+  className,
+}: {
+  name:
+    | "home"
+    | "search"
+    | "plus"
+    | "person"
+    | "back"
+    | "share"
+    | "bookmark"
+    | "spotify"
+    | "close"
+    | "grid"
+    | "rank"
+    | "spark"
+    | "settings"
+    | "bell";
+  className?: string;
+}) {
   const common = {
     viewBox: "0 0 24 24",
     fill: "none",
@@ -117,6 +137,33 @@ export function Icon({ name, className }: { name: "home" | "search" | "plus" | "
       return (
         <svg viewBox="0 0 24 24" fill="currentColor" className={cn("h-5 w-5", className)}>
           <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm4.6 14.5a.8.8 0 0 1-1.1.3c-3-1.8-6.8-2.2-11.2-1.2a.8.8 0 1 1-.4-1.6c4.9-1.1 9-.6 12.4 1.4.4.2.5.7.3 1.1Zm1.2-2.7a1 1 0 0 1-1.3.4c-3.4-2.1-8.5-2.7-12.5-1.5a1 1 0 1 1-.6-1.9c4.6-1.4 10.3-.7 14.2 1.7.5.3.6.9.2 1.3Zm.1-2.8C14.1 8.5 7.9 8.3 4.8 9.3a1.2 1.2 0 1 1-.7-2.3c3.6-1.1 10.4-.9 14.5 1.6a1.2 1.2 0 0 1-1.2 2Z" />
+        </svg>
+      );
+    case "rank":
+      return (
+        <svg {...common}>
+          <path d="M5 20v-9M12 20V4M19 20v-6" />
+        </svg>
+      );
+    case "spark":
+      return (
+        <svg {...common}>
+          <path d="M12 3.5l1.9 5.1L19 10.5l-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z" />
+        </svg>
+      );
+    case "settings":
+      return (
+        <svg {...common}>
+          <path d="M4 7h8M18 7h2M4 17h2M10 17h10" />
+          <circle cx="15" cy="7" r="2" />
+          <circle cx="7" cy="17" r="2" />
+        </svg>
+      );
+    case "bell":
+      return (
+        <svg {...common}>
+          <path d="M6.5 9a5.5 5.5 0 0 1 11 0c0 4 1.5 5.5 1.5 5.5H5S6.5 13 6.5 9Z" />
+          <path d="M10 18.5a2 2 0 0 0 4 0" />
         </svg>
       );
     case "close":
@@ -219,7 +266,7 @@ export function GradientSlider({ score, className }: { score: number; className?
 
 export function ScoreText({ score, className }: { score: number | null; className?: string }) {
   return (
-    <span className={cn("font-semibold tabular-nums", score === null ? "text-muted-2" : "text-brand", className)}>
+    <span className={cn("num font-semibold", score === null ? "text-muted-2" : "text-brand", className)}>
       {score === null ? "—" : score.toFixed(1)}
     </span>
   );

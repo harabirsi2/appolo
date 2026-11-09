@@ -15,7 +15,7 @@ export function BottomNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-40">
+    <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-40 lg:hidden">
       <div className="pointer-events-auto mx-auto w-full max-w-[560px] border-t border-white/[0.08] bg-black/75 px-2 pt-1.5 backdrop-blur-2xl safe-bottom">
         <div className="grid grid-cols-5 items-center">
           <Tab tab={TABS[0]!} active={isActive(pathname, TABS[0]!.href)} />
@@ -55,7 +55,7 @@ function Tab({
     <Link
       href={tab.href}
       aria-current={active ? "page" : undefined}
-      className={`group flex flex-col items-center gap-1 rounded-xl py-1 text-[10px] font-medium transition-colors ${
+      className={`group flex min-h-11 flex-col items-center justify-center gap-1 rounded-xl py-1 text-[10px] font-medium transition-colors ${
         active ? "text-ink" : "text-muted-2 hover:text-muted"
       }`}
     >

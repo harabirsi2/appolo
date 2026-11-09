@@ -39,20 +39,31 @@ so the page does not read as flat black. Selection uses a 38% brand mix.
 
 ## 3. Typography
 
-- Family: `--font-sans` = system UI stack (ui-sans-serif, system-ui, Segoe UI, Roboto,
-  Helvetica, Arial). No web font is loaded; there is currently no separate display face.
-- Scale in use (px values from Tailwind arbitrary sizes):
+Deliberate pairing:
+
+- **Display:** Fraunces (variable Google font, loaded through `next/font` with a metric
+  fallback) for the wordmark, page titles and the landing masthead. Applied by a base
+  `h1` rule and the `.font-display` utility. The serif carries the editorial, journal
+  identity; it is never used for body copy or controls.
+- **Body/UI:** `--font-sans` system stack (ui-sans-serif, system-ui, Segoe UI, Roboto,
+  Helvetica, Arial). No Inter dependency; the app renders instantly with native UI text.
+- **Numerics:** `.num` sets tabular, lining figures with tight tracking; used by
+  `ScoreText`. Ranking positions keep the sans face at heavy weight so they read as data,
+  not headlines.
+- Logo: lowercase `appolo` with a mint dot, set in Fraunces on the app home (mobile) and
+  in the desktop sidebar. The landing page uses `appolo.` with a mint period.
+
+Scale in use (px values from Tailwind arbitrary sizes):
   - Page title: `30px`, weight 800, tight tracking.
   - Section title: `17px`, weight 600.
   - Media/review title: `13–16px`, weight 500–600.
   - Body: `13–14px`.
   - Metadata: `10–12px`, muted, often uppercase with `0.14em` tracking.
   - Ranking numbers: large, weight 700–800, colour-coded by position.
-- Numerals are rendered with the same family; score text uses tabular alignment where
-  it appears in lists (`ScoreText`).
-
-**Known gap:** the mandate asks for a deliberate display/body/mono pairing. The app
-still uses a single system stack, so a real display face is roadmap work.
+- Numerals use tabular alignment where they appear in lists (`ScoreText`, ranking
+  rows); `.num` is the single token for this.
+- Base `h1` sets `line-height: 1.05`, `letter-spacing: -0.02em` and optical sizing; page
+  components may still override size/weight for hierarchy.
 
 ## 4. Spacing, radii, elevation
 
@@ -89,8 +100,11 @@ still uses a single system stack, so a real display face is roadmap work.
 - Category pills: Framer Motion `layoutId` for the active indicator; horizontal rails
   with masked edges.
 - FAB: mint pulse/glow ring; opens "Quick duel / manual rating".
-- Reduced motion is **not** yet wired to a `prefers-reduced-motion` guard; the
-  CSS animations are short, but this is an open accessibility item.
+- Reduced motion **is** wired: a global `prefers-reduced-motion: reduce` guard collapses
+  animations/transitions to 0.01ms and disables smooth scrolling. Motion is CSS-only
+  (no Framer Motion runtime), so the guard covers every animation in the app.
+- Focus: `:focus-visible` draws a 2px mint outline with a 2px offset on all interactive
+  elements, independent of hover styling.
 
 ## 7. Layout and breakpoints
 
@@ -100,14 +114,19 @@ still uses a single system stack, so a real display face is roadmap work.
   (`.no-scrollbar`).
 - Grids: 2-up for posters on phones (`grid-cols-2`), 3-up for compact score stats,
   denser grids appear from `sm`/`md` where used.
-- Desktop: the same components widen; there is no separate desktop navigation shell
-  yet — the mandate expects one.
-- Touch targets: form controls are 40–44px; the new tie/undecided buttons are
-  `min-h-11` (44px). The FAB and nav icons meet the 44px target.
+- Desktop (`lg`, ≥1024px): a 232px sticky sidebar replaces the bottom navigation.
+  It contains the serif wordmark, primary destinations (Home, Browse, Search, Rankings,
+  Taste, You), the primary Rate action and Settings. Content is capped at 768px inside a
+  1000px container. The bottom nav is `lg:hidden`; the home header wordmark is
+  `lg:hidden` so it is not duplicated.
+- Touch targets: form controls are 40–44px; nav tabs, the notification button, the avatar
+  link and tie/undecided controls are 44px (`min-h-11`/`h-11`).
 
-**Open responsive checks:** 320px, 375px, 390px, 430px, tablet and desktop were not
-systematically captured in this pass. The layout is `overflow-x` safe by construction
-(rails scroll internally), but this is not a substitute for measuring.
+**Responsive audit (this pass):** measured 320, 390, 768 and 1280px in a real browser.
+`documentElement.scrollWidth - clientWidth` was `0` at every width; the sidebar appears
+only at 1280 and the bottom nav hides there. Screenshots: `appolo-df-home-serif.png`
+(512px), `appolo-df-rankings-320.png` (320px), `appolo-df-desktop-1280.png` (1280px).
+The 430px case is covered by the same single-column rules as 390/512.
 
 ## 8. Iconography
 
@@ -117,7 +136,13 @@ content rather than chrome.
 
 ## 9. Honest gaps
 
-- No display typeface; no token for numeric type beyond size/weight conventions.
+- The landing page still uses three equal feature cards and ✓ glyphs; it predates the
+  new type system and should be recomposed asymmetrically in the next design pass.
+- Poster grids remain two-up on desktop; a wider editorial grid is not implemented.
+- No light theme (deliberate for now; the identity is dark-first).
+- Reduced-motion is respected, but there are no bespoke low-motion transitions beyond
+  removing animation.
+- Visual regression is manual screenshots; there is no automated screenshot suite.
 - No light theme.
 - No reduced-motion mode.
 - No formal breakpoint tokens; Tailwind defaults are used directly.

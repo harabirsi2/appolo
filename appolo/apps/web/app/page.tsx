@@ -31,8 +31,8 @@ export default function HomePage() {
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(70%_60%_at_50%_0%,rgba(74,222,128,0.16),transparent)]" />
 
       <header className="relative mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-        <Link href="/" className="text-xl font-extrabold tracking-tight">
-          appolo
+        <Link href="/" className="font-display text-2xl font-semibold tracking-[-0.04em]">
+          appolo<span className="text-brand">.</span>
         </Link>
         <nav className="flex items-center gap-2">
           <Link href="/demo" className="hidden sm:block">

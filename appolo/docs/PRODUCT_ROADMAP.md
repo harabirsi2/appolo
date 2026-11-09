@@ -12,17 +12,27 @@ Status legend: **Done**, **Partial**, **Open**.
 - Baseline: typecheck, build and new unit tests pass in this environment; DB/smoke CI
   could not run here (no Postgres/Docker/root) and is reported as a limitation.
 
-## Phase 1 — Design foundation (Partial)
+## Phase 1 — Design foundation (Mostly Done)
 
 Done earlier: dark editorial tokens, mint accent, kind icon set, media card, podium
 display, bottom nav FAB, scrollable category pills, skeletons, empty states.
 
+Done in this pass:
+- Fraunces display face for titles/wordmark with a system-sans body and tabular numerals;
+  the app no longer reads as a default system-font dashboard.
+- Persistent 232px desktop sidebar (Home, Browse, Search, Rankings, Taste, You, Rate,
+  Settings) from 1024px; bottom nav hides, content widens to 768px, duplicate mobile
+  wordmark removed on desktop.
+- 44px touch targets for nav, notifications, avatar and comparison controls; global
+  `:focus-visible` ring.
+- Reduced-motion guard confirmed and documented; motion remains CSS-only.
+- Measured 320/390/768/1280px in a browser: no horizontal overflow at any width.
+
 Open:
-- Display typeface + separate numeric treatment.
-- Reduced-motion support and a documented breakpoint/touch-target audit at
-  320/375/390/430/tablet/desktop.
-- Desktop navigation shell (the app is mobile-first with no desktop-specific chrome).
+- Recompose the landing page away from three equal feature cards and ✓ glyphs.
+- Wider editorial poster grid on desktop; currently still two-up.
 - Light theme (optional, only if it can be done without diluting the identity).
+- Automated visual regression screenshots.
 
 ## Phase 2 — Media and review foundation (Mostly Done)
 

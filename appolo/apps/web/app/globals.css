@@ -51,6 +51,19 @@ body {
     scrollbar-width: thin;
     scrollbar-color: var(--color-border-strong) transparent;
   }
+
+  /* Screen titles use the editorial face; body and metadata stay sans. */
+  h1 {
+    font-family: var(--font-fraunces, "Iowan Old Style"), Georgia, "Times New Roman", serif;
+    font-optical-sizing: auto;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-brand) 78%, white);
+    outline-offset: 2px;
+  }
 }
 
 @layer utilities {
@@ -90,6 +103,14 @@ body {
   }
   .safe-bottom {
     padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+  .num {
+    font-variant-numeric: tabular-nums lining-nums;
+    letter-spacing: -0.01em;
+  }
+  .font-display {
+    font-family: var(--font-fraunces, "Iowan Old Style"), Georgia, "Times New Roman", serif;
+    font-optical-sizing: auto;
   }
   .animate-rise {
     animation: rise 360ms cubic-bezier(0.22, 0.7, 0.3, 1) both;

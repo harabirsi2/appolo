@@ -15,7 +15,7 @@ import {
 } from "@/lib/services/social";
 import { MediaArt } from "@/components/media-art";
 import { KindIcon, isAnime } from "@/components/kind-icon";
-import { Avatar, PodRow, ReviewCard } from "@/components/podiums";
+import { Avatar, Icon, PodRow, ReviewCard } from "@/components/podiums";
 import { FollowButton } from "@/components/follow-button";
 
 export const dynamic = "force-dynamic";
@@ -52,8 +52,8 @@ export default async function HomePage() {
 
   return (
     <div className="px-5 pt-5">
-      <header className="flex items-center justify-between">
-        <Link href="/app" className="flex items-baseline gap-0.5 text-[24px] font-extrabold tracking-[-0.03em] text-ink">
+      <header className="flex items-center justify-between lg:justify-end">
+        <Link href="/app" className="flex items-baseline gap-0.5 font-display text-[26px] font-semibold leading-none tracking-[-0.04em] text-ink lg:hidden">
           appolo
           <span className="mb-1 h-1.5 w-1.5 rounded-full bg-brand" />
         </Link>
@@ -61,16 +61,16 @@ export default async function HomePage() {
           <Link
             href="/app/notifications"
             aria-label="Notifications"
-            className="relative grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-[16px] transition-colors hover:bg-white/[0.08]"
+            className="relative grid h-11 w-11 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-muted transition-colors hover:bg-white/[0.08] hover:text-ink"
           >
-            <span aria-hidden>🔔</span>
+            <Icon name="bell" className="h-[18px] w-[18px]" />
             {unread > 0 ? (
               <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-brand px-1 text-[9px] font-bold text-black">
                 {unread > 9 ? "9+" : unread}
               </span>
             ) : null}
           </Link>
-          <Link href="/app/profile" aria-label="Your profile" className="rounded-full ring-2 ring-white/10 transition hover:ring-brand/50">
+          <Link href="/app/profile" aria-label="Your profile" className="grid h-11 w-11 place-items-center rounded-full ring-2 ring-white/10 transition hover:ring-brand/50">
             <Avatar name={profile.displayName} hue={profile.avatarHue} size={36} />
           </Link>
         </div>

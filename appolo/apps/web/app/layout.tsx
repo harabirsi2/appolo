@@ -1,5 +1,13 @@
 import type { Metadata } from "next";
+import { Fraunces } from "next/font/google";
 import "./globals.css";
+
+/** Editorial display face for page titles and the wordmark. */
+const display = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-fraunces",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: {
@@ -13,13 +21,13 @@ export const metadata: Metadata = {
 };
 
 export const viewport = {
-  themeColor: "#0a0c10",
+  themeColor: "#000000",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-bg text-ink antialiased">{children}</body>
+      <body className={`${display.variable} min-h-screen bg-bg text-ink antialiased`}>{children}</body>
     </html>
   );
 }
