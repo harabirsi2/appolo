@@ -43,8 +43,19 @@ test("opposite rankings produce a much lower match than identical ones", () => {
     shared: pairs(Array.from({ length: 20 }, (_, index) => [index, 20 - index])),
   });
   assert.ok(identical.match! > reversed.match!);
-  assert.ok(reversed.match! < 60);
+  assert.ok(reversed.match! < 50);
   assert.ok(reversed.kendallTauB! < 0);
+});
+
+test("shared genres do not rescue opposite opinions", () => {
+  const genres = new Map([["Drama", 8], ["Sci-Fi", 5]]);
+  const result = tasteMatch({
+    shared: pairs(Array.from({ length: 8 }, (_, index) => [index, 8 - index])),
+    mineProfile: genres,
+    theirsProfile: genres,
+  });
+  assert.ok(result.match !== null);
+  assert.ok(result.match < 45);
 });
 
 test("a single shared title is labelled low confidence, not high", () => {

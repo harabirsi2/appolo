@@ -154,13 +154,22 @@ export function tasteMatch(input: TasteMatchInput): TasteMatchResult {
 
   const coverage = count / (count + 15);
   const evidence = 0.7 * (rankAgreement ?? 0.5) + 0.3 * (ratingSimilarity ?? 0.5);
-  // With no genre vectors the shared-item evidence is the best fallback we
-  // have; the coverage weight still stops one lucky match reading as 100%.
-  const fallback = profileSimilarity ?? evidence;
 
-  const match = count === 0 && profileSimilarity === null
+  // Profile (genre) similarity is a weak prior, not a substitute for shared
+  // opinions: two people who like the same genres but rank the same titles in
+  // opposite order are not a 60% match. With no shared titles it is all we have.
+  const PROFILE_WEIGHT_WITH_EVIDENCE = 0.2;
+  const prior =
+    count === 0
+      ? profileSimilarity
+      : profileSimilarity === null
+        ? evidence
+        : (1 - PROFILE_WEIGHT_WITH_EVIDENCE) * evidence +
+          PROFILE_WEIGHT_WITH_EVIDENCE * profileSimilarity;
+
+  const match = prior === null
     ? null
-    : Math.round(clamp(100 * (coverage * evidence + (1 - coverage) * fallback), 0, 100));
+    : Math.round(clamp(100 * (coverage * evidence + (1 - coverage) * prior), 0, 100));
 
   const confidence: MatchConfidence =
     count >= HIGH_CONFIDENCE_SHARED ? "high" : count >= MEDIUM_CONFIDENCE_SHARED ? "medium" : "low";

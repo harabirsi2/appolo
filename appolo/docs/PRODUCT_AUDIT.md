@@ -107,12 +107,12 @@ confident-looking percentage; no confidence label or explanation.
 | `pnpm install --frozen-lockfile` | Pass |
 | `pnpm typecheck` (6 packages) | Pass |
 | `pnpm test` (new) | Pass — 23/23 |
-| `pnpm --filter @appolo/web build` | Pass |
-| `pnpm run ci` / `pnpm smoke` | **Not run** — PowerShell scripts, and this VM has no Postgres server, no Docker daemon and no root to install one |
+| `pnpm --filter @appolo/web build` | Pass || `pnpm db:migrate` (18 migrations) | **Pass** on PostgreSQL 16.2 (portable binaries, port 55432) |
+| `pnpm db:seed` | **Pass** |
+| `pnpm db:rls-test` | **Pass** — 7/7 isolation checks |
+| `pnpm run ci` / `pnpm smoke` | Scripts are PowerShell, so not executed here. Every `ci` step (install, typecheck, migrate, seed, RLS, build) was run individually and passed; smoke's core flows were exercised with curl/node instead |
+| End-to-end API checks | **Pass** — login, tie vote, model rebuild, undo, signup, manual ratings, taste compare (19% for opposite taste), 401 for anonymous, login redirect |
 | Drizzle snapshot vs hand-written SQL | **Drift exists** (pre-existing): `drizzle-kit generate` wants to re-create tables already created by `sql/0007_podium_parity.sql`. New migration was therefore written by hand as `packages/db/sql/0012_ranking_model.sql` |
-
-The owner reports `ci` and `smoke` pass on their machine (Windows + local PostgreSQL on
-port 55432); that claim could not be re-verified here.
 
 ## 7. Honest summary
 

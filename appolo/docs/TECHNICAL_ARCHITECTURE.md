@@ -156,7 +156,7 @@ relying on `db:generate` again.
 ```bash
 pnpm install --frozen-lockfile
 pnpm typecheck
-pnpm test                 # new: packages/core unit tests (23)
+pnpm test                 # new: packages/core unit tests (24)
 pnpm --filter @appolo/web build
 # with a PostgreSQL instance:
 pnpm db:migrate && pnpm db:seed && pnpm db:rls-test
@@ -167,5 +167,7 @@ pnpm smoke                # PowerShell, needs a running server
 
 - `.env` holds `DATABASE_URL` and `MIGRATE_DATABASE_URL`; never commit it.
 - Local DB script expects port 55432 and Windows PostgreSQL binaries.
-- The cloud VM used for this pass had no Postgres server, no Docker daemon and no root,
-  so migration/RLS/smoke execution is unverified here and must be run before shipping.
+- The cloud VM had no Postgres server or Docker, so this pass used portable PostgreSQL
+  16.2 binaries on port 55432 (the same port the Windows script uses). Migrations,
+  seed, RLS test, build and the media/ranking API flows were verified there. Development
+  data in that ephemeral cluster is disposable and is not committed.

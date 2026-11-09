@@ -139,12 +139,15 @@ nested transaction is required.
 - entropy peaks at an even matchup;
 - selection prefers an uncertain, unshown opponent and avoids an obvious one.
 
-Run with `pnpm test` (uses `tsx --test`, so Node 20+ works).
+Run with `pnpm test` (uses `tsx --test`, so Node 20+ works). Including
+`community.test.ts`, the suite is 24 tests.
 
 ## 7. Known limitations
 
 - `ν` and `λ` are fixed constants, not hyperparameters estimated per user. The
   snapshot stores them so they can be tuned/replayed later.
+- Taste matching keeps genre similarity to a 20% prior when shared titles exist;
+  with no shared titles it is the only signal and is labelled as such.
 - The fit is per media kind only; sub-category (genre) models and per-collection
   models are not implemented.
 - Community scores now use fixed Bayesian-style shrinkage (`packages/core/src/community.ts`),
