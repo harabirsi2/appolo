@@ -239,6 +239,7 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
 | `pnpm db:seed` | demo org, user, contacts, reviews |
 | `pnpm db:rls-test` | cross-tenant isolation test |
 | `pnpm db:reset` | drop and recreate the schema (dev only) |
+| `pnpm e2e` | portable HTTP e2e suite (server must be running) |
 | `pnpm smoke` | HTTP end-to-end test (server must be running) |
 | `pnpm run ci` | install → typecheck → migrate → seed → RLS test → build |
 

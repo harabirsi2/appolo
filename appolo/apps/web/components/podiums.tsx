@@ -303,6 +303,8 @@ export interface ReviewCardData {
   favoriteTracks?: string[];
   reactions?: Array<{ emoji: string; count: number; mine: boolean }>;
   commentCount?: number;
+  /** Feed explanation, e.g. "From someone you follow". */
+  reason?: string;
 }
 
 export function ReviewCard({ review, className }: { review: ReviewCardData; className?: string }) {
@@ -329,6 +331,9 @@ export function ReviewCard({ review, className }: { review: ReviewCardData; clas
         </Link>
       </p>
       <p className="text-[11px] text-muted-2">{review.itemSubtitle || review.kind}</p>
+      {review.reason ? (
+        <p className="mt-1 text-[10px] font-medium tracking-[0.02em] text-brand/80">{review.reason}</p>
+      ) : null}
       {review.text ? (
         <p className="mt-2 line-clamp-6 whitespace-pre-line text-[13px] leading-relaxed text-muted">
           {review.spoiler ? <span className="mr-1 rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-red-300">Spoiler</span> : null}

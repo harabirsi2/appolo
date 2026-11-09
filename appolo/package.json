@@ -21,6 +21,7 @@
     "db:up": "powershell -ExecutionPolicy Bypass -File scripts/dev-db.ps1",
     "db:down": "powershell -ExecutionPolicy Bypass -File scripts/dev-db.ps1 -Stop",
     "smoke": "powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1",
+    "e2e": "node scripts/e2e.mjs",
     "ci": "powershell -ExecutionPolicy Bypass -File scripts/ci.ps1"
   },
   "devDependencies": {

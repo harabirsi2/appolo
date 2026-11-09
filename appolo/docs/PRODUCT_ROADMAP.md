@@ -74,14 +74,17 @@ Open:
 Done in this pass:
 - Taste match uses Kendall tau-b, rating similarity, genre cosine and evidence
   coverage; confidence label and plain-language basis shown on the compare page.
+- Category-specific match cards ("Movies", "Music", …) on the compare page, each with
+  its own shared-count and confidence.
+- Hybrid "For you" feed scoring (`packages/core/src/feed-rank.ts`): freshness decay,
+  follow affinity, genre relevance and engagement, plus deterministic exploration and
+  a per-card explanation ("From someone you follow", "Matches your taste", …).
+- Community ranking shrinkage and confidence labels.
 
 Open:
-- Category-specific match cards ("movie match / music match").
-- Community ranking shrinkage and coordinated-vote detection.
-- Hybrid feed scoring (affinity, taste, freshness, quality, novelty, conversation) with
-  diversity reranking and chronological Following mode.
-- Recommendation explanations and dismiss controls.
-- Cold-start onboarding interests.
+- Diversity reranking and a strict chronological Following mode.
+- Coordinated-vote detection for community rankings.
+- Recommendation dismiss controls and cold-start onboarding interests.
 
 ## Phase 6 — Integrations and sharing (Partial)
 
@@ -103,14 +106,18 @@ Open:
 - Account deletion/data export covering the media layer.
 - Accessibility pass (focus states exist; screen-reader labelling for icon-only
   controls needs work).
-- Playwright/e2e coverage of the flows in the mandate §16.
+- Browser-driven (Playwright) visuals; the HTTP e2e suite covers flows, not pixels.
+
+Done: `scripts/e2e.mjs` (`pnpm e2e`) drives the running app with fetch only and covers
+health, auth guards, signup, ratings, tie vote, model rebuild, undo, follow, follow-ranked
+feed explanations and taste comparison. It creates throwaway accounts and exits non-zero
+on failure.
 
 ## Immediate next three tasks
 
-1. Run `pnpm run ci` and `pnpm smoke` on a machine with PostgreSQL, then fix any
-   migration/RLS issue found by `0012_ranking_model.sql`.
-2. Add an e2e test for compare → tie → rebuild → undo → rebuild (needs a DB).
-3. Implement manual drag reordering without fabricating comparison events.
+1. Implement manual drag reordering without fabricating comparison events.
+2. Add auth/comparison rate limiting and media-layer account deletion/export.
+3. Cold-start onboarding: pick interests and seed the first comparisons from them.
 
 ## Explicit non-goals for this pass
 

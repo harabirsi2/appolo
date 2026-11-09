@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { MEDIA_KIND_LABELS } from "@appolo/core";
+import { KindIcon } from "@/components/kind-icon";
 import { requireSession } from "@/lib/session";
 import { compareTaste, getProfileByOrgId, getProfileByUsername } from "@/lib/services/social";
 import { MediaArt } from "@/components/media-art";
@@ -69,6 +71,33 @@ export default async function ComparePage({ params }: Params) {
       <p className="mt-2 text-center text-[11px] leading-relaxed text-muted-2">
         {comparison.basis}
       </p>
+
+      {comparison.kinds.length > 0 ? (
+        <section className="mt-4">
+          <h2 className="mb-2 text-[13px] font-semibold text-ink">Match by category</h2>
+          <div className="grid grid-cols-2 gap-2">
+            {comparison.kinds.map((entry) => (
+              <div
+                key={entry.kind}
+                className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] p-2.5"
+              >
+                <KindIcon kind={entry.kind} className="h-4 w-4 shrink-0 text-brand" />
+                <div className="min-w-0">
+                  <p className="truncate text-[10px] uppercase tracking-[0.1em] text-muted-2">
+                    {MEDIA_KIND_LABELS[entry.kind]}
+                  </p>
+                  <p className="text-[13px] font-semibold text-ink">
+                    {entry.match === null ? "—" : `${entry.match}%`}
+                    <span className="ml-1 text-[9px] font-normal text-muted-2">
+                      {entry.shared} shared · {entry.confidence}
+                    </span>
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {comparison.shared === 0 ? (
         <div className="mt-6 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center">

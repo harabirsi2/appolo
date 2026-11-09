@@ -4,6 +4,8 @@ import {
   MEDIA_KINDS,
   genreProfile,
   mediaKindSchema,
+  normalizeGenreWeights,
+  rankFeed,
   scoreForElo,
   tasteMatch,
   type MatchConfidence,
@@ -73,6 +75,8 @@ export interface ReviewView {
   reactions: ReactionSummary[];
   commentCount: number;
   updatedAt: Date;
+  /** Why the home feed surfaced this review, when it came from feed ranking. */
+  reason?: string;
 }
 
 export interface CommunityStats {
@@ -464,6 +468,12 @@ const reviewSelect = {
   profile: profiles,
   item: catalogItems,
 } as const;
+
+type ReviewRow = {
+  rating: typeof itemRatings.$inferSelect;
+  profile: typeof profiles.$inferSelect;
+  item: typeof catalogItems.$inferSelect;
+};
 
 /** Public ratings + reviews for one catalog item, across every profile. */
 export async function itemCommunity(
@@ -1265,30 +1275,83 @@ export async function matchPercent(orgId: string, otherOrgId: string): Promise<n
 }
 
 /** Combined "For You" feed: people you follow first, then the wider community. */
+/**
+ * The home feed. Mixes followed authors, recent community reviews, the
+ * viewer's genre history and engagement, then explains each pick. The pure
+ * ranking lives in `@appolo/core` so it can be tested without a database.
+ */
 export async function feedForYou(orgId: string, limit = 12): Promise<ReviewView[]> {
-  const followed = await followFeed(orgId, limit);
-  if (followed.length >= limit) return followed.slice(0, limit);
-
   const db = getDb();
-  const seen = new Set(followed.map((review) => review.id));
-  const rows = await db
-    .select(reviewSelect)
-    .from(itemRatings)
-    .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
-    .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
-    .where(ne(itemRatings.orgId, orgId))
-    .orderBy(desc(itemRatings.updatedAt))
-    .limit(60);
+  const [followedRows, ownRatings] = await Promise.all([
+    db.select({ orgId: follows.followeeOrgId }).from(follows).where(eq(follows.followerOrgId, orgId)),
+    db
+      .select({ genres: catalogItems.genres })
+      .from(itemRatings)
+      .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
+      .where(eq(itemRatings.orgId, orgId)),
+  ]);
+  const followedIds = followedRows.map((row) => row.orgId);
+  const followedSet = new Set(followedIds);
 
-  const extra = rows
+  const [friendsRows, globalRows] = await Promise.all([
+    followedIds.length === 0
+      ? Promise.resolve([] as ReviewRow[])
+      : db
+          .select(reviewSelect)
+          .from(itemRatings)
+          .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
+          .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
+          .where(inArray(itemRatings.orgId, followedIds))
+          .orderBy(desc(itemRatings.updatedAt))
+          .limit(48),
+    db
+      .select(reviewSelect)
+      .from(itemRatings)
+      .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
+      .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
+      .where(ne(itemRatings.orgId, orgId))
+      .orderBy(desc(itemRatings.updatedAt))
+      .limit(60),
+  ]);
+
+  const rowsById = new Map<string, ReviewRow>();
+  for (const row of [...friendsRows, ...globalRows]) rowsById.set(row.rating.id, row);
+
+  const candidates = [...rowsById.values()]
     .map(toReview)
-    .filter(
-      (review) =>
-        !seen.has(review.id) && (Boolean(review.text) || Boolean(review.videoUrl) || review.tags.length > 0),
-    )
-    .slice(0, limit - followed.length);
+    .filter((review) => Boolean(review.text) || Boolean(review.videoUrl) || review.tags.length > 0);
+  if (candidates.length === 0) return [];
 
-  return attachEngagement(orgId, [...followed, ...extra]);
+  const genresById = new Map([...rowsById.values()].map((row) => [row.rating.id, row.item.genres ?? []]));
+  const engagement = await engagementFor(
+    null,
+    candidates.map((review) => review.id),
+  );
+  const genreWeights = normalizeGenreWeights(ownRatings.flatMap((row) => row.genres ?? []));
+
+  const ranked = rankFeed(
+    candidates.map((review) => {
+      const stats = engagement.get(review.id);
+      return {
+        id: review.id,
+        authorId: review.orgId,
+        createdAt: review.updatedAt,
+        score: review.score,
+        genres: genresById.get(review.id) ?? [],
+        followed: followedSet.has(review.orgId),
+        reactions: (stats?.reactions ?? []).reduce((sum, reaction) => sum + reaction.count, 0),
+        comments: stats?.commentCount ?? 0,
+      };
+    }),
+    { followedAuthorIds: followedSet, genreWeights },
+  );
+
+  const byId = new Map(candidates.map((review) => [review.id, review]));
+  const reviews = ranked.slice(0, limit).flatMap((entry) => {
+    const review = byId.get(entry.item.id);
+    return review ? [{ ...review, reason: entry.reason.label }] : [];
+  });
+  return attachEngagement(orgId, reviews);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1550,12 +1613,22 @@ export interface CompareEntry {
   gap: number;
 }
 
+export interface KindMatch {
+  kind: MediaKind;
+  match: number | null;
+  shared: number;
+  confidence: MatchConfidence;
+  kendallTauB: number | null;
+}
+
 export interface TasteComparison {
   other: ProfileSummary;
   match: number;
   shared: number;
   agreements: number;
   entries: CompareEntry[];
+  /** Match broken down per media kind, only where the profiles overlap. */
+  kinds: KindMatch[];
   /** Kendall tau-b over shared scores, or null with too little overlap. */
   kendallTauB: number | null;
   rankAgreement: number | null;
@@ -1600,12 +1673,35 @@ export async function compareTaste(orgId: string, otherOrgId: string): Promise<T
     theirsProfile: genreProfile(theirs),
   });
 
+  const kinds: KindMatch[] = MEDIA_KINDS.map((kind) => {
+    const mineOfKind = mine.filter((item) => item.kind === kind);
+    const theirsOfKind = theirs.filter((item) => item.kind === kind);
+    const theirKindScores = new Map(theirsOfKind.map((item) => [item.id, item.score]));
+    const sharedOfKind = mineOfKind
+      .filter((item) => theirKindScores.has(item.id))
+      .map((item) => ({ id: item.id, mine: item.score, theirs: theirKindScores.get(item.id) ?? 0 }));
+    const kindMatch = tasteMatch({
+      shared: sharedOfKind,
+      mineProfile: genreProfile(mineOfKind),
+      theirsProfile: genreProfile(theirsOfKind),
+      kindLabel: kind,
+    });
+    return {
+      kind,
+      match: kindMatch.match,
+      shared: sharedOfKind.length,
+      confidence: kindMatch.confidence,
+      kendallTauB: kindMatch.kendallTauB,
+    };
+  }).filter((entry) => entry.shared > 0);
+
   return {
     other,
     match: match.match ?? 0,
     shared: entries.length,
     agreements: match.agreements,
     entries,
+    kinds,
     kendallTauB: match.kendallTauB,
     rankAgreement: match.rankAgreement,
     ratingSimilarity: match.ratingSimilarity,

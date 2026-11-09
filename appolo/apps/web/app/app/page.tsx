@@ -235,10 +235,10 @@ export default async function HomePage() {
       </section>
 
       <section className="mt-8">
-        <SectionHeader title="From people you follow" href="/app/browse" action="Discover" />
+        <SectionHeader title="For you" href="/app/browse" action="Discover" />
         {feed.length === 0 ? (
           <p className="card-surface rounded-2xl p-4 text-[13px] text-muted">
-            Follow someone below and their reviews show up here.
+            Follow someone or rate a few titles and your feed will fill in.
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-2.5">

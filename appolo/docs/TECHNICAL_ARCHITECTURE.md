@@ -134,6 +134,26 @@ GET /api/rankings/model?kind=movie
 - Community scores use `packages/core/src/community.ts` shrinkage; `catalogLeaderboard`
   and `similarItems` expose `average` (shrunk), `rawAverage` and `confidence`.
 
+## 7a. Home feed ranking
+
+`packages/core/src/feed-rank.ts` is a pure, synchronous ranker. `feedForYou` in
+`apps/web/lib/services/social.ts` gathers candidates (followed authors + recent global
+reviews), attaches reaction/comment totals and the viewer's genre weights, then calls
+`rankFeed`. Signals:
+
+| Signal | Weight | Source |
+| --- | --- | --- |
+| affinity | 0.30 | viewer follows the author |
+| freshness | 0.34 | exponential decay, 36 h half-life (`updatedAt`) |
+| engagement | 0.20 | log-scaled reactions + 2 × comments |
+| relevance | 0.16 | genre overlap with the viewer's rated titles |
+| exploration | ≤ 0.06 | stable FNV-1a hash of the review id |
+
+Each ranked entry carries a reason label that the review card renders. The function
+filters seen ids, clamps negative ages and breaks exact ties by id, so equal inputs
+always produce the same order. Weights and half-life are parameters with documented
+defaults; tune them once feed analytics exist rather than guessing per user.
+
 ## 8. Migrations
 
 Two directories are applied by `packages/db/src/migrate.ts`, in order: `drizzle/` then
@@ -156,10 +176,11 @@ relying on `db:generate` again.
 ```bash
 pnpm install --frozen-lockfile
 pnpm typecheck
-pnpm test                 # new: packages/core unit tests (24)
+pnpm test                 # packages/core unit tests (30)
 pnpm --filter @appolo/web build
 # with a PostgreSQL instance:
 pnpm db:migrate && pnpm db:seed && pnpm db:rls-test
+pnpm e2e                  # HTTP e2e against a running server (creates test accounts)
 pnpm smoke                # PowerShell, needs a running server
 ```
 

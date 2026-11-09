@@ -1,0 +1,224 @@
+#!/usr/bin/env node
+/**
+ * End-to-end checks against a running Appolo server and a real database.
+ *
+ * Usage:
+ *   pnpm dev            # in one terminal
+ *   pnpm e2e            # in another
+ *
+ * BASE_URL overrides http://localhost:3000. The script creates two throwaway
+ * accounts per run (unique emails), so it is safe to re-run against a dev DB.
+ * It exits non-zero if any check fails.
+ */
+import assert from "node:assert/strict";
+
+const BASE = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
+const stamp = Date.now().toString(36);
+const password = "e2e-demo-1234";
+
+let passed = 0;
+const failures = [];
+
+async function check(name, fn) {
+  try {
+    await fn();
+    passed += 1;
+    console.log(`PASS  ${name}`);
+  } catch (error) {
+    failures.push({ name, error });
+    console.log(`FAIL  ${name}\n      ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function call(path, { method = "GET", body, cookie, redirect = "manual" } = {}) {
+  const response = await fetch(BASE + path, {
+    method,
+    redirect,
+    headers: {
+      ...(body ? { "content-type": "application/json" } : {}),
+      ...(cookie ? { cookie } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const setCookies = response.headers.getSetCookie ? response.headers.getSetCookie() : [];
+  const nextCookie = setCookies.length
+    ? setCookies.map((value) => value.split(";")[0]).join("; ")
+    : cookie;
+  const text = await response.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    /* HTML or empty */
+  }
+  return { status: response.status, json, text, cookie: nextCookie, headers: response.headers };
+}
+
+async function signup(label) {
+  const email = `e2e-${label}-${stamp}@appolo.test`;
+  const result = await call("/api/auth/signup", {
+    method: "POST",
+    body: {
+      orgName: `E2E ${label} ${stamp}`,
+      name: `E2E ${label}`,
+      email,
+      password,
+      timezone: "UTC",
+    },
+  });
+  assert.equal(result.status, 201, `signup ${label} returned ${result.status}: ${result.text.slice(0, 160)}`);
+  assert.ok(result.cookie, "signup did not set a session cookie");
+  const profilePage = await call("/app/profile", { cookie: result.cookie });
+  assert.equal(profilePage.status, 200, "profile page did not render");
+  const profile = await call("/api/profile", { cookie: result.cookie });
+  assert.equal(profile.status, 200, "profile API failed");
+  assert.ok(profile.json?.profile?.username, "profile username missing");
+  return { email, cookie: result.cookie, username: profile.json.profile.username };
+}
+
+const health = await call("/api/health");
+await check("server is up and database is reachable", () => {
+  assert.equal(health.status, 200);
+  assert.equal(health.json?.ok, true);
+  assert.equal(health.json?.database, "up");
+});
+
+await check("anonymous API and pages are protected", async () => {
+  const api = await call("/api/rankings");
+  assert.equal(api.status, 401);
+  const page = await call("/app");
+  assert.equal(page.status, 307);
+  assert.match(page.headers.get("location") ?? "", /\/login/);
+});
+
+const alpha = await signup("alpha");
+const beta = await signup("beta");
+
+await check("two accounts get distinct public profiles", () => {
+  assert.notEqual(alpha.username, beta.username);
+});
+
+const catalog = await call("/api/catalog?kind=movie&limit=6", { cookie: alpha.cookie });
+const items = catalog.json?.items ?? [];
+await check("catalog returns at least four movie titles", () => {
+  assert.equal(catalog.status, 200);
+  assert.ok(items.length >= 4, `only ${items.length} items`);
+});
+
+const sample = items.slice(0, 6);
+const alphaScores = [9.5, 9, 8.5, 7.5, 7, 6.5];
+
+for (let index = 0; index < sample.length; index += 1) {
+  const item = sample[index];
+  const score = alphaScores[index];
+  const result = await call(`/api/rankings/${item.id}/manual`, {
+    method: "POST",
+    body: { score },
+    cookie: alpha.cookie,
+  });
+  assert.equal(result.status, 200, `alpha manual rating failed for ${item.title}`);
+}
+const betaRate = await Promise.all(
+  sample.map((item, index) =>
+    call(`/api/rankings/${item.id}/manual`, {
+      method: "POST",
+      body: { score: Math.round((10 - alphaScores[index]) * 10) / 10 },
+      cookie: beta.cookie,
+    }),
+  ),
+);
+await check("both accounts can rate the same titles", () => {
+  assert.ok(betaRate.every((result) => result.status === 200));
+});
+
+const rankings = await call("/api/rankings?kind=movie", { cookie: alpha.cookie });
+await check("ratings persist and are ordered", () => {
+  assert.equal(rankings.status, 200);
+  assert.ok(rankings.json.rankings.length >= 4);
+  for (let index = 1; index < rankings.json.rankings.length; index += 1) {
+    assert.ok(
+      rankings.json.rankings[index - 1].score >= rankings.json.rankings[index].score,
+      "rankings are not descending",
+    );
+  }
+});
+
+const [first, second] = sample;
+const tieVote = await call(`/api/rankings/${first.id}/vote`, {
+  method: "POST",
+  body: { opponentId: second.id, result: "tie" },
+  cookie: alpha.cookie,
+});
+await check("a tie vote is accepted", () => {
+  assert.equal(tieVote.status, 200);
+  assert.equal(tieVote.json.result, "tie");
+});
+
+const modelAfterVote = await call("/api/rankings/model?kind=movie", { cookie: alpha.cookie });
+await check("model rebuilds from comparison history and records the tie", () => {
+  assert.equal(modelAfterVote.status, 200);
+  assert.equal(modelAfterVote.json.comparisons, 1);
+  assert.equal(modelAfterVote.json.converged, true);
+  assert.ok(modelAfterVote.json.items.some((item) => item.ties === 1));
+});
+
+const undo = await call(`/api/rankings/${first.id}/undo`, { method: "POST", cookie: alpha.cookie });
+const modelAfterUndo = await call("/api/rankings/model?kind=movie", { cookie: alpha.cookie });
+await check("undo removes the comparison and rebuilds the model", () => {
+  assert.equal(undo.status, 200);
+  assert.equal(undo.json.undone, true);
+  assert.equal(modelAfterUndo.json.comparisons, 0);
+});
+
+const follow = await call("/api/follow", {
+  method: "POST",
+  body: { username: alpha.username, follow: true },
+  cookie: beta.cookie,
+});
+await check("beta can follow alpha", () => {
+  assert.equal(follow.status, 200);
+  assert.equal(follow.json.following, true);
+});
+
+const reviewText = `E2E review ${stamp}: the ranking engine earned this score.`;
+const review = await call(`/api/rankings/${first.id}/review`, {
+  method: "POST",
+  body: { text: reviewText, tags: ["e2e"] },
+  cookie: alpha.cookie,
+});
+const homeFeed = await call("/app", { cookie: beta.cookie });
+await check("home feed ranks followed reviews and explains why", () => {
+  assert.equal(review.status, 200, `review save failed: ${review.text.slice(0, 160)}`);
+  assert.equal(homeFeed.status, 200);
+  assert.match(homeFeed.text, /E2E review/);
+  assert.match(homeFeed.text, /From someone you follow/);
+});
+
+const compare = await call(`/app/compare/${alpha.username}`, { cookie: beta.cookie });
+await check("taste comparison renders with evidence and confidence", () => {
+  assert.equal(compare.status, 200);
+  const text = compare.text.replace(/<[^>]+>/g, " ").replace(/&quot;/g, '"').replace(/\s+/g, " ");
+  assert.match(text, /\d+% match/);
+  assert.match(text, /shared titles/);
+  assert.match(text, /τ-b -?\d/);
+  assert.match(text, /confidence/);
+  assert.match(text, /Match by category/);
+  assert.match(text, /Movies/);
+  const percent = Number(text.match(/(\d+)% match/)?.[1] ?? "100");
+  assert.ok(percent < 50, `opposite rankings scored ${percent}% — genre prior too strong`);
+});
+
+await check("session data survives a fresh login", async () => {
+  const login = await call("/api/auth/login", {
+    method: "POST",
+    body: { email: alpha.email, password },
+  });
+  assert.equal(login.status, 200);
+  assert.ok(login.cookie);
+  const after = await call("/api/rankings?kind=movie", { cookie: login.cookie });
+  assert.equal(after.status, 200);
+  assert.ok(after.json.rankings.some((item) => item.id === first.id));
+});
+
+console.log(`\n${passed} passed, ${failures.length} failed`);
+if (failures.length > 0) process.exitCode = 1;
