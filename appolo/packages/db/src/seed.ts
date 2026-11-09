@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { eq, and, sql } from "drizzle-orm";
@@ -212,57 +213,240 @@ function spotifyLink(item: CatalogSeed): string | null {
   return null;
 }
 
-async function fetchCoverUrl(item: { kind: string; title: string; subtitle: string; year: number | null }): Promise<string | null> {
-  try {
-    if (item.kind === "book") {
-      return `https://covers.openlibrary.org/b/title/${encodeURIComponent(item.title)}-L.jpg`;
+type CoverSeed = { kind: string; title: string; subtitle: string; year: number | null };
+
+function normalizeTitle(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** True when two titles refer to the same work (ignoring punctuation and extra words). */
+function titleMatches(candidate: string, wanted: string): boolean {
+  const a = normalizeTitle(candidate);
+  const b = normalizeTitle(wanted);
+  if (!a || !b) return false;
+  return a === b || a.includes(b) || b.includes(a);
+}
+
+const WIKI_UA = "AppoloSeed/1.0 (https://github.com/harabirsi2/appolo; dev@local)";
+
+/** Wikipedia asks for a descriptive UA and throttles anonymous bursts; retry politely. */
+async function wikiSummary(title: string): Promise<{ thumbnail?: { source?: string }; type?: string } | null> {
+  const url =
+    "https://en.wikipedia.org/api/rest_v1/page/summary/" +
+    encodeURIComponent(title.replace(/ /g, "_"));
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        headers: { "User-Agent": WIKI_UA, Accept: "application/json" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (res.status === 429 || res.status >= 500) {
+        await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+        continue;
+      }
+      if (!res.ok) return null;
+      return (await res.json()) as { thumbnail?: { source?: string }; type?: string };
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
     }
-    const mediaMap: Record<string, string> = { music: "music", podcast: "podcast" };
-    if (item.kind === "movie" || item.kind === "tv" || item.kind === "game") {
-      const suffixes = item.kind === "game" ? [" (video game)"] : item.kind === "tv" ? [" (TV series)", " (TV show)"] : [" (film)", " (movie)"];
-      const tries = [item.year ? item.title + " (" + item.year + " film)" : null, item.year ? item.title + " (" + item.year + ")" : null, ...suffixes.map((s) => item.title + s), item.title].filter(Boolean) as string[];
-      for (const cand of tries) {
-        try {
-          const wikiRes = await fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(cand.replace(/ /g, "_")), { signal: AbortSignal.timeout(8000) });
-          if (wikiRes.ok) {
-            const wikiData = (await wikiRes.json()) as { thumbnail?: { source?: string }; type?: string };
-            if (wikiData.type !== "disambiguation" && wikiData.thumbnail?.source) return wikiData.thumbnail.source;
-          }
-        } catch {
-          // fall through
+  }
+  return null;
+}
+
+/** Search Wikipedia and return the first non-disambiguation thumbnail. */
+async function wikipediaCover(titles: string[]): Promise<string | null> {
+  for (const title of titles) {
+    const data = await wikiSummary(title);
+    if (data && data.type !== "disambiguation" && data.thumbnail?.source) {
+      return data.thumbnail.source;
+    }
+  }
+  return null;
+}
+
+/** Open Library search gives the right edition cover for a title + author. */
+async function openLibraryCover(item: CoverSeed): Promise<string | null> {
+  try {
+    const params = new URLSearchParams({
+      title: item.title,
+      limit: "5",
+      fields: "title,author_name,cover_i",
+    });
+    if (item.subtitle) params.set("author", item.subtitle);
+    const res = await fetch(`https://openlibrary.org/search.json?${params.toString()}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as {
+        docs?: Array<{ title?: string; author_name?: string[]; cover_i?: number }>;
+      };
+      for (const doc of data.docs ?? []) {
+        if (!doc.cover_i || !doc.title) continue;
+        if (!titleMatches(doc.title, item.title)) continue;
+        if (item.subtitle) {
+          const authors = (doc.author_name ?? []).map(normalizeTitle);
+          if (!authors.some((author) => author.includes(normalizeTitle(item.subtitle)))) continue;
         }
+        return `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`;
       }
     }
-    const media = mediaMap[item.kind];
-    if (!media) return null;
-    const entity = item.kind === "music" ? "album" : item.kind === "podcast" ? "podcast" : "movie";
-    const term = item.kind === "music" ? `${item.title} ${item.subtitle}` : item.title;
-    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=${media}&entity=${entity}&limit=1`;
+  } catch {
+    // fall through to the title endpoint
+  }
+  return `https://covers.openlibrary.org/b/title/${encodeURIComponent(item.title)}-L.jpg`;
+}
+
+/** TVmaze has keyless poster art for nearly every TV series. */
+async function tvmazeCover(item: CoverSeed): Promise<string | null> {
+  try {
+    const res = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(item.title)}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Array<{
+      show?: { name?: string; premiered?: string | null; image?: { original?: string; medium?: string } };
+    }>;
+    for (const entry of data) {
+      const show = entry.show;
+      if (!show?.name || !show.image) continue;
+      if (!titleMatches(show.name, item.title)) continue;
+      if (item.year && show.premiered) {
+        const premieredYear = Number(show.premiered.slice(0, 4));
+        if (Number.isFinite(premieredYear) && Math.abs(premieredYear - item.year) > 1) continue;
+      }
+      return show.image.original ?? show.image.medium ?? null;
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+/** iTunes artwork for albums and podcasts, with an artist-aware query. */
+async function itunesCover(item: CoverSeed): Promise<string | null> {
+  const media = item.kind === "music" ? "music" : item.kind === "podcast" ? "podcast" : null;
+  if (!media) return null;
+  const entity = item.kind === "music" ? "album" : "podcast";
+  const term = item.kind === "music" ? `${item.title} ${item.subtitle}` : item.title;
+  try {
+    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=${media}&entity=${entity}&limit=5`;
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return null;
     const data = (await res.json()) as { results?: Array<Record<string, unknown>> };
-    const row = data.results?.[0];
-    if (!row) return null;
-    const art = (row.artworkUrl600 as string) || (row.artworkUrl100 as string) || "";
-    if (!art) return null;
-    return art.replace("100x100bb", "600x600bb");
+    for (const row of data.results ?? []) {
+      const name = (row.collectionName as string) ?? "";
+      const artist = (row.artistName as string) ?? "";
+      if (!titleMatches(name, item.title)) continue;
+      if (item.kind === "music" && item.subtitle && !titleMatches(artist, item.subtitle)) continue;
+      const art = (row.artworkUrl600 as string) || (row.artworkUrl100 as string) || "";
+      if (!art) continue;
+      return art.replace("100x100bb", "600x600bb").replace("100x100.jpg", "600x600.jpg");
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+async function fetchCoverUrl(item: CoverSeed): Promise<string | null> {
+  try {
+    if (item.kind === "book") {
+      return await openLibraryCover(item);
+    }
+    if (item.kind === "tv") {
+      return (
+        (await tvmazeCover(item)) ??
+        (await wikipediaCover([
+          item.year ? `${item.title} (${item.year} TV series)` : `${item.title} (TV series)`,
+          `${item.title} (TV series)`,
+          item.title,
+        ]))
+      );
+    }
+    if (item.kind === "movie" || item.kind === "game") {
+      const suffixes =
+        item.kind === "game" ? [" (video game)"] : [" (film)", " (movie)"];
+      return await wikipediaCover([
+        ...(item.year
+          ? [`${item.title} (${item.year} film)`, `${item.title} (${item.year})`]
+          : []),
+        ...suffixes.map((suffix) => item.title + suffix),
+        item.title,
+      ]);
+    }
+    if (item.kind === "music") {
+      return (
+        (await itunesCover(item)) ??
+        (await wikipediaCover([
+          `${item.title} (${item.subtitle} album)`,
+          `${item.title} (album)`,
+          item.title,
+        ]))
+      );
+    }
+    if (item.kind === "podcast") {
+      return await itunesCover(item);
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
+const COVERS_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../apps/web/public/covers",
+);
+
+/** Download remote artwork once so the app serves stable local files instead of hotlinking. */
+async function cacheCover(row: CoverSeed, remoteUrl: string): Promise<string | null> {
+  const ext = /\.png(\?|$)/i.test(remoteUrl) ? "png" : "jpg";
+  const filename = `${row.kind}-${slugify(row.title)}.${ext}`;
+  const file = path.join(COVERS_DIR, filename);
+  if (existsSync(file)) return `/covers/${filename}`;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const res = await fetch(remoteUrl, {
+        headers: { "User-Agent": WIKI_UA, Accept: "image/*" },
+        signal: AbortSignal.timeout(20000),
+      });
+      if (res.status === 429 || res.status >= 500) {
+        await new Promise((resolve) => setTimeout(resolve, 2500 * (attempt + 1)));
+        continue;
+      }
+      if (!res.ok) return null;
+      const bytes = Buffer.from(await res.arrayBuffer());
+      if (bytes.length < 1000) return null;
+      await mkdir(COVERS_DIR, { recursive: true });
+      await writeFile(file, bytes);
+      return `/covers/${filename}`;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+    }
+  }
+  return null;
+}
+
 async function enrichCoverImages(rows: Array<{ id: string; kind: string; title: string; subtitle: string; year: number | null; imageUrl: string | null }>): Promise<void> {
   const missing = rows.filter((row) => !row.imageUrl);
-  const concurrency = 6;
+  const concurrency = 2;
   for (let i = 0; i < missing.length; i += concurrency) {
     const batch = missing.slice(i, i + concurrency);
     await Promise.all(
       batch.map(async (row) => {
-        const url = await fetchCoverUrl(row);
-        if (!url) return;
-        await db.update(catalogItems).set({ imageUrl: url }).where(eq(catalogItems.id, row.id));
+        const remoteUrl = await fetchCoverUrl(row);
+        if (!remoteUrl) return;
+        const localPath = await cacheCover(row, remoteUrl);
+        await db
+          .update(catalogItems)
+          .set({ imageUrl: localPath ?? remoteUrl })
+          .where(eq(catalogItems.id, row.id));
       }),
     );
+    await new Promise((resolve) => setTimeout(resolve, 600));
   }
 }
 
@@ -283,7 +467,7 @@ async function seedMedia(orgId: string): Promise<void> {
           links: spotify ? { spotify } : {},
           genres: item.genres ?? [],
           trailerUrl: item.trailerUrl ?? (item.kind === "movie" || item.kind === "tv" ? `https://www.youtube.com/results?search_query=${encodeURIComponent(item.title + " trailer")}` : null),
-          imageUrl: item.kind === "book" ? `https://covers.openlibrary.org/b/title/${encodeURIComponent(item.title)}-L.jpg` : null,
+          imageUrl: null,
           tags: item.tags,
         };
       }),
@@ -296,7 +480,7 @@ async function seedMedia(orgId: string): Promise<void> {
         tags: sql`excluded.tags`,
         genres: sql`excluded.genres`,
         trailerUrl: sql`excluded.trailer_url`,
-        imageUrl: sql`excluded.image_url`,
+        imageUrl: sql`coalesce(excluded.image_url, ${catalogItems.imageUrl})`,
       },
     });
 

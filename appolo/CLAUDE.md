@@ -23,6 +23,8 @@ Clean-room, responsive web app/PWA clone of Podiums (https://podiu.ms/). Next.js
 - `packages/core/src/ranking.ts`
 - `apps/web/lib/services/rankings.ts`, `apps/web/lib/services/social.ts`
 - `apps/web/components/podiums.tsx`, `profile-screen.tsx`
+- `apps/web/components/media-art.tsx` — renders covers from `imageUrl`, falls back to a kind glyph.
+- `apps/web/public/covers/` — 56 cached cover images. `db:seed` fills missing art from TVmaze (TV), Wikipedia (film/game/music fallback), iTunes (music/podcast) and Open Library (books), then downloads it here so the app never hotlinks external images.
 - `apps/web/scripts/smoke.ps1`
 
 ## Git
