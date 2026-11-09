@@ -1070,6 +1070,7 @@ export const itemRatings = pgTable(
     matches: integer("matches").notNull().default(0),
     wins: integer("wins").notNull().default(0),
     losses: integer("losses").notNull().default(0),
+    ties: integer("ties").notNull().default(0),
     skips: integer("skips").notNull().default(0),
     reviewText: text("review_text"),
     reviewTags: text("review_tags").array().notNull().default(emptyTextArray()),
@@ -1095,8 +1096,14 @@ export const itemMatchups = pgTable(
     orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
     itemId: uuid("item_id").notNull().references(() => catalogItems.id, { onDelete: "cascade" }),
     opponentId: uuid("opponent_id").notNull().references(() => catalogItems.id, { onDelete: "cascade" }),
-    /** Result from the item's perspective: win | loss | skip. */
+    /** Result from the item's perspective: win | loss | tie | undecided | skip. */
     result: text("result").notNull(),
+    /**
+     * Tie-aware outcome for the statistical model: "a", "b", "tie",
+     * "undecided" or "skip". Null for rows written before the model existed;
+     * those are read from `result` instead.
+     */
+    outcome: text("outcome"),
     itemEloBefore: integer("item_elo_before").notNull(),
     itemEloAfter: integer("item_elo_after").notNull(),
     opponentEloBefore: integer("opponent_elo_before").notNull(),
@@ -1105,6 +1112,29 @@ export const itemMatchups = pgTable(
   },
   (t) => ({
     orgItemIdx: index("item_matchups_org_item_idx").on(t.orgId, t.itemId, t.createdAt),
+  }),
+);
+
+/**
+ * Fitted personal ranking model per org and media kind. The JSON state is a
+ * snapshot of the Bradley–Terry + Davidson fit (thetas, standard errors,
+ * comparison counts). It can always be rebuilt from `item_matchups`, which is
+ * the durable source of truth.
+ */
+export const rankingModels = pgTable(
+  "ranking_models",
+  {
+    id: pk(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    kind: mediaKindEnum("kind").notNull(),
+    /** { items: FittedItem[], tieParameter, logLikelihood, converged, iterations } */
+    state: jsonb("state").notNull().default(emptyJson()),
+    comparisons: integer("comparisons").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    orgKindUq: uniqueIndex("ranking_models_org_kind_uq").on(t.orgId, t.kind),
   }),
 );
 

@@ -1,6 +1,14 @@
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
-import { MEDIA_KINDS, mediaKindSchema, scoreForElo, type MediaKind } from "@appolo/core";
+import {
+  MEDIA_KINDS,
+  genreProfile,
+  mediaKindSchema,
+  scoreForElo,
+  tasteMatch,
+  type MatchConfidence,
+  type MediaKind,
+} from "@appolo/core";
 import { getDb, withOrg, schema } from "@/lib/db";
 import { DomainError } from "./errors";
 import { rankedRatings, watchlistFor, type CatalogItem, type RankedItem } from "./rankings";
@@ -1246,11 +1254,14 @@ export async function matchPercent(orgId: string, otherOrgId: string): Promise<n
   if (orgId === otherOrgId) return 100;
   const [mine, theirs] = await Promise.all([rankedRatings(orgId), rankedRatings(otherOrgId)]);
   const theirScores = new Map(theirs.map((item) => [item.id, item.score]));
-  const shared = mine.filter((item) => theirScores.has(item.id));
-  if (shared.length === 0) return null;
-  const totalDiff = shared.reduce((sum, item) => sum + Math.abs(item.score - (theirScores.get(item.id) ?? 0)), 0);
-  const avgDiff = totalDiff / shared.length;
-  return Math.max(0, Math.min(100, Math.round(100 - avgDiff * 10)));
+  const shared = mine
+    .filter((item) => theirScores.has(item.id))
+    .map((item) => ({ id: item.id, mine: item.score, theirs: theirScores.get(item.id) ?? 0 }));
+  return tasteMatch({
+    shared,
+    mineProfile: genreProfile(mine),
+    theirsProfile: genreProfile(theirs),
+  }).match;
 }
 
 /** Combined "For You" feed: people you follow first, then the wider community. */
@@ -1545,6 +1556,13 @@ export interface TasteComparison {
   shared: number;
   agreements: number;
   entries: CompareEntry[];
+  /** Kendall tau-b over shared scores, or null with too little overlap. */
+  kendallTauB: number | null;
+  rankAgreement: number | null;
+  ratingSimilarity: number | null;
+  confidence: MatchConfidence;
+  /** Plain-language explanation of what supports the percentage. */
+  basis: string;
 }
 
 /** Two profiles' scores for every title they have both ranked, biggest gaps first. */
@@ -1571,13 +1589,27 @@ export async function compareTaste(orgId: string, otherOrgId: string): Promise<T
     })
     .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
 
-  if (entries.length === 0) return { other, match: 0, shared: 0, agreements: 0, entries: [] };
-  const totalDiff = entries.reduce((sum, entry) => sum + Math.abs(entry.gap), 0);
+  const sharedPairs = entries.map((entry) => ({
+    id: entry.item.id,
+    mine: entry.mine,
+    theirs: entry.theirs,
+  }));
+  const match = tasteMatch({
+    shared: sharedPairs,
+    mineProfile: genreProfile(mine),
+    theirsProfile: genreProfile(theirs),
+  });
+
   return {
     other,
-    match: Math.max(0, Math.min(100, Math.round(100 - (totalDiff / entries.length) * 10))),
+    match: match.match ?? 0,
     shared: entries.length,
-    agreements: entries.filter((entry) => Math.abs(entry.gap) <= 0.5).length,
+    agreements: match.agreements,
     entries,
+    kendallTauB: match.kendallTauB,
+    rankAgreement: match.rankAgreement,
+    ratingSimilarity: match.ratingSimilarity,
+    confidence: match.confidence,
+    basis: match.basis,
   };
 }

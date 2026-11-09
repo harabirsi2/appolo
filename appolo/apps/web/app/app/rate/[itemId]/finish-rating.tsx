@@ -78,7 +78,9 @@ export function FinishRating({
     );
   }
 
-  async function vote(result: "win" | "loss" | "skip") {
+  type VoteResult = "win" | "loss" | "tie" | "undecided" | "skip";
+
+  async function vote(result: VoteResult) {
     setBusy(true);
     setError(null);
     try {
@@ -114,7 +116,11 @@ export function FinishRating({
       setMessage(
         result === "skip"
           ? "Skipped — no score change."
-          : `Now ${outcome.item.score.toFixed(1)} / 10.`,
+          : result === "undecided"
+            ? "Too close to call — no score change."
+            : result === "tie"
+              ? `Tied — now ${outcome.item.score.toFixed(1)} / 10.`
+              : `Now ${outcome.item.score.toFixed(1)} / 10.`,
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Something went wrong.");
@@ -184,6 +190,8 @@ export function FinishRating({
       if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
       if (event.key === "1") void vote("win");
       if (event.key === "2") void vote("loss");
+      if (event.key === "3") void vote("tie");
+      if (event.key === "4") void vote("undecided");
       if (event.key.toLowerCase() === "s") void vote("skip");
     }
     window.addEventListener("keydown", onKey);
@@ -403,7 +411,26 @@ export function FinishRating({
               VS
             </span>
           </div>
-          <p className="mt-1.5 text-center text-[10px] text-muted-2">Tip: press 1, 2, or S</p>
+          <p className="mt-1.5 text-center text-[10px] text-muted-2">Tip: press 1, 2, 3, 4, or S</p>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => vote("tie")}
+              className="min-h-11 rounded-xl border border-white/10 bg-white/[0.03] text-[12px] font-medium text-ink transition-colors hover:border-white/20 disabled:opacity-50"
+            >
+              Equally good
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => vote("undecided")}
+              className="min-h-11 rounded-xl border border-white/10 bg-white/[0.03] text-[12px] font-medium text-ink transition-colors hover:border-white/20 disabled:opacity-50"
+            >
+              Too close to call
+            </button>
+          </div>
 
           <div className="mt-2 flex items-center justify-between">
             <button
@@ -412,7 +439,7 @@ export function FinishRating({
               onClick={() => vote("skip")}
               className="text-[11px] text-muted-2 transition-colors hover:text-ink disabled:opacity-50"
             >
-              Can’t decide — skip
+              Skip this one
             </button>
             {message ? <p className="text-[11px] text-brand">{message}</p> : null}
           </div>

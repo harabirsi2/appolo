@@ -10,3 +10,5 @@ export * from "./automations";
 export * from "./campaigns";
 export * from "./ai-employee";
 export * from "./ranking";
+export * from "./ranking-model";
+export * from "./taste-match";

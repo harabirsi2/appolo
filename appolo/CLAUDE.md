@@ -20,8 +20,11 @@ Clean-room, responsive web app/PWA clone of Podiums (https://podiu.ms/). Next.js
 
 ## Key files
 - `packages/db/src/schema.ts`, `packages/db/sql/0007_podium_parity.sql`, `packages/db/src/seed.ts`
-- `packages/core/src/ranking.ts`
+- `packages/core/src/ranking.ts` (Elo), `packages/core/src/ranking-model.ts` (Bradley–Terry + Davidson), `packages/core/src/taste-match.ts`
 - `apps/web/lib/services/rankings.ts`, `apps/web/lib/services/social.ts`
+- `packages/db/sql/0012_ranking_model.sql` (outcome, ties, ranking_models + RLS)
+- `docs/` — product audit, roadmap, ranking system, design system, architecture
+- `pnpm test` runs the `@appolo/core` unit tests (18 at time of writing)
 - `apps/web/components/podiums.tsx`, `profile-screen.tsx`
 - `apps/web/components/media-art.tsx` — renders covers from `imageUrl`, falls back to a kind glyph.
 - `apps/web/public/covers/` — 56 cached cover images. `db:seed` fills missing art from TVmaze (TV), Wikipedia (film/game/music fallback), iTunes (music/podcast) and Open Library (books), then downloads it here so the app never hotlinks external images.

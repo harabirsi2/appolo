@@ -55,9 +55,14 @@ export const SCORE_FLOOR_ELO = 1200;
 /** Elo points per score point (so 1800 Elo maps to a perfect 10.0). */
 export const SCORE_SPAN = 60;
 
-export const MATCH_RESULTS = ["win", "loss", "skip"] as const;
+export const MATCH_RESULTS = ["win", "loss", "tie", "undecided", "skip"] as const;
 export type MatchResult = (typeof MATCH_RESULTS)[number];
 export const matchResultSchema = z.enum(MATCH_RESULTS);
+
+/** Outcomes that must leave both Elo ratings untouched. */
+export function isNoOpResult(result: MatchResult): boolean {
+  return result === "skip" || result === "undecided";
+}
 
 export const voteInputSchema = z.object({
   opponentId: z.string().uuid(),
@@ -102,9 +107,9 @@ export function nextElo(
   outcome: MatchResult,
   k = K_FACTOR,
 ): { a: number; b: number } {
-  if (outcome === "skip") return { a, b };
+  if (isNoOpResult(outcome)) return { a, b };
   const expected = expectedWinProbability(a, b);
-  const actual = outcome === "win" ? 1 : 0;
+  const actual = outcome === "win" ? 1 : outcome === "tie" ? 0.5 : 0;
   const delta = Math.round(k * (actual - expected));
   return { a: a + delta, b: b - delta };
 }
@@ -137,9 +142,9 @@ export function nextEloAdaptive(
   decidedA: number,
   decidedB: number,
 ): { a: number; b: number } {
-  if (outcome === "skip") return { a, b };
+  if (isNoOpResult(outcome)) return { a, b };
   const expected = expectedWinProbability(a, b);
-  const actual = outcome === "win" ? 1 : 0;
+  const actual = outcome === "win" ? 1 : outcome === "tie" ? 0.5 : 0;
   return {
     a: a + Math.round(kFactorFor(decidedA) * (actual - expected)),
     b: b + Math.round(kFactorFor(decidedB) * (expected - actual)),

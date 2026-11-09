@@ -66,6 +66,10 @@ export default async function ComparePage({ params }: Params) {
         </div>
       </div>
 
+      <p className="mt-2 text-center text-[11px] leading-relaxed text-muted-2">
+        {comparison.basis}
+      </p>
+
       {comparison.shared === 0 ? (
         <div className="mt-6 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center">
           <p className="text-sm font-medium text-ink">Nothing to compare yet</p>

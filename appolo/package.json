@@ -12,6 +12,7 @@
     "dev:worker": "pnpm --filter @appolo/worker dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @appolo/core test",
     "db:generate": "pnpm --filter @appolo/db generate",
     "db:migrate": "pnpm --filter @appolo/db migrate",
     "db:seed": "pnpm --filter @appolo/db seed",

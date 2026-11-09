@@ -1,10 +1,16 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import {
   START_ELO,
   clamp,
   scoreForElo,
   selectOpponent,
   withPositions,
+  fitBradleyTerry,
+  pairKey,
+  selectInformativeOpponent,
+  type ComparisonEvent,
+  type ComparisonOutcome,
+  type FittedItem,
   type MatchResult,
   type MediaKind,
 } from "@appolo/core";
@@ -13,7 +19,7 @@ import { DomainError } from "./errors";
 import { enrichCatalogFromProviders } from "./catalog-providers";
 import { nextEloAdaptive } from "@appolo/core/ranking";
 
-const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, catalogCredits } = schema;
+const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, catalogCredits, rankingModels } = schema;
 
 export interface CatalogItem {
   id: string;
@@ -61,6 +67,131 @@ export interface TasteStats {
 
 function toScore(elo: number): number {
   return scoreForElo(elo);
+}
+
+/* ------------------------------------------------------------------ */
+/* Bradley–Terry model                                                 */
+/* ------------------------------------------------------------------ */
+
+export interface RankingModelView {
+  kind: MediaKind;
+  items: FittedItem[];
+  byId: Map<string, FittedItem>;
+  tieParameter: number;
+  logLikelihood: number;
+  converged: boolean;
+  iterations: number;
+  comparisons: number;
+  updatedAt: Date | null;
+}
+
+/** Map a legacy/recorded matchup result onto the model's outcome vocabulary. */
+export function outcomeForResult(result: string, stored?: string | null): ComparisonOutcome {
+  if (stored === "a" || stored === "b" || stored === "tie" || stored === "undecided" || stored === "skip") {
+    return stored;
+  }
+  switch (result) {
+    case "win":
+      return "a";
+    case "loss":
+      return "b";
+    case "tie":
+      return "tie";
+    case "undecided":
+      return "undecided";
+    default:
+      return "skip";
+  }
+}
+
+function modelFromRow(row: typeof rankingModels.$inferSelect): RankingModelView {
+  const state = (row.state ?? {}) as {
+    items?: FittedItem[];
+    tieParameter?: number;
+    logLikelihood?: number;
+    converged?: boolean;
+    iterations?: number;
+  };
+  const items = Array.isArray(state.items) ? state.items : [];
+  return {
+    kind: row.kind,
+    items,
+    byId: new Map(items.map((item) => [item.id, item])),
+    tieParameter: state.tieParameter ?? 0.55,
+    logLikelihood: state.logLikelihood ?? 0,
+    converged: state.converged ?? false,
+    iterations: state.iterations ?? 0,
+    comparisons: row.comparisons,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/**
+ * Rebuild one category's model from its full comparison history. `item_matchups`
+ * is the source of truth: this function never writes to it, only to the cached
+ * snapshot in `ranking_models`. Skipped/undecided votes are excluded by the
+ * fitter, so they can never corrupt a ranking.
+ */
+export async function refreshRankingModel(
+  orgId: string,
+  kind: MediaKind,
+): Promise<RankingModelView> {
+  return withOrg(orgId, async (tx) => {
+    const rows = await tx
+      .select({
+        itemId: itemMatchups.itemId,
+        opponentId: itemMatchups.opponentId,
+        result: itemMatchups.result,
+        outcome: itemMatchups.outcome,
+      })
+      .from(itemMatchups)
+      .innerJoin(catalogItems, eq(catalogItems.id, itemMatchups.itemId))
+      .where(and(eq(itemMatchups.orgId, orgId), eq(catalogItems.kind, kind)));
+
+    const events: ComparisonEvent[] = rows.map((row) => ({
+      aId: row.itemId,
+      bId: row.opponentId,
+      outcome: outcomeForResult(row.result, row.outcome),
+    }));
+
+    const fit = fitBradleyTerry(events);
+    const state = {
+      items: fit.items,
+      tieParameter: fit.tieParameter,
+      logLikelihood: fit.logLikelihood,
+      converged: fit.converged,
+      iterations: fit.iterations,
+    };
+
+    const updated = (
+      await tx
+        .insert(rankingModels)
+        .values({ orgId, kind, state, comparisons: events.length })
+        .onConflictDoUpdate({
+          target: [rankingModels.orgId, rankingModels.kind],
+          set: { state, comparisons: events.length, updatedAt: new Date() },
+        })
+        .returning()
+    )[0]!;
+
+    return modelFromRow(updated);
+  });
+}
+
+/** Read the stored model, building the first snapshot on demand. */
+export async function getRankingModel(
+  orgId: string,
+  kind: MediaKind,
+): Promise<RankingModelView> {
+  const rows = await withOrg(orgId, (tx) =>
+    tx
+      .select()
+      .from(rankingModels)
+      .where(and(eq(rankingModels.orgId, orgId), eq(rankingModels.kind, kind)))
+      .limit(1),
+  );
+  if (rows[0]) return modelFromRow(rows[0]);
+  return refreshRankingModel(orgId, kind);
 }
 
 /* ------------------------------------------------------------------ */
@@ -264,6 +395,10 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
   const item = await getCatalogItem(itemId);
   if (!item) throw new DomainError("ITEM_NOT_FOUND", "That item is not in the catalog.", 404);
 
+  // The fitted model is read before the transaction so selection can use the
+  // thetas and standard errors rather than raw Elo alone.
+  const model = await getRankingModel(orgId, item.kind).catch(() => null);
+
   return withOrg(orgId, async (tx) => {
     const rating =
       (
@@ -300,11 +435,53 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
       .limit(5);
     const recentIds = recentRows.map((r) => r.opponentId);
 
-    const opponent = selectOpponent(
-      { id: item.id, elo: rating.elo },
-      pool,
-      { recentIds, seed: Date.now() & 0xffff },
-    );
+    // Pair history for the target, used to stop the same question repeating.
+    const pairRows = await tx
+      .select({ itemId: itemMatchups.itemId, opponentId: itemMatchups.opponentId })
+      .from(itemMatchups)
+      .where(
+        and(
+          eq(itemMatchups.orgId, orgId),
+          or(eq(itemMatchups.itemId, itemId), eq(itemMatchups.opponentId, itemId)),
+        ),
+      );
+    const pairCounts = new Map<string, number>();
+    for (const row of pairRows) {
+      const key = pairKey(row.itemId, row.opponentId);
+      pairCounts.set(key, (pairCounts.get(key) ?? 0) + 1);
+    }
+
+    const exposure = new Map<string, number>();
+    for (const entry of model?.items ?? []) exposure.set(entry.id, entry.comparisons);
+
+    const candidates = pool.map((row) => ({
+      id: row.id,
+      theta: model?.byId.get(row.id)?.theta ?? 0,
+      standardError: model?.byId.get(row.id)?.standardError ?? 1,
+    }));
+
+    // Prefer the matchup that teaches the model most. Fall back to the
+    // Elo-distance heuristic when no model is available yet.
+    const informativeId =
+      candidates.length > 1
+        ? selectInformativeOpponent({
+            targetId: item.id,
+            targetTheta: model?.byId.get(item.id)?.theta ?? 0,
+            targetStandardError: model?.byId.get(item.id)?.standardError ?? 1,
+            candidates,
+            pairCounts,
+            exposure,
+            recentIds,
+            tieParameter: model?.tieParameter,
+          })
+        : null;
+
+    const opponent = informativeId
+      ? pool.find((row) => row.id === informativeId) ?? null
+      : selectOpponent({ id: item.id, elo: rating.elo }, pool, {
+          recentIds,
+          seed: Date.now() & 0xffff,
+        });
     if (!opponent) {
       throw new DomainError("NO_OPPONENT", "No other items to compare against yet.", 409);
     }
@@ -365,7 +542,7 @@ export async function submitVote(
     throw new DomainError("KIND_MISMATCH", "Choose two items of the same kind.");
   }
 
-  return withOrg(orgId, async (tx) => {
+  const output = await withOrg(orgId, async (tx) => {
     const itemRating = await getOrInitRating(tx, orgId, itemId);
     const opponentRating = await getOrInitRating(tx, orgId, opponentId);
 
@@ -377,7 +554,7 @@ export async function submitVote(
       itemRating.wins + itemRating.losses,
       opponentRating.wins + opponentRating.losses,
     );
-    const counted = result !== "skip";
+    const counted = result !== "skip" && result !== "undecided";
 
     const updatedItem = (
       await tx
@@ -387,7 +564,9 @@ export async function submitVote(
           matches: itemRating.matches + 1,
           wins: itemRating.wins + (result === "win" ? 1 : 0),
           losses: itemRating.losses + (result === "loss" ? 1 : 0),
-          skips: itemRating.skips + (result === "skip" ? 1 : 0),
+          ties: itemRating.ties + (result === "tie" ? 1 : 0),
+          skips:
+            itemRating.skips + (result === "skip" || result === "undecided" ? 1 : 0),
           updatedAt: new Date(),
         })
         .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, itemId)))
@@ -402,7 +581,9 @@ export async function submitVote(
           matches: opponentRating.matches + 1,
           wins: opponentRating.wins + (result === "loss" ? 1 : 0),
           losses: opponentRating.losses + (result === "win" ? 1 : 0),
-          skips: opponentRating.skips + (result === "skip" ? 1 : 0),
+          ties: opponentRating.ties + (result === "tie" ? 1 : 0),
+          skips:
+            opponentRating.skips + (result === "skip" || result === "undecided" ? 1 : 0),
           updatedAt: new Date(),
         })
         .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, opponentId)))
@@ -414,18 +595,22 @@ export async function submitVote(
       itemId,
       opponentId,
       result,
+      outcome: outcomeForResult(result),
       itemEloBefore: before.item,
       itemEloAfter: after.a,
       opponentEloBefore: before.opponent,
       opponentEloAfter: after.b,
     });
 
-    if (result !== "skip") {
+    if (counted) {
       await tx.insert(ratingEvents).values({
         orgId,
         itemId,
         kind: "rated",
-        detail: `${result === "win" ? "Picked over" : "Lost to"} ${opponent.title}`,
+        detail:
+          result === "tie"
+            ? `Tied with ${opponent.title}`
+            : `${result === "win" ? "Picked over" : "Lost to"} ${opponent.title}`,
       });
     }
 
@@ -436,6 +621,17 @@ export async function submitVote(
       opponent: { ...opponent, ratingId: updatedOpponent.id, elo: updatedOpponent.elo, matches: updatedOpponent.matches, wins: updatedOpponent.wins, losses: updatedOpponent.losses, skips: updatedOpponent.skips, score: toScore(updatedOpponent.elo), position: 0, reviewText: updatedOpponent.reviewText ?? null, reviewTags: updatedOpponent.reviewTags ?? [], spoiler: updatedOpponent.spoiler, photoUrl: updatedOpponent.photoUrl ?? null, videoUrl: updatedOpponent.videoUrl ?? null, favoriteCharacter: updatedOpponent.favoriteCharacter ?? null, favoriteTracks: updatedOpponent.favoriteTracks ?? [] },
     };
   });
+
+  // Refresh the statistical snapshot with the new observation. The vote is
+  // already committed, so a refresh failure must not fail the request; the
+  // next read rebuilds the model from item_matchups.
+  try {
+    await refreshRankingModel(orgId, item.kind);
+  } catch (error) {
+    console.error("ranking model refresh failed", error);
+  }
+
+  return output;
 }
 
 /** Recently completed matchups for an item, newest first. */

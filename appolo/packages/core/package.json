@@ -9,13 +9,15 @@
     "./ranking": "./src/ranking.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/ranking-model.test.ts src/taste-match.test.ts"
   },
   "dependencies": {
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }
 }

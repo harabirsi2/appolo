@@ -16,6 +16,11 @@ Reviews, shared inbox, AI employee, contacts, reporting — **no payments.**
 | [`FEATURE_MAP.md`](./FEATURE_MAP.md) | Every feature with ID, description, build-vs-integrate call, and phase |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Stack, data model, API surface, pipelines, AI subsystem, security, risks |
 | [`ROADMAP.md`](./ROADMAP.md) | Phased plan, exit criteria, MVP cut line, open decisions |
+| [`docs/PRODUCT_AUDIT.md`](./docs/PRODUCT_AUDIT.md) | Verified audit of what works, what is missing, baseline checks |
+| [`docs/PRODUCT_ROADMAP.md`](./docs/PRODUCT_ROADMAP.md) | Current phase status and immediate next tasks |
+| [`docs/RANKING_SYSTEM.md`](./docs/RANKING_SYSTEM.md) | Bradley–Terry + Davidson model, ties, uncertainty, selection, tests |
+| [`docs/DESIGN_SYSTEM.md`](./docs/DESIGN_SYSTEM.md) | Implemented tokens, typography, components, motion, gaps |
+| [`docs/TECHNICAL_ARCHITECTURE.md`](./docs/TECHNICAL_ARCHITECTURE.md) | Request flows, data model, security, migrations |
 
 ## Quick start (Windows, no Docker)
 
