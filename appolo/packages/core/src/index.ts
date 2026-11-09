@@ -12,3 +12,4 @@ export * from "./ai-employee";
 export * from "./ranking";
 export * from "./ranking-model";
 export * from "./taste-match";
+export * from "./community";

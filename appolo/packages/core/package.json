@@ -10,7 +10,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/ranking-model.test.ts src/taste-match.test.ts"
+    "test": "tsx --test src/ranking-model.test.ts src/taste-match.test.ts src/community.test.ts"
   },
   "dependencies": {
     "zod": "^3.24.1"

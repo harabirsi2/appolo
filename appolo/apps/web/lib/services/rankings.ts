@@ -8,6 +8,8 @@ import {
   fitBradleyTerry,
   pairKey,
   selectInformativeOpponent,
+  shrinkCommunityScore,
+  type CommunityConfidence,
   type ComparisonEvent,
   type ComparisonOutcome,
   type FittedItem,
@@ -634,6 +636,115 @@ export async function submitVote(
   return output;
 }
 
+export interface UndoResult {
+  undone: boolean;
+  itemId: string;
+  opponentId: string;
+}
+
+/**
+ * Undo the most recent comparison that involved this item.
+ *
+ * Elo values are restored from the stored `*_elo_before` columns (not
+ * recomputed heuristically), counters are decremented for the exact outcome,
+ * the durable matchup row is deleted, the matching timeline event is removed,
+ * and the statistical model is rebuilt. Returns `undone: false` when there is
+ * nothing to undo.
+ */
+export async function undoLastComparison(orgId: string, itemId: string): Promise<UndoResult> {
+  const item = await getCatalogItem(itemId);
+  if (!item) throw new DomainError("ITEM_NOT_FOUND", "That item is not in the catalog.", 404);
+
+  const output = await withOrg(orgId, async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(itemMatchups)
+      .where(
+        and(
+          eq(itemMatchups.orgId, orgId),
+          or(eq(itemMatchups.itemId, itemId), eq(itemMatchups.opponentId, itemId)),
+        ),
+      )
+      .orderBy(desc(itemMatchups.createdAt))
+      .limit(1);
+
+    if (!row) return { undone: false, itemId, opponentId: itemId } satisfies UndoResult;
+
+    const skipDelta = row.result === "skip" || row.result === "undecided" ? 1 : 0;
+    const itemDecided = row.result === "win" || row.result === "loss";
+
+    const [itemRating] = await tx
+      .select()
+      .from(itemRatings)
+      .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, row.itemId)))
+      .limit(1);
+    if (itemRating) {
+      await tx
+        .update(itemRatings)
+        .set({
+          elo: row.itemEloBefore,
+          matches: Math.max(0, itemRating.matches - 1),
+          wins: Math.max(0, itemRating.wins - (row.result === "win" ? 1 : 0)),
+          losses: Math.max(0, itemRating.losses - (row.result === "loss" ? 1 : 0)),
+          ties: Math.max(0, itemRating.ties - (row.result === "tie" ? 1 : 0)),
+          skips: Math.max(0, itemRating.skips - skipDelta),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, row.itemId)));
+    }
+
+    const [opponentRating] = await tx
+      .select()
+      .from(itemRatings)
+      .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, row.opponentId)))
+      .limit(1);
+    if (opponentRating) {
+      await tx
+        .update(itemRatings)
+        .set({
+          elo: row.opponentEloBefore,
+          matches: Math.max(0, opponentRating.matches - 1),
+          wins: Math.max(0, opponentRating.wins - (row.result === "loss" ? 1 : 0)),
+          losses: Math.max(0, opponentRating.losses - (row.result === "win" ? 1 : 0)),
+          ties: Math.max(0, opponentRating.ties - (row.result === "tie" ? 1 : 0)),
+          skips: Math.max(0, opponentRating.skips - skipDelta),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, row.opponentId)));
+    }
+
+    await tx.delete(itemMatchups).where(eq(itemMatchups.id, row.id));
+
+    if (itemDecided) {
+      const [event] = await tx
+        .select({ id: ratingEvents.id })
+        .from(ratingEvents)
+        .where(
+          and(
+            eq(ratingEvents.orgId, orgId),
+            eq(ratingEvents.itemId, row.itemId),
+            eq(ratingEvents.kind, "rated"),
+          ),
+        )
+        .orderBy(desc(ratingEvents.createdAt))
+        .limit(1);
+      if (event) await tx.delete(ratingEvents).where(eq(ratingEvents.id, event.id));
+    }
+
+    return { undone: true, itemId: row.itemId, opponentId: row.opponentId } satisfies UndoResult;
+  });
+
+  if (output.undone) {
+    try {
+      await refreshRankingModel(orgId, item.kind);
+    } catch (error) {
+      console.error("ranking model refresh after undo failed", error);
+    }
+  }
+
+  return output;
+}
+
 /** Recently completed matchups for an item, newest first. */
 export async function recentMatchups(orgId: string, itemId: string, limit = 10) {
   return withOrg(orgId, async (tx) => {
@@ -867,8 +978,12 @@ export async function personBySlug(slug: string): Promise<PersonPage | null> {
 export type LeaderboardSort = "top" | "rated" | "new";
 
 export interface CommunityItem extends CatalogItem {
-  /** Community average score, or null when nobody has rated it yet. */
+  /** Conservative community score after Bayesian-style shrinkage. */
   average: number | null;
+  /** Unsrunk average, kept for transparency and internal ordering. */
+  rawAverage: number | null;
+  /** How much evidence supports the score. */
+  confidence: CommunityConfidence;
   ratings: number;
 }
 
@@ -905,11 +1020,19 @@ export async function catalogLeaderboard(
     )
     .limit(Math.min(options.limit ?? 24, 60));
 
-  return rows.map((row) => ({
-    ...mapCatalogItem(row.item),
-    ratings: row.ratings,
-    average: row.ratings === 0 ? null : toScore(row.avgElo),
-  }));
+  return rows.map((row) => {
+    const estimate = shrinkCommunityScore({
+      mean: toScore(row.avgElo),
+      count: row.ratings,
+    });
+    return {
+      ...mapCatalogItem(row.item),
+      ratings: row.ratings,
+      average: estimate.score,
+      rawAverage: estimate.raw,
+      confidence: estimate.confidence,
+    };
+  });
 }
 
 export interface SimilarItem extends CommunityItem {
@@ -942,10 +1065,16 @@ export async function similarItems(itemId: string, limit = 8): Promise<SimilarIt
   return rows
     .map((row) => {
       const overlap = row.item.genres.filter((genre) => wanted.has(genre.toLowerCase())).length;
+      const estimate = shrinkCommunityScore({
+        mean: toScore(row.avgElo),
+        count: row.ratings,
+      });
       return {
         ...mapCatalogItem(row.item),
         ratings: row.ratings,
-        average: row.ratings === 0 ? null : toScore(row.avgElo),
+        average: estimate.score,
+        rawAverage: estimate.raw,
+        confidence: estimate.confidence,
         overlap,
       };
     })

@@ -59,6 +59,7 @@ export function FinishRating({
   const [favoriteTracks, setFavoriteTracks] = useState<string[]>(initialItem.favoriteTracks);
   const [trackInput, setTrackInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [votes, setVotes] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
@@ -79,6 +80,25 @@ export function FinishRating({
   }
 
   type VoteResult = "win" | "loss" | "tie" | "undecided" | "skip";
+
+  async function undoLast() {
+    setUndoing(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/rankings/${item.id}/undo`, { method: "POST" });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not undo that comparison.");
+      }
+      const outcome = (await response.json()) as { undone: boolean };
+      setMessage(outcome.undone ? "Undid the last comparison." : "Nothing to undo yet.");
+      if (outcome.undone) router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Something went wrong.");
+    } finally {
+      setUndoing(false);
+    }
+  }
 
   async function vote(result: VoteResult) {
     setBusy(true);
@@ -432,15 +452,25 @@ export function FinishRating({
             </button>
           </div>
 
-          <div className="mt-2 flex items-center justify-between">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => vote("skip")}
-              className="text-[11px] text-muted-2 transition-colors hover:text-ink disabled:opacity-50"
-            >
-              Skip this one
-            </button>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => vote("skip")}
+                className="text-[11px] text-muted-2 transition-colors hover:text-ink disabled:opacity-50"
+              >
+                Skip this one
+              </button>
+              <button
+                type="button"
+                disabled={undoing || busy}
+                onClick={undoLast}
+                className="text-[11px] text-muted-2 transition-colors hover:text-ink disabled:opacity-50"
+              >
+                {undoing ? "Undoing…" : "Undo last"}
+              </button>
+            </div>
             {message ? <p className="text-[11px] text-brand">{message}</p> : null}
           </div>
           {error ? <p className="mt-1 text-center text-[11px] text-danger">{error}</p> : null}

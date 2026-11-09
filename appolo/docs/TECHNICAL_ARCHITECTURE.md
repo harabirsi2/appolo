@@ -126,7 +126,13 @@ GET /api/rankings/model?kind=movie
 - `packages/core/src/taste-match.ts`: Kendall tau-b, cosine, coverage/confidence.
 - `apps/web/lib/services/social.ts`: `matchPercent` and `compareTaste` now delegate to
   `tasteMatch`; the compare page prints the basis/confidence.
-- New API route: `apps/web/app/api/rankings/model/route.ts`.
+- New API routes: `apps/web/app/api/rankings/model/route.ts` (model inspection)
+  and `apps/web/app/api/rankings/[itemId]/undo/route.ts` (reverse the latest
+  comparison and refit).
+- `apps/web/app/app/rankings/page.tsx` orders by θ for a selected kind and shows
+  model score, interval, comparison count and confidence.
+- Community scores use `packages/core/src/community.ts` shrinkage; `catalogLeaderboard`
+  and `similarItems` expose `average` (shrunk), `rawAverage` and `confidence`.
 
 ## 8. Migrations
 
@@ -150,7 +156,7 @@ relying on `db:generate` again.
 ```bash
 pnpm install --frozen-lockfile
 pnpm typecheck
-pnpm test                 # new: packages/core unit tests (18)
+pnpm test                 # new: packages/core unit tests (23)
 pnpm --filter @appolo/web build
 # with a PostgreSQL instance:
 pnpm db:migrate && pnpm db:seed && pnpm db:rls-test

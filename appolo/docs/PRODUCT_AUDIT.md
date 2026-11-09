@@ -92,7 +92,8 @@ confident-looking percentage; no confidence label or explanation.
 | P1 | Taste match ignores rank order/evidence | **Implemented** (Kendall tau-b + coverage) |
 | P1 | Comparison selection not information-driven | **Implemented** (entropy × uncertainty × exposure) |
 | P1 | No tie/undecided UI | **Implemented** in the rating flow |
-| P2 | No community-ranking shrinkage/robust aggregation | Open |
+| P2 | No community-ranking shrinkage | **Implemented** (fixed prior shrinkage + confidence) |
+| P2 | Robust aggregation / coordinated-vote detection | Open |
 | P2 | No manual drag reordering UI (data exists via `manualMode`/podium order) | Partially open |
 | P2 | Onboarding interests/genre selection | Open |
 | P3 | Moderation/reporting depth, account deletion/export | Partially present (reports route, settings) |
@@ -105,7 +106,7 @@ confident-looking percentage; no confidence label or explanation.
 |---|---|
 | `pnpm install --frozen-lockfile` | Pass |
 | `pnpm typecheck` (6 packages) | Pass |
-| `pnpm test` (new) | Pass — 18/18 |
+| `pnpm test` (new) | Pass — 23/23 |
 | `pnpm --filter @appolo/web build` | Pass |
 | `pnpm run ci` / `pnpm smoke` | **Not run** — PowerShell scripts, and this VM has no Postgres server, no Docker daemon and no root to install one |
 | Drizzle snapshot vs hand-written SQL | **Drift exists** (pre-existing): `drizzle-kit generate` wants to re-create tables already created by `sql/0007_podium_parity.sql`. New migration was therefore written by hand as `packages/db/sql/0012_ranking_model.sql` |

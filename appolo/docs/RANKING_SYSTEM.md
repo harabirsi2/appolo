@@ -113,10 +113,15 @@ nested transaction is required.
 ## 5. What the UI shows
 
 - Elo-derived 0–10 score and win-rate badge (existing).
-- New: "Equally good" (tie) and "Too close to call" (undecided) buttons, keys 3/4.
-- The API exposes confidence, but the ranking screen still sorts by Elo. Switching
-  list order to the fitted θ is a deliberate follow-up (see roadmap) because it
-  changes user-visible ordering and needs a migration of expectations, not just code.
+- "Equally good" (tie) and "Too close to call" (undecided) buttons, keys 3/4.
+- "Undo last" next to Skip: restores the stored pre-comparison Elo values and
+  counters, deletes the durable matchup row, removes the matching timeline event
+  and rebuilds the model (`POST /api/rankings/:itemId/undo`).
+- `/app/rankings?kind=…` now orders by fitted θ whenever a model exists and prints
+  `model score · ±95% interval · comparisons · confidence` per row. The un-filtered
+  "All" view continues to use the Elo ladder because it spans categories.
+- Community scores are shrunk toward a neutral prior (see `community.ts`) before
+  they are shown publicly, with a confidence label.
 
 ## 6. Tests
 
@@ -142,9 +147,9 @@ Run with `pnpm test` (uses `tsx --test`, so Node 20+ works).
   snapshot stores them so they can be tuned/replayed later.
 - The fit is per media kind only; sub-category (genre) models and per-collection
   models are not implemented.
-- Community rankings still use simple averages; Bayesian shrinkage and coordinated
-  voting detection are not implemented.
+- Community scores now use fixed Bayesian-style shrinkage (`packages/core/src/community.ts`),
+  but coordinated-voting detection and per-item robust aggregation are not implemented.
 - No undo endpoint yet; because comparisons are durable events, undo can be added by
   appending a reversing event or deleting a row and refitting — no schema change
   needed.
-- The model does not decide list order in the UI yet (see §5).
+- The "All" rankings view still orders by Elo; only a specific media kind uses θ.

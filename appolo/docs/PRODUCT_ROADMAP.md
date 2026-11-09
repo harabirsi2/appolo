@@ -45,13 +45,18 @@ Done in this pass:
 - Tie/undecided UI in the rating flow.
 - 11 engine tests (plus 7 taste tests).
 
+Also done:
+- Rankings screen orders by fitted θ for a selected kind and shows model score,
+  95% interval, comparison count and confidence.
+- Undo endpoint + "Undo last" control; restores stored Elo/counters and refits.
+- Community scores use Bayesian-style shrinkage with a confidence label.
+
 Open:
-- Make the ranking screen sort by fitted θ (and show confidence) instead of relying on
-  Elo alone.
-- Undo endpoint (append a reversing event or delete the last matchup, then refit).
+- "All" rankings view spanning kinds still uses Elo.
 - Manual drag mode that creates explicit manual events rather than fake comparisons.
 - Estimate `ν`/`λ` per user; add sub-category (genre) models.
 - Ranking history view ("why is A above B"): expose the comparison path.
+- Coordinated-vote detection for community rankings.
 
 ## Phase 4 — Social system (Partial)
 
@@ -104,10 +109,8 @@ Open:
 
 1. Run `pnpm run ci` and `pnpm smoke` on a machine with PostgreSQL, then fix any
    migration/RLS issue found by `0012_ranking_model.sql`.
-2. Switch the rankings screen to the fitted model ordering with an honest confidence
-   indicator.
-3. Add the undo-comparison endpoint and an e2e test for compare → tie → rebuild →
-   undo → rebuild.
+2. Add an e2e test for compare → tie → rebuild → undo → rebuild (needs a DB).
+3. Implement manual drag reordering without fabricating comparison events.
 
 ## Explicit non-goals for this pass
 

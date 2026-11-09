@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { MEDIA_KIND_LABELS, MEDIA_KINDS, scoreBand, type MediaKind } from "@appolo/core";
 import { requireSession } from "@/lib/session";
-import { rankedRatings, tasteStats } from "@/lib/services/rankings";
+import { getRankingModel, rankedRatings, tasteStats } from "@/lib/services/rankings";
 import { MediaArt } from "@/components/media-art";
 import { BackButton } from "@/components/back-button";
 import { ScoreText } from "@/components/podiums";
@@ -19,10 +19,25 @@ export default async function RankingsPage({
   const { kind } = await searchParams;
   const activeKind = MEDIA_KINDS.includes(kind as MediaKind) ? (kind as MediaKind) : undefined;
 
-  const [rankings, stats] = await Promise.all([
+  const [rankings, stats, model] = await Promise.all([
     rankedRatings(session.org.id, { kind: activeKind }),
     tasteStats(session.org.id),
+    activeKind
+      ? getRankingModel(session.org.id, activeKind).catch(() => null)
+      : Promise.resolve(null),
   ]);
+
+  const hasModel = Boolean(model && model.items.length > 0);
+  const ordered = hasModel && model
+    ? [...rankings].sort((a, b) => {
+        const fitA = model.byId.get(a.id);
+        const fitB = model.byId.get(b.id);
+        if (fitA && fitB) return fitB.theta - fitA.theta;
+        if (fitA) return -1;
+        if (fitB) return 1;
+        return b.elo - a.elo;
+      })
+    : rankings;
 
   return (
     <div className="px-5 pt-4">
@@ -37,6 +52,12 @@ export default async function RankingsPage({
       <p className="mt-1 text-[13px] text-muted">
         {stats.rated} ranked · {stats.matchups} matchups · {stats.averageScore.toFixed(1)} avg
       </p>
+      {hasModel && model ? (
+        <p className="mt-1 text-[11px] text-muted-2">
+          Model order from {model.comparisons} comparisons · tie parameter ν{" "}
+          {model.tieParameter.toFixed(2)} · {model.converged ? "converged" : "approximate"}
+        </p>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Link
@@ -66,8 +87,17 @@ export default async function RankingsPage({
       </div>
 
       <ol className="mt-5 space-y-2 pb-10">
-        {rankings.map((item, index) => {
+        {ordered.map((item, index) => {
           const band = scoreBand(item.score);
+          const fit = model?.byId.get(item.id) ?? null;
+          const confidence =
+            fit === null
+              ? null
+              : fit.comparisons >= 20
+                ? "high"
+                : fit.comparisons >= 8
+                  ? "medium"
+                  : "low";
           return (
             <li key={item.id}>
               <Link
@@ -84,13 +114,18 @@ export default async function RankingsPage({
                     {item.subtitle || MEDIA_KIND_LABELS[item.kind]}
                     {item.year ? ` · ${item.year}` : ""} · {band.label}
                   </p>
+                  {fit ? (
+                    <p className="truncate text-[10px] text-muted-2">
+                      {`model ${fit.personalScore.toFixed(1)}/10 · ±${(1.96 * fit.standardError).toFixed(2)} · ${fit.comparisons} cmp · ${confidence} confidence`}
+                    </p>
+                  ) : null}
                 </div>
                 <ScoreText score={item.score} className="text-[15px]" />
               </Link>
             </li>
           );
         })}
-        {rankings.length === 0 ? (
+        {ordered.length === 0 ? (
           <p className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 text-[13px] text-muted">
             Nothing ranked in this category yet.
           </p>
