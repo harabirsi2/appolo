@@ -1037,6 +1037,9 @@ export async function reviewStats(orgId: string): Promise<ReviewStats> {
   });
 }
 
+/** Rows per upsert statement: far below the 65535 bind-parameter ceiling. */
+const SYNC_BATCH_SIZE = 200;
+
 export interface SyncReviewsResult {
   imported: number;
   updated: number;
@@ -1083,19 +1086,30 @@ export async function syncPlatformReviews(
       continue;
     }
 
-    for (const review of fetched) {
-      const existed = await withOrg(orgId, (tx) =>
-        tx
-          .select({ id: reviews.id })
-          .from(reviews)
-          .where(and(eq(reviews.platformId, platform.id), eq(reviews.externalId, review.externalId)))
-          .limit(1),
-      );
+    // Deduplicate by external id: one statement cannot update the same
+    // conflict target twice.
+    const byExternalId = new Map(fetched.map((review) => [review.externalId, review]));
+    const rows = [...byExternalId.values()];
 
-      await withOrg(orgId, (tx) =>
-        tx
-          .insert(reviews)
-          .values({
+    for (let start = 0; start < rows.length; start += SYNC_BATCH_SIZE) {
+      const chunk = rows.slice(start, start + SYNC_BATCH_SIZE);
+      await withOrg(orgId, async (tx) => {
+        const existing = await tx
+          .select({ externalId: reviews.externalId })
+          .from(reviews)
+          .where(
+            and(
+              eq(reviews.platformId, platform.id),
+              inArray(
+                reviews.externalId,
+                chunk.map((review) => review.externalId),
+              ),
+            ),
+          );
+        const known = new Set(existing.map((row) => row.externalId));
+
+        await tx.insert(reviews).values(
+          chunk.map((review) => ({
             orgId,
             locationId: null,
             platformId: platform.id,
@@ -1106,24 +1120,26 @@ export async function syncPlatformReviews(
             language: review.language,
             reviewedAt: review.reviewedAt,
             url: review.url,
-            replyStatus: "draft",
+            replyStatus: "draft" as const,
             sentiment: sentimentForRating(review.rating),
             raw: (review.raw ?? {}) as never,
-          })
-          .onConflictDoUpdate({
-            target: [reviews.platformId, reviews.externalId],
-            set: {
-              authorName: review.authorName,
-              rating: review.rating,
-              body: review.body,
-              reviewedAt: review.reviewedAt,
-              sentiment: sentimentForRating(review.rating),
-              updatedAt: new Date(),
-            },
-          }),
-      );
-      if (existed[0]) updated += 1;
-      else imported += 1;
+          })),
+        ).onConflictDoUpdate({
+          target: [reviews.platformId, reviews.externalId],
+          set: {
+            authorName: sql`excluded.author_name`,
+            rating: sql`excluded.rating`,
+            body: sql`excluded.body`,
+            reviewedAt: sql`excluded.reviewed_at`,
+            sentiment: sql`excluded.sentiment`,
+            updatedAt: new Date(),
+          },
+        });
+
+        const updatedInChunk = chunk.filter((review) => known.has(review.externalId)).length;
+        updated += updatedInChunk;
+        imported += chunk.length - updatedInChunk;
+      });
     }
   }
 

@@ -100,6 +100,22 @@ password guessing and mass account creation were only slowed by scrypt.
 The e2e script now sends a unique `x-forwarded-for` per run so repeated test
 runs are not treated as one abusive client.
 
+### 8. Review sync committed once per review
+
+Each fetched review cost two transactions (one existence check, one upsert), so
+syncing 200 reviews from a platform meant 400 commits and a round trip per row.
+
+- Reviews are deduplicated by external id, then written in chunks of 200 in one
+  transaction per chunk: a single `select … where external_id = any(…)` to
+  decide imported vs updated, followed by one multi-row upsert using
+  `excluded.*` so every row still updates independently.
+- Measured on the mock adapter (2 reviews): syncing dropped from **8 to 5**
+  committed transactions per request, which includes about 3 per-request
+  commits for session/bootstrap. The saving is one commit per review beyond the
+  first, so a 200-review import goes from ~401 to ~3.
+- Counts verified: first sync reports `imported: 2, updated: 0`, a repeat sync
+  reports `imported: 0, updated: 2` — idempotent as before.
+
 ## Remaining risks (not changed in this pass)
 
 Ordered by expected impact. None are regressions from this review.
@@ -118,21 +134,19 @@ Ordered by expected impact. None are regressions from this review.
    enabled, a search with 3+ characters can await up to 4 s of external calls
    before returning local results. Move insertion to the background and return
    local matches immediately.
-5. **Review-platform sync is one transaction per fetched review**
-   (`reviews.ts`, import loop). Batch the upserts or move the sync to a job.
-6. **Search indexes.** `ILIKE '%term%'` and `genre = any(genres)` have no trigram
+5. **Search indexes.** `ILIKE '%term%'` and `genre = any(genres)` have no trigram
    or GIN index. Correct at 56 rows; plan `pg_trgm` + GIN before catalog growth,
    and confirm the extension is available on the target database first.
-7. **Global discovery queries scan across tenants by design** (`popularThisWeek`,
+6. **Global discovery queries scan across tenants by design** (`popularThisWeek`,
    the global branch of `feedForYou`). They are candidates for caching or a
    materialized view once profile/review volume grows; today they are the main
    source of per-page DB reads.
-8. **`ensureProfile` costs up to six queries for a brand-new account**
+7. **`ensureProfile` costs up to six queries for a brand-new account**
    (two existence checks, an insert, then a re-read). It is only hit once per
    account, so it was left as-is; the caller already checks first.
-9. **No ESLint.** Unused imports, floating promises and hook misuse are only
+8. **No ESLint.** Unused imports, floating promises and hook misuse are only
    caught by review. Type checking covers the rest.
-10. **Worker is still a heartbeat stub.** Model rebuilds are process-local and
+9. **Worker is still a heartbeat stub.** Model rebuilds are process-local and
    self-healing via the comparison-count check in `getRankingModel`; a real queue
    is still the right long-term home for them.
 
