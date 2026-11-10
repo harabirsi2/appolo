@@ -473,17 +473,50 @@ export function fitBradleyTerry(
   };
 }
 
-/** Invert the (symmetric positive definite) information matrix. */
+/**
+ * Invert the (symmetric positive definite) information matrix.
+ *
+ * Gauss–Jordan elimination with partial pivoting on [H | I] in one pass.
+ * Solving H·x = e_i separately for every column would cost O(k⁴); a single
+ * inversion is O(k³), which keeps the fit responsive as a catalog grows.
+ */
 function fitCovariance(information: number[][], k: number): number[][] {
   if (k === 0) return [];
-  // Invert column by column: H · x = e_i.
-  const inverse: number[][] = Array.from({ length: k }, () => new Array<number>(k).fill(0));
+
+  const left = information.map((row) => [...row]);
+  const inverse: number[][] = Array.from({ length: k }, (_, row) =>
+    Array.from({ length: k }, (_, col) => (row === col ? 1 : 0)),
+  );
+
   for (let col = 0; col < k; col += 1) {
-    const unit = new Array<number>(k).fill(0);
-    unit[col] = 1;
-    const solution = solveLinearSystem(information, unit);
-    for (let row = 0; row < k; row += 1) inverse[row]![col] = solution[row] ?? 0;
+    let pivot = col;
+    for (let row = col + 1; row < k; row += 1) {
+      if (Math.abs(left[row]![col] ?? 0) > Math.abs(left[pivot]![col] ?? 0)) pivot = row;
+    }
+    if (pivot !== col) {
+      [left[col], left[pivot]] = [left[pivot]!, left[col]!];
+      [inverse[col], inverse[pivot]] = [inverse[pivot]!, inverse[col]!];
+    }
+
+    const diagonal = left[col]![col] ?? 0;
+    if (Math.abs(diagonal) < 1e-12) continue;
+    const scale = 1 / diagonal;
+    for (let j = 0; j < k; j += 1) {
+      left[col]![j] = (left[col]![j] ?? 0) * scale;
+      inverse[col]![j] = (inverse[col]![j] ?? 0) * scale;
+    }
+
+    for (let row = 0; row < k; row += 1) {
+      if (row === col) continue;
+      const factor = left[row]![col] ?? 0;
+      if (factor === 0) continue;
+      for (let j = 0; j < k; j += 1) {
+        left[row]![j] = (left[row]![j] ?? 0) - factor * (left[col]![j] ?? 0);
+        inverse[row]![j] = (inverse[row]![j] ?? 0) - factor * (inverse[col]![j] ?? 0);
+      }
+    }
   }
+
   return inverse;
 }
 

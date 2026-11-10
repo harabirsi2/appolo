@@ -135,3 +135,20 @@ test("comparison selection avoids obvious and recently repeated matchups", () =>
   });
   assert.ok(scored[0]!.utility > scored[scored.length - 1]!.utility);
 });
+
+test("large fits keep finite, centred uncertainty beyond the dense solver limit", () => {
+  const events: ComparisonEvent[] = Array.from({ length: 520 }, (_, index) => ({
+    aId: `item-${index % 260}`,
+    bId: `item-${(index * 37 + 11) % 260}`,
+    outcome: index % 7 === 0 ? "tie" : index % 3 === 0 ? "b" : "a",
+  }));
+
+  const fit = fitBradleyTerry(events);
+  assert.equal(fit.items.length, 260);
+  for (const item of fit.items) {
+    assert.ok(Number.isFinite(item.theta), `${item.id} theta is not finite`);
+    assert.ok(Number.isFinite(item.standardError), `${item.id} standard error is not finite`);
+    assert.ok(item.standardError >= 0);
+    assert.ok(item.lower <= item.theta && item.theta <= item.upper);
+  }
+});
