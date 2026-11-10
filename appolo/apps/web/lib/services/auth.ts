@@ -5,6 +5,15 @@ import { slugify, withSuffix } from "@appolo/core";
 import { getDb, schema } from "@/lib/db";
 import { SESSION_COOKIE } from "@/lib/constants";
 import {
+  clearAttempts,
+  consumeAttempt,
+  LOGIN_WINDOW,
+  loginAttemptKey,
+  signupAttemptKey,
+  SIGNUP_WINDOW,
+  tooManyAttemptsMessage,
+} from "@/lib/services/auth-rate-limit";
+import {
   hashPassword,
   normalizeEmail,
   randomToken,
@@ -18,7 +27,9 @@ const { orgs, locations, users, memberships, sessions, channels } = schema;
 
 const SESSION_DAYS = 30;
 
-export type AuthResult = { ok: true } | { ok: false; error: string };
+export type AuthResult =
+  | { ok: true }
+  | { ok: false; error: string; retryAfterSeconds?: number };
 
 function pgCode(err: unknown): string | undefined {
   return (err as { code?: string } | undefined)?.code;
@@ -58,6 +69,16 @@ async function createSession(userId: string): Promise<void> {
 export async function signUp(input: SignupInput): Promise<AuthResult> {
   const db = getDb();
   const email = normalizeEmail(input.email);
+  const meta = await requestMeta();
+
+  const signupLimit = await consumeAttempt(signupAttemptKey(meta.ip), SIGNUP_WINDOW);
+  if (!signupLimit.allowed) {
+    return {
+      ok: false,
+      error: tooManyAttemptsMessage(signupLimit.retryAfterSeconds),
+      retryAfterSeconds: signupLimit.retryAfterSeconds,
+    };
+  }
 
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
   if (existing.length > 0) {
@@ -125,6 +146,16 @@ export async function signIn(input: LoginInput): Promise<AuthResult> {
   const db = getDb();
   const email = normalizeEmail(input.email);
 
+  const attemptKey = loginAttemptKey(email);
+  const gate = await consumeAttempt(attemptKey, LOGIN_WINDOW);
+  if (!gate.allowed) {
+    return {
+      ok: false,
+      error: tooManyAttemptsMessage(gate.retryAfterSeconds),
+      retryAfterSeconds: gate.retryAfterSeconds,
+    };
+  }
+
   const rows = await db.select().from(users).where(eq(users.email, email)).limit(1);
   const user = rows[0];
   if (!user || !verifyPassword(input.password, user.passwordHash)) {
@@ -146,6 +177,9 @@ export async function signIn(input: LoginInput): Promise<AuthResult> {
 
   await db.update(users).set({ lastSeenAt: new Date() }).where(eq(users.id, user.id));
   await createSession(user.id);
+  // A successful sign-in refunds the sender's budget so normal use never
+  // accumulates toward the limit.
+  await clearAttempts(attemptKey).catch(() => {});
   return { ok: true };
 }
 

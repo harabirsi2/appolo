@@ -15,6 +15,9 @@ import assert from "node:assert/strict";
 const BASE = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
 const stamp = Date.now().toString(36);
 const password = "e2e-demo-1234";
+// A unique source address per run keeps the auth rate limiter from treating
+// repeated test runs as one abusive client.
+const clientIp = `198.18.${Math.floor(Math.random() * 254) + 1}.${Math.floor(Math.random() * 254) + 1}`;
 
 let passed = 0;
 const failures = [];
@@ -37,6 +40,7 @@ async function call(path, { method = "GET", body, cookie, redirect = "manual" } 
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
       ...(cookie ? { cookie } : {}),
+      "x-forwarded-for": clientIp,
     },
     body: body ? JSON.stringify(body) : undefined,
   });

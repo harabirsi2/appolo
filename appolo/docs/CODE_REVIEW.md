@@ -80,36 +80,59 @@ surfaced as an internal error.
 - `toggleWatchlist` now returns a 404 `ITEM_NOT_FOUND`; normal toggle on/off
   verified.
 
+### 7. Credential endpoints were unthrottled
+
+`/api/auth/login` and `/api/auth/signup` accepted unlimited attempts, so online
+password guessing and mass account creation were only slowed by scrypt.
+
+- New `auth_rate_limits` table (migration `sql/0011_auth_rate_limits.sql`,
+  identity-plane like `sessions`) with a single-statement upsert, so concurrent
+  requests cannot all observe an under-limit count.
+- Sign-in: 20 attempts per email per 15 minutes, hashed key (no plain emails at
+  rest), and a successful sign-in deletes the key so normal use never
+  accumulates. Sign-up: 20 per client IP per hour.
+- Routes return `429` with `Retry-After`; expired rows are pruned
+  opportunistically.
+- Verified over HTTP: 20 wrong passwords then the correct one → `429` with
+  `Retry-After: 899`; a success after 3 failures refunded the budget; the 21st
+  sign-up from one IP → `429` with `Retry-After: 3599`.
+
+The e2e script now sends a unique `x-forwarded-for` per run so repeated test
+runs are not treated as one abusive client.
+
 ## Remaining risks (not changed in this pass)
 
 Ordered by expected impact. None are regressions from this review.
 
-1. **No rate limiting or lockout on `/api/auth/login` or `/signup`.** Passwords
-   use scrypt, but online guessing and account enumeration are unthrottled.
-   A DB-backed attempt counter per email/IP is the smallest robust fix; an
-   in-memory limiter would not hold across instances.
-2. **Sessions are never pruned.** Expired rows accumulate because there is no
+1. **Per-IP limit is only as good as the proxy header.** It keys on the first
+   `x-forwarded-for` entry (what the app already used for session metadata),
+   which a direct client can spoof. Behind a proxy that overwrites the header
+   this is solid; otherwise add a trusted-proxy hop count.
+2. **Account lockout can be weaponized.** Twenty bad attempts from anyone lock
+   an email for up to 15 minutes. That is the usual trade-off; a captcha or
+   progressive delay would soften it if it becomes a problem.
+3. **Sessions are never pruned.** Expired rows accumulate because there is no
    cron/worker job. A periodic `delete from sessions where expires_at < now()`
    belongs with whichever scheduler the project adopts.
-3. **Catalog provider enrichment is synchronous.** When `CATALOG_PROVIDERS` is
+4. **Catalog provider enrichment is synchronous.** When `CATALOG_PROVIDERS` is
    enabled, a search with 3+ characters can await up to 4 s of external calls
    before returning local results. Move insertion to the background and return
    local matches immediately.
-4. **Review-platform sync is one transaction per fetched review**
+5. **Review-platform sync is one transaction per fetched review**
    (`reviews.ts`, import loop). Batch the upserts or move the sync to a job.
-5. **Search indexes.** `ILIKE '%term%'` and `genre = any(genres)` have no trigram
+6. **Search indexes.** `ILIKE '%term%'` and `genre = any(genres)` have no trigram
    or GIN index. Correct at 56 rows; plan `pg_trgm` + GIN before catalog growth,
    and confirm the extension is available on the target database first.
-6. **Global discovery queries scan across tenants by design** (`popularThisWeek`,
+7. **Global discovery queries scan across tenants by design** (`popularThisWeek`,
    the global branch of `feedForYou`). They are candidates for caching or a
    materialized view once profile/review volume grows; today they are the main
    source of per-page DB reads.
-7. **`ensureProfile` costs up to six queries for a brand-new account**
+8. **`ensureProfile` costs up to six queries for a brand-new account**
    (two existence checks, an insert, then a re-read). It is only hit once per
    account, so it was left as-is; the caller already checks first.
-8. **No ESLint.** Unused imports, floating promises and hook misuse are only
+9. **No ESLint.** Unused imports, floating promises and hook misuse are only
    caught by review. Type checking covers the rest.
-9. **Worker is still a heartbeat stub.** Model rebuilds are process-local and
+10. **Worker is still a heartbeat stub.** Model rebuilds are process-local and
    self-healing via the comparison-count check in `getRankingModel`; a real queue
    is still the right long-term home for them.
 

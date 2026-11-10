@@ -17,6 +17,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const result = await signUp(parsed.data);
   if (!result.ok) {
+    if (result.retryAfterSeconds) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: 429, headers: { "retry-after": String(result.retryAfterSeconds) } },
+      );
+    }
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
 

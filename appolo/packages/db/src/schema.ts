@@ -163,6 +163,19 @@ export const sessions = pgTable(
   }),
 );
 
+/* Identity-plane, outside RLS: written before an org context exists. */
+export const authRateLimits = pgTable(
+  "auth_rate_limits",
+  {
+    key: text("key").primaryKey(),
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull().defaultNow(),
+    count: integer("count").notNull().default(0),
+  },
+  (t) => ({
+    windowIdx: index("auth_rate_limits_window_idx").on(t.windowStart),
+  }),
+);
+
 export const apiKeys = pgTable(
   "api_keys",
   {

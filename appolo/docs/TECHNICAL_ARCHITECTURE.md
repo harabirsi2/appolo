@@ -117,8 +117,12 @@ GET /api/rankings/model?kind=movie
 - Authorization: `requireSession` in pages, explicit session checks in every API route;
   mutation handlers validate with Zod before touching the DB.
 - Tenancy: RLS + `withOrg`; the app role is non-superuser where configured.
+- Rate limiting: fixed-window counters in `auth_rate_limits` (`lib/services/auth-rate-limit.ts`).
+  Sign-in allows 20 attempts per email per 15 minutes (a success refunds the budget);
+  sign-up allows 20 per client IP per hour. Both answer `429` with `Retry-After`.
+  The table is identity-plane (outside RLS) and prunes itself opportunistically.
 - Uploads/metadata URLs are strings today; file upload validation is not implemented.
-- Rate limiting and account deletion/export for the media layer are open items.
+- Account deletion/export for the media layer remains an open item.
 - No secrets are read from or written to client bundles; provider keys stay server-side.
 
 ## 7. Ranking integration details
