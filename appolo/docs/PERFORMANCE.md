@@ -155,17 +155,22 @@ Strengths:
   `packages/ui`, HTTP/RSC in `apps/web`.
 - Strict TypeScript everywhere; Zod schemas are shared from `packages/core`
   into route handlers and services; no `any`/`@ts-ignore` in application code.
-- 31 unit tests plus a 13-check end-to-end script that exercises auth, RLS
+- 37 unit tests plus a 13-check end-to-end script that exercises auth, RLS
   tenant isolation, ratings, ties, undo, follows, feed ranking and taste match.
 - Migrations are append-only SQL files with an applied-migrations table.
 
 Prioritised gaps:
 
-1. **Model refresh is synchronous in the request path.** A vote calls
-   `refreshRankingModel`, which refits the whole category (189 ms at 300 items,
-   672 ms at 500). Route this through the existing worker/queue or debounce it
-   and serve the previous snapshot; the schema already stores a snapshot with
-   `comparisons`, `converged` and `iterations`.
+1. ~~**Model refresh is synchronous in the request path.**~~ Fixed: votes and
+   undos now call `scheduleRankingRefresh`, which coalesces rebuilds for 750 ms
+   per org and kind and runs them off the request (`createCoalescingRunner` in
+   `packages/core/src/coalesce.ts`). A vote therefore no longer pays the
+   24/189/672 ms fit at 100/300/500 items. `getRankingModel` flushes pending
+   work before reading and compares the snapshot's `comparisons` with the
+   durable log, so the rankings page is still fresh and heals after a restart.
+   The explicit `GET /api/rankings/model` route cancels queued work and refits
+   once. Verified: a vote returned in 94 ms and a snapshot with one comparison
+   appeared within 3 s without calling that route.
 2. **No linter.** `CLAUDE.md` claims CI runs lint, but there is no ESLint
    config, dependency or script. Type checking does not catch unused imports,
    hook violations or floating promises. Add one flat config and wire it into CI.

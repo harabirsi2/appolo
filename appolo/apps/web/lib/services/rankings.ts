@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import {
   START_ELO,
   clamp,
+  createCoalescingRunner,
   scoreForElo,
   selectOpponent,
   withPositions,
@@ -11,6 +12,7 @@ import {
   shrinkCommunityScore,
   type CommunityConfidence,
   type ComparisonEvent,
+  type CoalescingRunner,
   type ComparisonOutcome,
   type FittedItem,
   type MatchResult,
@@ -22,6 +24,20 @@ import { enrichCatalogFromProviders } from "./catalog-providers";
 import { nextEloAdaptive } from "@appolo/core/ranking";
 
 const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, catalogCredits, rankingModels } = schema;
+
+/**
+ * Model rebuilds are coalesced per org and kind so a burst of votes pays for
+ * one fit, not one per vote, and the vote response never waits for it. The
+ * runner is stashed on `globalThis` because dev HMR re-evaluates this module
+ * and would otherwise stack duplicate timers.
+ */
+type RankingRefreshGlobal = typeof globalThis & { __appoloRankingRefresh?: CoalescingRunner };
+const modelRefresh = ((globalThis as RankingRefreshGlobal).__appoloRankingRefresh ??= createCoalescingRunner({
+  delayMs: 750,
+  onError: (error, key) => console.error(`ranking model refresh failed (${key})`, error),
+}));
+
+const refreshKey = (orgId: string, kind: MediaKind): string => `${orgId}:${kind}`;
 
 export interface CatalogItem {
   id: string;
@@ -180,11 +196,46 @@ export async function refreshRankingModel(
   });
 }
 
-/** Read the stored model, building the first snapshot on demand. */
+/**
+ * Request a model rebuild without waiting for it. The 750 ms window collapses
+ * rapid voting into a single fit, and callers never pay the fit latency.
+ */
+export function scheduleRankingRefresh(orgId: string, kind: MediaKind): void {
+  modelRefresh.schedule(refreshKey(orgId, kind), async () => {
+    await refreshRankingModel(orgId, kind);
+  });
+}
+
+/** Drop a coalesced rebuild, e.g. when an explicit rebuild supersedes it. */
+export function cancelRankingRefresh(orgId: string, kind: MediaKind): void {
+  modelRefresh.cancel(refreshKey(orgId, kind));
+}
+
+/** How many comparisons the durable log holds for this kind. */
+async function loggedComparisons(orgId: string, kind: MediaKind): Promise<number> {
+  const [row] = await withOrg(orgId, (tx) =>
+    tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(itemMatchups)
+      .innerJoin(catalogItems, eq(catalogItems.id, itemMatchups.itemId))
+      .where(and(eq(itemMatchups.orgId, orgId), eq(catalogItems.kind, kind))),
+  );
+  return row?.count ?? 0;
+}
+
+/**
+ * Read the stored model, rebuilding when it is missing or behind the durable
+ * comparison log. Pending coalesced work is flushed first so visiting the
+ * rankings page right after a vote still shows that vote. The comparison check
+ * also heals a snapshot lost to a restart, when no timer survives.
+ */
 export async function getRankingModel(
   orgId: string,
   kind: MediaKind,
 ): Promise<RankingModelView> {
+  const key = refreshKey(orgId, kind);
+  if (modelRefresh.isPending(key)) await modelRefresh.flush(key);
+
   const rows = await withOrg(orgId, (tx) =>
     tx
       .select()
@@ -192,8 +243,12 @@ export async function getRankingModel(
       .where(and(eq(rankingModels.orgId, orgId), eq(rankingModels.kind, kind)))
       .limit(1),
   );
-  if (rows[0]) return modelFromRow(rows[0]);
-  return refreshRankingModel(orgId, kind);
+  const stored = rows[0];
+  if (!stored) return refreshRankingModel(orgId, kind);
+  if ((await loggedComparisons(orgId, kind)) !== stored.comparisons) {
+    return refreshRankingModel(orgId, kind);
+  }
+  return modelFromRow(stored);
 }
 
 /* ------------------------------------------------------------------ */
@@ -624,14 +679,10 @@ export async function submitVote(
     };
   });
 
-  // Refresh the statistical snapshot with the new observation. The vote is
-  // already committed, so a refresh failure must not fail the request; the
-  // next read rebuilds the model from item_matchups.
-  try {
-    await refreshRankingModel(orgId, item.kind);
-  } catch (error) {
-    console.error("ranking model refresh failed", error);
-  }
+  // The vote is committed; rebuild the statistical snapshot in the background.
+  // Coalescing keeps a burst of votes to one fit, and getRankingModel heals
+  // the snapshot from item_matchups if this process never gets to it.
+  scheduleRankingRefresh(orgId, item.kind);
 
   return output;
 }
@@ -735,11 +786,7 @@ export async function undoLastComparison(orgId: string, itemId: string): Promise
   });
 
   if (output.undone) {
-    try {
-      await refreshRankingModel(orgId, item.kind);
-    } catch (error) {
-      console.error("ranking model refresh after undo failed", error);
-    }
+    scheduleRankingRefresh(orgId, item.kind);
   }
 
   return output;

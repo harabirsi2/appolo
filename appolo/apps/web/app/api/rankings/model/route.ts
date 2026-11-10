@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { mediaKindSchema } from "@appolo/core";
 import { getSession } from "@/lib/session";
 import { apiError, jsonError } from "@/lib/api";
-import { refreshRankingModel } from "@/lib/services/rankings";
+import { cancelRankingRefresh, refreshRankingModel } from "@/lib/services/rankings";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +24,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return jsonError("Unknown media kind.", 400, "INVALID_KIND");
     }
 
+    // This route is an explicit rebuild, so drop any queued background fit and
+    // pay for exactly one.
+    cancelRankingRefresh(session.org.id, parsed.data);
     const model = await refreshRankingModel(session.org.id, parsed.data);
 
     return NextResponse.json({

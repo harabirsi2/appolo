@@ -84,7 +84,9 @@ POST /api/rankings/:itemId/vote
            upsert both item_ratings, adaptive Elo, counters (wins/losses/ties/skips)
            insert item_matchups { result, outcome, elo before/after }
            insert rating_events for decided outcomes
-       └ after commit: refreshRankingModel(orgId, kind)   (best-effort)
+       └ after commit: scheduleRankingRefresh(orgId, kind) (coalesced, off-request)
+          └ 750 ms later: refreshRankingModel(orgId, kind)
+            (getRankingModel flushes pending work and heals a stale snapshot)
 ```
 
 ### Next matchup
@@ -103,6 +105,7 @@ GET /api/rankings/:itemId/matchup
 
 ```
 GET /api/rankings/model?kind=movie
+  → cancelRankingRefresh (drop queued background work)
   → refreshRankingModel (rebuild from item_matchups)
   → positions, θ, SE, 95% interval, wins/losses/ties, personal score
 ```

@@ -103,8 +103,11 @@ nested transaction is required.
 - `ranking_models` (one row per `org_id` + `kind`) stores a JSON snapshot:
   `{ items: FittedItem[], tieParameter, logLikelihood, converged, iterations }`.
 - It is a cache. `item_matchups` can always rebuild it.
-- `submitVote` commits the vote first, then refreshes the snapshot; a refresh failure
-  is logged and does not fail the request.
+- `submitVote` commits the vote and schedules a coalesced rebuild, so a burst of
+  votes costs one fit and the request never waits for it. `getRankingModel`
+  flushes pending work, and compares the snapshot's `comparisons` with
+  `item_matchups` so a missed refresh (for example after a restart) is repaired
+  on the next read. Rebuild failures are logged and never fail the vote.
 - `GET /api/rankings/model?kind=movie` forces a rebuild and returns positions,
   personal scores, standard errors and intervals.
 - Migration: `packages/db/sql/0012_ranking_model.sql` (adds `item_matchups.outcome`,
