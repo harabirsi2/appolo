@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   MEDIA_KINDS,
@@ -192,6 +192,42 @@ async function followCounts(orgId: string): Promise<{ followers: number; followi
   return { followers: row?.followers ?? 0, following: row?.following ?? 0 };
 }
 
+/**
+ * Follow counts for several profiles in two grouped queries instead of one
+ * query per profile. Used by every list of people (search, suggestions).
+ */
+async function followCountsFor(
+  orgIds: readonly string[],
+): Promise<Map<string, { followers: number; following: number }>> {
+  const ids = [...new Set(orgIds)];
+  const counts = new Map(ids.map((id) => [id, { followers: 0, following: 0 }]));
+  if (ids.length === 0) return counts;
+
+  const db = getDb();
+  const [followerRows, followingRows] = await Promise.all([
+    db
+      .select({ orgId: follows.followeeOrgId, n: sql<number>`count(*)::int` })
+      .from(follows)
+      .where(inArray(follows.followeeOrgId, ids))
+      .groupBy(follows.followeeOrgId),
+    db
+      .select({ orgId: follows.followerOrgId, n: sql<number>`count(*)::int` })
+      .from(follows)
+      .where(inArray(follows.followerOrgId, ids))
+      .groupBy(follows.followerOrgId),
+  ]);
+
+  for (const row of followerRows) {
+    const entry = counts.get(row.orgId);
+    if (entry) entry.followers = row.n;
+  }
+  for (const row of followingRows) {
+    const entry = counts.get(row.orgId);
+    if (entry) entry.following = row.n;
+  }
+  return counts;
+}
+
 export async function getProfileByUsername(username: string): Promise<ProfileSummary | null> {
   const db = getDb();
   const rows = await db
@@ -289,37 +325,46 @@ export async function followingOrgIds(orgId: string): Promise<string[]> {
 
 export async function searchProfiles(query: string, limit = 8): Promise<ProfileSummary[]> {
   const db = getDb();
-  const like = `%${query.trim()}%`;
+  // Escape LIKE metacharacters so a query of "%" matches nothing rather than
+  // every profile.
+  const escaped = query.trim().replace(/[\\%_]/g, (char) => `\\${char}`);
+  const like = `%${escaped}%`;
   const rows = await db
     .select()
     .from(profiles)
     .where(sql`(${profiles.username} ilike ${like} or ${profiles.displayName} ilike ${like})`)
     .orderBy(profiles.displayName)
     .limit(limit);
-  return Promise.all(rows.map(async (row) => toProfileSummary(row, await followCounts(row.orgId))));
+  if (rows.length === 0) return [];
+  const counts = await followCountsFor(rows.map((row) => row.orgId));
+  return rows.map((row) =>
+    toProfileSummary(row, counts.get(row.orgId) ?? { followers: 0, following: 0 }),
+  );
 }
 
-export async function suggestedProfiles(orgId: string, limit = 8): Promise<ProfileSummary[]> {  const db = getDb();
+export async function suggestedProfiles(orgId: string, limit = 8): Promise<ProfileSummary[]> {
+  const db = getDb();
   const followed = await db
     .select({ orgId: follows.followeeOrgId })
     .from(follows)
     .where(eq(follows.followerOrgId, orgId));
   const excluded = [orgId, ...followed.map((row) => row.orgId)];
 
+  // Exclude in SQL, not after taking the first 40 rows. Previously a user who
+  // followed the first alphabetically sorted profiles got no suggestions even
+  // though plenty of others existed.
   const rows = await db
     .select()
     .from(profiles)
-    .where(ne(profiles.orgId, orgId))
+    .where(notInArray(profiles.orgId, excluded))
     .orderBy(profiles.displayName)
-    .limit(40);
+    .limit(limit);
+  if (rows.length === 0) return [];
 
-  const results: ProfileSummary[] = [];
-  for (const row of rows) {
-    if (excluded.includes(row.orgId)) continue;
-    results.push(toProfileSummary(row, await followCounts(row.orgId)));
-    if (results.length >= limit) break;
-  }
-  return results;
+  const counts = await followCountsFor(rows.map((row) => row.orgId));
+  return rows.map((row) =>
+    toProfileSummary(row, counts.get(row.orgId) ?? { followers: 0, following: 0 }),
+  );
 }
 
 /* ------------------------------------------------------------------ */

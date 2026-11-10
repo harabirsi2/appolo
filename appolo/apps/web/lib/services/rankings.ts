@@ -424,24 +424,35 @@ export async function tasteStats(orgId: string): Promise<TasteStats> {
 /* head-to-head                                                        */
 /* ------------------------------------------------------------------ */
 
-/** Get the org's rating for an item, creating a default one on first use. */
-async function getOrInitRating(tx: Tx, orgId: string, itemId: string) {
-  const existing = await tx
+/**
+ * Load (or create) both ratings for a vote and lock them for the rest of the
+ * transaction. Rows are inserted in one statement and locked in id order, so
+ * two concurrent votes on the same pair cannot lose each other's Elo update
+ * or deadlock by locking in opposite orders.
+ */
+async function getOrInitRatings(
+  tx: Tx,
+  orgId: string,
+  itemIds: readonly [string, string],
+): Promise<Map<string, typeof itemRatings.$inferSelect>> {
+  const ids = [...new Set(itemIds)].sort();
+  await tx
+    .insert(itemRatings)
+    .values(ids.map((itemId) => ({ orgId, itemId })))
+    .onConflictDoNothing();
+
+  const rows = await tx
     .select()
     .from(itemRatings)
-    .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, itemId)))
-    .limit(1);
-  if (existing[0]) return existing[0];
+    .where(and(eq(itemRatings.orgId, orgId), inArray(itemRatings.itemId, ids)))
+    .orderBy(itemRatings.itemId)
+    .for("update");
 
-  const inserted = await tx
-    .insert(itemRatings)
-    .values({ orgId, itemId })
-    .onConflictDoUpdate({
-      target: [itemRatings.orgId, itemRatings.itemId],
-      set: { updatedAt: new Date() },
-    })
-    .returning();
-  return inserted[0]!;
+  const byItem = new Map(rows.map((row) => [row.itemId, row]));
+  if (byItem.size !== ids.length) {
+    throw new DomainError("RATING_INIT_FAILED", "Could not prepare those ratings.", 500);
+  }
+  return byItem;
 }
 
 /**
@@ -600,8 +611,9 @@ export async function submitVote(
   }
 
   const output = await withOrg(orgId, async (tx) => {
-    const itemRating = await getOrInitRating(tx, orgId, itemId);
-    const opponentRating = await getOrInitRating(tx, orgId, opponentId);
+    const ratings = await getOrInitRatings(tx, orgId, [itemId, opponentId]);
+    const itemRating = ratings.get(itemId)!;
+    const opponentRating = ratings.get(opponentId)!;
 
     const before = { item: itemRating.elo, opponent: opponentRating.elo };
     const after = nextEloAdaptive(
@@ -717,12 +729,17 @@ export async function undoLastComparison(orgId: string, itemId: string): Promise
         ),
       )
       .orderBy(desc(itemMatchups.createdAt))
-      .limit(1);
+      .limit(1)
+      // Two undo clicks must not decrement the same matchup twice: the second
+      // transaction waits here, then finds the row gone.
+      .for("update");
 
     if (!row) return { undone: false, itemId, opponentId: itemId } satisfies UndoResult;
 
     const skipDelta = row.result === "skip" || row.result === "undecided" ? 1 : 0;
-    const itemDecided = row.result === "win" || row.result === "loss";
+    // Must mirror submitVote: ties are counted and do write a `rated` event,
+    // so undoing one has to remove it too.
+    const countedEvent = row.result !== "skip" && row.result !== "undecided";
 
     const [itemRating] = await tx
       .select()
@@ -766,7 +783,7 @@ export async function undoLastComparison(orgId: string, itemId: string): Promise
 
     await tx.delete(itemMatchups).where(eq(itemMatchups.id, row.id));
 
-    if (itemDecided) {
+    if (countedEvent) {
       const [event] = await tx
         .select({ id: ratingEvents.id })
         .from(ratingEvents)
@@ -878,6 +895,11 @@ export async function setManualRating(orgId: string, itemId: string, score: numb
 
 /** Add or remove an item from the org's watchlist. */
 export async function toggleWatchlist(orgId: string, itemId: string): Promise<{ watching: boolean }> {
+  // Without this, an unknown (but well-formed) id hits a foreign-key error and
+  // surfaces as a 500 instead of a 404.
+  if (!(await getCatalogItem(itemId))) {
+    throw new DomainError("ITEM_NOT_FOUND", "That item is not in the catalog.", 404);
+  }
   return withOrg(orgId, async (tx) => {
     const existing = await tx
       .select({ id: watchlist.id })

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq, gt } from "drizzle-orm";
@@ -15,7 +16,16 @@ export interface SessionContext {
   capabilities: readonly Capability[];
 }
 
-export async function getSession(): Promise<SessionContext | null> {
+/**
+ * Read the session for the current request. Memoised per render with React's
+ * `cache` so a layout, page and nested server component share one lookup
+ * instead of running the session + workspace queries three times.
+ *
+ * Disabled/invited memberships are rejected (not merely hidden) and the
+ * oldest membership wins when a user somehow belongs to more than one
+ * workspace, so the active workspace is never arbitrary.
+ */
+const readSession = cache(async (): Promise<SessionContext | null> => {
   const store = await cookies();
   const raw = store.get(SESSION_COOKIE)?.value;
   if (!raw) return null;
@@ -35,7 +45,14 @@ export async function getSession(): Promise<SessionContext | null> {
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
     .innerJoin(memberships, eq(memberships.userId, users.id))
-    .where(and(eq(sessions.tokenHash, sha256(raw)), gt(sessions.expiresAt, new Date())))
+    .where(
+      and(
+        eq(sessions.tokenHash, sha256(raw)),
+        gt(sessions.expiresAt, new Date()),
+        eq(memberships.status, "active"),
+      ),
+    )
+    .orderBy(memberships.createdAt)
     .limit(1);
 
   const row = rows[0];
@@ -61,6 +78,10 @@ export async function getSession(): Promise<SessionContext | null> {
     },
     capabilities: capabilitiesFor(row.role as Role),
   };
+});
+
+export function getSession(): Promise<SessionContext | null> {
+  return readSession();
 }
 
 export async function requireSession(): Promise<SessionContext> {

@@ -132,12 +132,16 @@ export async function signIn(input: LoginInput): Promise<AuthResult> {
   }
 
   const member = await db
-    .select({ id: memberships.id })
+    .select({ id: memberships.id, status: memberships.status })
     .from(memberships)
     .where(eq(memberships.userId, user.id))
+    .orderBy(memberships.createdAt)
     .limit(1);
   if (!member[0]) {
     return { ok: false, error: "This account is not attached to a workspace." };
+  }
+  if (member[0].status !== "active") {
+    return { ok: false, error: "This workspace membership is not active." };
   }
 
   await db.update(users).set({ lastSeenAt: new Date() }).where(eq(users.id, user.id));
