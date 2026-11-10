@@ -27,9 +27,10 @@ Done in this pass:
   `:focus-visible` ring.
 - Reduced-motion guard confirmed and documented; motion remains CSS-only.
 - Measured 320/390/768/1280px in a browser: no horizontal overflow at any width.
+- Landing page recomposed: left-aligned serif hero, hairline media rail with kind icons,
+  and an asymmetric lead/stacked layout instead of three equal cards and ✓ glyphs.
 
 Open:
-- Recompose the landing page away from three equal feature cards and ✓ glyphs.
 - Wider editorial poster grid on desktop; currently still two-up.
 - Light theme (optional, only if it can be done without diluting the identity).
 - Automated visual regression screenshots.

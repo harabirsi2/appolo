@@ -122,10 +122,16 @@ Scale in use (px values from Tailwind arbitrary sizes):
 - Touch targets: form controls are 40–44px; nav tabs, the notification button, the avatar
   link and tie/undecided controls are 44px (`min-h-11`/`h-11`).
 
+Landing page (marketing surface): a left-aligned editorial hero with a hairline media
+rail (real kind icons, no emoji), then an asymmetric 6/6 split for the three product
+pillars — one lead essay in display type, two stacked entries with hairline dividers.
+The old three-equal-card and ✓-list pattern is gone.
+
 **Responsive audit (this pass):** measured 320, 390, 768 and 1280px in a real browser.
 `documentElement.scrollWidth - clientWidth` was `0` at every width; the sidebar appears
 only at 1280 and the bottom nav hides there. Screenshots: `appolo-df-home-serif.png`
 (512px), `appolo-df-rankings-320.png` (320px), `appolo-df-desktop-1280.png` (1280px).
+Landing: `appolo-landing-512.png`, `appolo-landing-1280.png`.
 The 430px case is covered by the same single-column rules as 390/512.
 
 ## 8. Iconography
@@ -136,8 +142,6 @@ content rather than chrome.
 
 ## 9. Honest gaps
 
-- The landing page still uses three equal feature cards and ✓ glyphs; it predates the
-  new type system and should be recomposed asymmetrically in the next design pass.
 - Poster grids remain two-up on desktop; a wider editorial grid is not implemented.
 - No light theme (deliberate for now; the identity is dark-first).
 - Reduced-motion is respected, but there are no bespoke low-motion transitions beyond
