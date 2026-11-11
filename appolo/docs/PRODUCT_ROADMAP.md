@@ -114,8 +114,11 @@ Done in this pass:
   the genre weight until ratings dominate) and suggested profiles are ordered by
   shared genres with those interests instead of alphabetically.
 
+- The For-you feed reranks greedily so the same kind or primary genre does
+  not cluster, without dropping any candidate.
+
 Open:
-- Diversity reranking and a strict chronological Following mode.
+- A strict chronological Following mode.
 - Coordinated-vote detection for community rankings.
 - Recommendation dismiss controls and cold-start onboarding interests.
 

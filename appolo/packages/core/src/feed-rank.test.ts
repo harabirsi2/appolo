@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   blendGenreWeights,
+  diversifyRankedFeed,
   hashUnit,
   normalizeGenreWeights,
   rankFeed,
@@ -111,4 +112,35 @@ test("hashUnit is stable and inside [0, 1)", () => {
     const unit = hashUnit(value);
     assert.ok(unit >= 0 && unit < 1);
   }
+});
+
+test("diversification breaks up runs of the same kind", () => {
+  const ranked = rankFeed(
+    [
+      review({ id: "m1", kind: "movie", createdAt: new Date(now.getTime() - 60_000) }),
+      review({ id: "m2", kind: "movie", createdAt: new Date(now.getTime() - 120_000) }),
+      review({ id: "m3", kind: "movie", createdAt: new Date(now.getTime() - 180_000) }),
+      review({ id: "b1", kind: "book", createdAt: new Date(now.getTime() - 240_000) }),
+    ],
+    { now },
+    { exploration: 0 },
+  );
+  const diverse = diversifyRankedFeed(ranked, { kindPenalty: 0.1 });
+  assert.deepEqual(diverse.slice(0, 2).map((entry) => entry.item.id), ["m1", "b1"]);
+  assert.equal(diverse.length, ranked.length);
+});
+
+test("diversification leaves an already varied feed alone", () => {
+  const ranked = rankFeed(
+    [
+      review({ id: "a", kind: "movie", genres: ["Drama"] }),
+      review({ id: "b", kind: "book", genres: ["Sci-Fi"] }),
+    ],
+    { now },
+    { exploration: 0 },
+  );
+  assert.deepEqual(
+    diversifyRankedFeed(ranked).map((entry) => entry.item.id),
+    ranked.map((entry) => entry.item.id),
+  );
 });

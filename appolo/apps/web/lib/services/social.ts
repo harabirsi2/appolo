@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   MEDIA_KINDS,
   blendGenreWeights,
+  diversifyRankedFeed,
   genreProfile,
   mediaKindSchema,
   normalizeGenreWeights,
@@ -1416,7 +1417,8 @@ export async function feedForYou(orgId: string, limit = 12): Promise<ReviewView[
     interests.map((pick) => pick.genre),
   );
 
-  const ranked = rankFeed(
+  const ranked = diversifyRankedFeed(
+    rankFeed(
     candidates.map((review) => {
       const stats = engagement.get(review.id);
       return {
@@ -1425,12 +1427,14 @@ export async function feedForYou(orgId: string, limit = 12): Promise<ReviewView[
         createdAt: review.updatedAt,
         score: review.score,
         genres: genresById.get(review.id) ?? [],
+        kind: review.kind,
         followed: followedSet.has(review.orgId),
         reactions: (stats?.reactions ?? []).reduce((sum, reaction) => sum + reaction.count, 0),
         comments: stats?.commentCount ?? 0,
       };
     }),
-    { followedAuthorIds: followedSet, genreWeights },
+      { followedAuthorIds: followedSet, genreWeights },
+    ),
   );
 
   const byId = new Map(candidates.map((review) => [review.id, review]));

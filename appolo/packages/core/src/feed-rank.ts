@@ -21,6 +21,8 @@ export interface FeedInput {
   /** Author's rating, used only for deterministic tie-breaking today. */
   score?: number;
   genres?: readonly string[];
+  /** Media kind, used by the diversity pass to avoid kind runs. */
+  kind?: string;
   followed?: boolean;
   reactions?: number;
   comments?: number;
@@ -209,4 +211,55 @@ export function rankFeed<T extends FeedInput>(
 
   ranked.sort((left, right) => right.score - left.score || left.item.id.localeCompare(right.item.id));
   return ranked;
+}
+
+
+export interface DiversityOptions {
+  /** Penalty per repeat of the same media kind inside the recent window. */
+  kindPenalty?: number;
+  /** Penalty per repeat of the same primary genre inside the recent window. */
+  genrePenalty?: number;
+  /** How many already-selected entries count as recent. Default 3. */
+  recentWindow?: number;
+}
+
+/**
+ * Re-order ranked entries so the same kind or primary genre does not cluster.
+ * Scores still dominate and nothing is dropped; repeats only nudge a candidate
+ * down, so the feed stays explainable and complete.
+ */
+export function diversifyRankedFeed<T extends FeedInput>(
+  ranked: readonly RankedFeedEntry<T>[],
+  options: DiversityOptions = {},
+): RankedFeedEntry<T>[] {
+  const kindPenalty = Math.max(0, options.kindPenalty ?? 0.05);
+  const genrePenalty = Math.max(0, options.genrePenalty ?? 0.03);
+  const window = Math.max(1, options.recentWindow ?? 3);
+  const primaryGenre = (entry: RankedFeedEntry<T>): string | null => {
+    const genre = entry.item.genres?.[0];
+    return genre ? genre.trim().toLowerCase() : null;
+  };
+
+  const remaining = [...ranked];
+  const ordered: RankedFeedEntry<T>[] = [];
+  while (remaining.length > 0) {
+    const recent = ordered.slice(-window);
+    let bestIndex = 0;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (let index = 0; index < remaining.length; index += 1) {
+      const candidate = remaining[index]!;
+      const genre = primaryGenre(candidate);
+      const kindRepeats = candidate.item.kind
+        ? recent.filter((entry) => entry.item.kind === candidate.item.kind).length
+        : 0;
+      const genreRepeats = genre ? recent.filter((entry) => primaryGenre(entry) === genre).length : 0;
+      const adjusted = candidate.score - kindPenalty * kindRepeats - genrePenalty * genreRepeats;
+      if (adjusted > bestScore) {
+        bestScore = adjusted;
+        bestIndex = index;
+      }
+    }
+    ordered.push(remaining.splice(bestIndex, 1)[0]!);
+  }
+  return ordered;
 }
