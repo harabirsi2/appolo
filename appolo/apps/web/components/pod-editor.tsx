@@ -119,8 +119,8 @@ export function PodEditor({ pod: initial }: { pod: PodDetail }) {
                 <p className="truncate text-[11px] text-muted-2">{entry.subtitle}</p>
               </div>
               <div className="flex gap-1">
-                <button type="button" onClick={() => move(entry.id, -1)} disabled={index === 0} className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-muted disabled:opacity-30">↑</button>
-                <button type="button" onClick={() => move(entry.id, 1)} disabled={index === pod.entries.length - 1} className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-muted disabled:opacity-30">↓</button>
+                <button type="button" aria-label={`Move ${entry.title} up`} onClick={() => move(entry.id, -1)} disabled={index === 0} className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-muted disabled:opacity-30">↑</button>
+                <button type="button" aria-label={`Move ${entry.title} down`} onClick={() => move(entry.id, 1)} disabled={index === pod.entries.length - 1} className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-muted disabled:opacity-30">↓</button>
                 <button type="button" onClick={() => removeItem(entry.id)} className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-red-300">Remove</button>
               </div>
             </li>

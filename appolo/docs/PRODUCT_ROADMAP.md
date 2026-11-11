@@ -129,6 +129,9 @@ Done in this pass:
 - Comment posting goes through the shared action limiter (20 per minute per
   profile) like votes, matchups and reactions, and comments are paginated 20 at
   a time with a total so long threads load in pages.
+
+- Icon-only controls (navigation, notifications, dismiss, reactions and reorder
+  arrows) expose `aria-label` names, and decorative icons are `aria-hidden`.
 - Coordinated-vote detection for community rankings.
 
 ## Phase 6 — Integrations and sharing (Partial)
@@ -161,8 +164,6 @@ Done in this pass:
   tapping speed and stop scripted bursts.
 
 Open:
-- Accessibility pass (focus states exist; screen-reader labelling for icon-only
-  controls needs work).
 - Browser-driven (Playwright) visuals; the HTTP e2e suite covers flows, not pixels.
 
 Done: `scripts/e2e.mjs` (`pnpm e2e`) drives the running app with fetch only and covers
@@ -172,8 +173,7 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Add screen-reader labelling for icon-only controls.
-2. Add browser-driven (Playwright) visual checks for the main screens.
+1. Add browser-driven (Playwright) visual checks for the main screens.
 
 ## Explicit non-goals for this pass
 

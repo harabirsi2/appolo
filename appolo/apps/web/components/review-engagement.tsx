@@ -4,6 +4,16 @@ import { useState } from "react";
 
 const EMOJIS = ["🔥", "❤️", "👏", "😂", "😮", "😢"];
 
+/** Spoken names for the reaction chips, which are otherwise just glyphs. */
+const EMOJI_LABELS: Record<string, string> = {
+  "🔥": "fire",
+  "❤️": "love",
+  "👏": "applause",
+  "😂": "laugh",
+  "😮": "wow",
+  "😢": "sad",
+};
+
 interface Comment {
   id: string;
   orgId: string;
@@ -87,6 +97,8 @@ export function ReviewEngagement({
             <button
               key={emoji}
               type="button"
+              aria-label={`React with ${EMOJI_LABELS[emoji] ?? emoji}${found ? `, ${found.count} total` : ""}`}
+              aria-pressed={Boolean(found?.mine)}
               onClick={() => toggle(emoji)}
               className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
                 found?.mine

@@ -77,6 +77,7 @@ export function Icon({
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
     className: cn("h-5 w-5", className),
+    "aria-hidden": true,
   };
   switch (name) {
     case "home":
@@ -135,7 +136,7 @@ export function Icon({
       );
     case "spotify":
       return (
-        <svg viewBox="0 0 24 24" fill="currentColor" className={cn("h-5 w-5", className)}>
+        <svg viewBox="0 0 24 24" fill="currentColor" className={cn("h-5 w-5", className)} aria-hidden>
           <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm4.6 14.5a.8.8 0 0 1-1.1.3c-3-1.8-6.8-2.2-11.2-1.2a.8.8 0 1 1-.4-1.6c4.9-1.1 9-.6 12.4 1.4.4.2.5.7.3 1.1Zm1.2-2.7a1 1 0 0 1-1.3.4c-3.4-2.1-8.5-2.7-12.5-1.5a1 1 0 1 1-.6-1.9c4.6-1.4 10.3-.7 14.2 1.7.5.3.6.9.2 1.3Zm.1-2.8C14.1 8.5 7.9 8.3 4.8 9.3a1.2 1.2 0 1 1-.7-2.3c3.6-1.1 10.4-.9 14.5 1.6a1.2 1.2 0 0 1-1.2 2Z" />
         </svg>
       );
