@@ -11,11 +11,14 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ ratingId: string }> };
 
-export async function GET(_request: NextRequest, { params }: Params): Promise<NextResponse> {
+export async function GET(request: NextRequest, { params }: Params): Promise<NextResponse> {
   try {
     const { ratingId } = await params;
-    const comments = await commentsFor(ratingId);
-    return NextResponse.json({ comments });
+    const limit = Math.min(50, Math.max(1, Number(request.nextUrl.searchParams.get("limit") ?? 20) || 20));
+    const offsetValue = Number(request.nextUrl.searchParams.get("offset") ?? 0);
+    const offset = Number.isFinite(offsetValue) ? Math.max(0, Math.floor(offsetValue)) : 0;
+    const page = await commentsFor(ratingId, limit, offset);
+    return NextResponse.json(page);
   } catch (error) {
     return apiError(error);
   }
@@ -38,8 +41,8 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     }
     const parsed = schema.safeParse(body);
     if (!parsed.success) return jsonError("Write a comment.", 400, "INVALID_COMMENT");
-    const comments = await addComment(session.org.id, ratingId, parsed.data.body);
-    return NextResponse.json({ comments });
+    const result = await addComment(session.org.id, ratingId, parsed.data.body);
+    return NextResponse.json(result);
   } catch (error) {
     return apiError(error);
   }

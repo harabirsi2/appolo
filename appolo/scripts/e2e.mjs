@@ -267,7 +267,10 @@ const dismiss = await call("/api/feed/dismiss", {
 const dismissedFeed = await call("/app", { cookie: beta.cookie });
 await check("dismissing a recommendation hides it from the For-you feed", () => {
   assert.equal(dismiss.status, 200, `dismiss failed: ${dismiss.text.slice(0, 160)}`);
-  assert.ok(!dismissedFeed.text.includes(reviewText), "the dismissed review is still in the feed");
+  // The flight payload also carries prefetched item pages, where the review
+  // legitimately stays. Only the visible markup decides what the feed shows.
+  const visible = dismissedFeed.text.replace(/<script[\s\S]*?<\/script>/gi, "");
+  assert.ok(!visible.includes(reviewText), "the dismissed review is still in the feed");
 });
 
 const newerReviewText = `E2E newer ${stamp}: chronological check.`;
@@ -350,6 +353,18 @@ await check("a burst of comments is rate limited with a retry hint", () => {
   assert.equal(lastComment.status, 429);
   assert.equal(lastComment.json?.code, "RATE_LIMITED");
   assert.ok(Number(lastComment.headers.get("retry-after")) >= 1);
+});
+
+const commentPage = await call(`/api/ratings/${reactionRatingId}/comments?limit=5&offset=0`);
+const commentPageTwo = await call(`/api/ratings/${reactionRatingId}/comments?limit=5&offset=5`);
+await check("comments paginate with a total and non-overlapping pages", () => {
+  assert.equal(commentPage.status, 200);
+  assert.equal(commentPage.json.comments.length, 5);
+  assert.ok(commentPage.json.total >= 20, `only ${commentPage.json.total} comments`);
+  assert.equal(commentPageTwo.status, 200);
+  assert.equal(commentPageTwo.json.comments.length, 5);
+  const firstIds = new Set(commentPage.json.comments.map((item) => item.id));
+  assert.ok(commentPageTwo.json.comments.every((item) => !firstIds.has(item.id)));
 });
 
 const badDelete = await call("/api/account/delete", {

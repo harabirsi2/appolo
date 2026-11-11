@@ -1039,24 +1039,50 @@ export interface CommentView {
   createdAt: Date;
 }
 
-export async function commentsFor(ratingId: string, limit = 50): Promise<CommentView[]> {
+export interface CommentPage {
+  comments: CommentView[];
+  total: number;
+}
+
+export async function commentCount(ratingId: string): Promise<number> {
   const db = getDb();
-  const rows = await db
-    .select({ comment: ratingComments, profile: profiles })
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
     .from(ratingComments)
-    .innerJoin(profiles, eq(profiles.orgId, ratingComments.orgId))
-    .where(eq(ratingComments.ratingId, ratingId))
-    .orderBy(ratingComments.createdAt)
-    .limit(limit);
-  return rows.map(({ comment, profile }) => ({
-    id: comment.id,
-    orgId: comment.orgId,
-    username: profile.username,
-    displayName: profile.displayName,
-    avatarHue: profile.avatarHue,
-    body: comment.body,
-    createdAt: comment.createdAt,
-  }));
+    .where(eq(ratingComments.ratingId, ratingId));
+  return row?.count ?? 0;
+}
+
+/** One page of comments, oldest first, with the total so the client can paginate. */
+export async function commentsFor(
+  ratingId: string,
+  limit = 20,
+  offset = 0,
+): Promise<CommentPage> {
+  const db = getDb();
+  const [rows, total] = await Promise.all([
+    db
+      .select({ comment: ratingComments, profile: profiles })
+      .from(ratingComments)
+      .innerJoin(profiles, eq(profiles.orgId, ratingComments.orgId))
+      .where(eq(ratingComments.ratingId, ratingId))
+      .orderBy(ratingComments.createdAt)
+      .limit(limit)
+      .offset(offset),
+    commentCount(ratingId),
+  ]);
+  return {
+    comments: rows.map(({ comment, profile }) => ({
+      id: comment.id,
+      orgId: comment.orgId,
+      username: profile.username,
+      displayName: profile.displayName,
+      avatarHue: profile.avatarHue,
+      body: comment.body,
+      createdAt: comment.createdAt,
+    })),
+    total,
+  };
 }
 
 async function ratingOwner(ratingId: string): Promise<{ orgId: string; itemId: string } | null> {
@@ -1073,15 +1099,18 @@ export async function addComment(
   orgId: string,
   ratingId: string,
   body: string,
-): Promise<CommentView[]> {
+): Promise<{ comment: CommentView; total: number }> {
   const trimmed = body.trim();
   if (!trimmed) throw new DomainError("EMPTY_COMMENT", "Write something first.", 400);
   if (trimmed.length > 1000) throw new DomainError("COMMENT_TOO_LONG", "Keep comments under 1,000 characters.", 400);
   const owner = await ratingOwner(ratingId);
   if (!owner) throw new DomainError("RATING_NOT_FOUND", "That review does not exist.", 404);
 
-  await withOrg(orgId, async (tx) => {
-    await tx.insert(ratingComments).values({ ratingId, orgId, body: trimmed });
+  const [created] = await withOrg(orgId, async (tx) => {
+    const rows = await tx
+      .insert(ratingComments)
+      .values({ ratingId, orgId, body: trimmed })
+      .returning({ id: ratingComments.id, createdAt: ratingComments.createdAt });
     if (owner.orgId !== orgId) {
       await tx.insert(notifications).values({
         orgId: owner.orgId,
@@ -1092,9 +1121,23 @@ export async function addComment(
         body: trimmed.slice(0, 140),
       });
     }
+    return rows;
   });
+  if (!created) throw new DomainError("COMMENT_FAILED", "Could not save that comment.", 500);
 
-  return commentsFor(ratingId);
+  const profile = await getProfileByOrgId(orgId);
+  return {
+    comment: {
+      id: created.id,
+      orgId,
+      username: profile?.username ?? "you",
+      displayName: profile?.displayName ?? "You",
+      avatarHue: profile?.avatarHue ?? 0,
+      body: trimmed,
+      createdAt: created.createdAt,
+    },
+    total: await commentCount(ratingId),
+  };
 }
 
 export async function toggleReaction(

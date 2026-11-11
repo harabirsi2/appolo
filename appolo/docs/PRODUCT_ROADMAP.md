@@ -127,7 +127,8 @@ Done in this pass:
   profile's feed through `feed_dismissals`.
 
 - Comment posting goes through the shared action limiter (20 per minute per
-  profile) like votes, matchups and reactions.
+  profile) like votes, matchups and reactions, and comments are paginated 20 at
+  a time with a total so long threads load in pages.
 - Coordinated-vote detection for community rankings.
 
 ## Phase 6 — Integrations and sharing (Partial)
@@ -171,8 +172,8 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Add comment pagination beyond the current limit.
-2. Add screen-reader labelling for icon-only controls.
+1. Add screen-reader labelling for icon-only controls.
+2. Add browser-driven (Playwright) visual checks for the main screens.
 
 ## Explicit non-goals for this pass
 

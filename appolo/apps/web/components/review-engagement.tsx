@@ -31,18 +31,22 @@ export function ReviewEngagement({
 }) {
   const [reactions, setReactions] = useState<Reaction[]>(initialReactions);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [total, setTotal] = useState(initialCommentCount);
   const [loaded, setLoaded] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [comment, setComment] = useState("");
   const [showComments, setShowComments] = useState(false);
 
-  async function loadComments() {
-    if (loaded) return;
-    const res = await fetch(`/api/ratings/${ratingId}/comments`);
-    if (res.ok) {
-      const data = (await res.json()) as { comments: Comment[] };
-      setComments(data.comments);
-      setLoaded(true);
-    }
+  async function loadComments(offset = 0) {
+    if (offset === 0 && loaded) return;
+    setLoadingMore(true);
+    const res = await fetch(`/api/ratings/${ratingId}/comments?limit=20&offset=${offset}`);
+    setLoadingMore(false);
+    if (!res.ok) return;
+    const data = (await res.json()) as { comments: Comment[]; total: number };
+    setComments((current) => (offset === 0 ? data.comments : [...current, ...data.comments]));
+    setTotal(data.total);
+    setLoaded(true);
   }
 
   async function toggle(emoji: string) {
@@ -66,8 +70,9 @@ export function ReviewEngagement({
       body: JSON.stringify({ body: trimmed }),
     });
     if (res.ok) {
-      const data = (await res.json()) as { comments: Comment[] };
-      setComments(data.comments);
+      const data = (await res.json()) as { comment: Comment; total: number };
+      setComments((current) => [...current, data.comment]);
+      setTotal(data.total);
       setLoaded(true);
       setComment("");
     }
@@ -102,7 +107,7 @@ export function ReviewEngagement({
         }}
         className="text-[11px] text-muted-2 hover:text-ink"
       >
-        {showComments ? "Hide comments" : `Comments (${initialCommentCount})`}
+        {showComments ? "Hide comments" : `Comments (${total})`}
       </button>
       {showComments ? (
         <div className="space-y-2">
@@ -112,6 +117,16 @@ export function ReviewEngagement({
               <p className="mt-0.5 text-[12px] text-muted">{c.body}</p>
             </div>
           ))}
+          {comments.length < total ? (
+            <button
+              type="button"
+              onClick={() => loadComments(comments.length)}
+              disabled={loadingMore}
+              className="text-[11px] text-muted-2 hover:text-ink disabled:opacity-60"
+            >
+              {loadingMore ? "Loading…" : `Load more comments (${total - comments.length})`}
+            </button>
+          ) : null}
           <div className="flex gap-2">
             <input
               value={comment}
