@@ -267,7 +267,8 @@ export async function listCatalog(options: {
   }
   const filters = [];
   if (options.kind) filters.push(eq(catalogItems.kind, options.kind as MediaKind));
-  if (options.genre) filters.push(sql`${options.genre} = any(${catalogItems.genres})`);
+  // Containment (not `= any(...)`) so the GIN index on genres can serve it.
+  if (options.genre) filters.push(sql`${catalogItems.genres} @> array[${options.genre}]::text[]`);
   if (options.q) {
     const like = `%${options.q}%`;
     filters.push(sql`(${catalogItems.title} ilike ${like} or ${catalogItems.subtitle} ilike ${like})`);
@@ -1068,7 +1069,8 @@ export async function catalogLeaderboard(
   const sort = options.sort ?? "top";
   const filters = [];
   if (options.kind) filters.push(eq(catalogItems.kind, options.kind));
-  if (options.genre) filters.push(sql`${options.genre} = any(${catalogItems.genres})`);
+  // Containment (not `= any(...)`) so the GIN index on genres can serve it.
+  if (options.genre) filters.push(sql`${catalogItems.genres} @> array[${options.genre}]::text[]`);
 
   const ratings = sql<number>`count(${itemRatings.id})::int`;
   const avgElo = sql<number>`coalesce(avg(${itemRatings.elo}), ${START_ELO})::float`;

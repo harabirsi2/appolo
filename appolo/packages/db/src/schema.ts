@@ -234,6 +234,8 @@ export const contacts = pgTable(
   (t) => ({
     orgIdx: index("contacts_org_idx").on(t.orgId),
     nameIdx: index("contacts_name_idx").on(t.orgId, t.name),
+    nameTrgmIdx: index("contacts_name_trgm_idx").using("gin", sql`${t.name} gin_trgm_ops`),
+    companyTrgmIdx: index("contacts_company_trgm_idx").using("gin", sql`${t.company} gin_trgm_ops`),
   }),
 );
 
@@ -253,6 +255,11 @@ export const contactChannels = pgTable(
   (t) => ({
     valueIdx: index("contact_channels_value_idx").on(t.orgId, t.normalizedValue),
     contactIdx: index("contact_channels_contact_idx").on(t.contactId),
+    valueTrgmIdx: index("contact_channels_value_trgm_idx").using("gin", sql`${t.value} gin_trgm_ops`),
+    normalizedValueTrgmIdx: index("contact_channels_normalized_value_trgm_idx").using(
+      "gin",
+      sql`${t.normalizedValue} gin_trgm_ops`,
+    ),
   }),
 );
 
@@ -587,6 +594,8 @@ export const reviews = pgTable(
     platformExternalUq: uniqueIndex("reviews_platform_external_uq").on(t.platformId, t.externalId),
     orgReviewedIdx: index("reviews_org_reviewed_idx").on(t.orgId, t.reviewedAt),
     orgReplyIdx: index("reviews_org_reply_idx").on(t.orgId, t.replyStatus),
+    bodyTrgmIdx: index("reviews_body_trgm_idx").using("gin", sql`${t.body} gin_trgm_ops`),
+    authorNameTrgmIdx: index("reviews_author_name_trgm_idx").using("gin", sql`${t.authorName} gin_trgm_ops`),
   }),
 );
 
@@ -1069,6 +1078,9 @@ export const catalogItems = pgTable(
     kindTitleUq: uniqueIndex("catalog_items_kind_title_uq").on(t.kind, t.title, t.subtitle),
     externalRefUq: uniqueIndex("catalog_items_external_ref_uq").on(t.externalRef),
     kindIdx: index("catalog_items_kind_idx").on(t.kind, t.title),
+    titleTrgmIdx: index("catalog_items_title_trgm_idx").using("gin", sql`${t.title} gin_trgm_ops`),
+    subtitleTrgmIdx: index("catalog_items_subtitle_trgm_idx").using("gin", sql`${t.subtitle} gin_trgm_ops`),
+    genresIdx: index("catalog_items_genres_gin_idx").using("gin", t.genres),
   }),
 );
 
@@ -1182,6 +1194,11 @@ export const profiles = pgTable(
   (t) => ({
     orgUq: uniqueIndex("profiles_org_uq").on(t.orgId),
     usernameUq: uniqueIndex("profiles_username_uq").on(t.username),
+    usernameTrgmIdx: index("profiles_username_trgm_idx").using("gin", sql`${t.username} gin_trgm_ops`),
+    displayNameTrgmIdx: index("profiles_display_name_trgm_idx").using(
+      "gin",
+      sql`${t.displayName} gin_trgm_ops`,
+    ),
   }),
 );
 

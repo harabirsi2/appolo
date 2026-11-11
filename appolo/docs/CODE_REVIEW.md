@@ -116,6 +116,28 @@ syncing 200 reviews from a platform meant 400 commits and a round trip per row.
 - Counts verified: first sync reports `imported: 2, updated: 0`, a repeat sync
   reports `imported: 0, updated: 2` — idempotent as before.
 
+### 9. Search predicates had no usable indexes
+
+Catalog search, profile lookup, review search and contact search all use
+`ilike '%term%'`, which no btree index can serve, and the genre filter used
+`genre = any(genres)`. Correct at 56 catalog rows, a sequential scan at scale.
+
+- Migration `0013_search_indexes.sql` enables `pg_trgm` and adds GIN trigram
+  indexes for `catalog_items.title/subtitle`, `profiles.username/display_name`,
+  `reviews.body/author_name`, `contacts.name/company` and
+  `contact_channels.value/normalized_value`, plus a GIN array index on
+  `catalog_items.genres`. The same indexes are declared in `schema.ts` so future
+  drizzle generations see them.
+- `= any(genres)` cannot use an array GIN index; both ranking filters now use
+  the equivalent `genres @> array[…]` containment form. Verified with
+  `enable_seqscan = off`: catalog search becomes a `BitmapOr` over the two
+  trigram indexes and the genre filter a `Bitmap Index Scan` on the GIN index.
+- At 56 rows the planner still (correctly) prefers a sequential scan; the
+  indexes matter once the catalog grows.
+- `pg_trgm` is a trusted extension on PostgreSQL 13+, so the migration role can
+  create it. On a database that forbids extensions the migration fails inside
+  its transaction and is not recorded.
+
 ## Remaining risks (not changed in this pass)
 
 Ordered by expected impact. None are regressions from this review.
@@ -134,19 +156,16 @@ Ordered by expected impact. None are regressions from this review.
    enabled, a search with 3+ characters can await up to 4 s of external calls
    before returning local results. Move insertion to the background and return
    local matches immediately.
-5. **Search indexes.** `ILIKE '%term%'` and `genre = any(genres)` have no trigram
-   or GIN index. Correct at 56 rows; plan `pg_trgm` + GIN before catalog growth,
-   and confirm the extension is available on the target database first.
-6. **Global discovery queries scan across tenants by design** (`popularThisWeek`,
+5. **Global discovery queries scan across tenants by design** (`popularThisWeek`,
    the global branch of `feedForYou`). They are candidates for caching or a
    materialized view once profile/review volume grows; today they are the main
    source of per-page DB reads.
-7. **`ensureProfile` costs up to six queries for a brand-new account**
+6. **`ensureProfile` costs up to six queries for a brand-new account**
    (two existence checks, an insert, then a re-read). It is only hit once per
    account, so it was left as-is; the caller already checks first.
-8. **No ESLint.** Unused imports, floating promises and hook misuse are only
+7. **No ESLint.** Unused imports, floating promises and hook misuse are only
    caught by review. Type checking covers the rest.
-9. **Worker is still a heartbeat stub.** Model rebuilds are process-local and
+8. **Worker is still a heartbeat stub.** Model rebuilds are process-local and
    self-healing via the comparison-count check in `getRankingModel`; a real queue
    is still the right long-term home for them.
 
@@ -165,5 +184,8 @@ Ordered by expected impact. None are regressions from this review.
 - `pnpm --filter @appolo/core test` 37/37.
 - `pnpm --filter @appolo/web build` clean.
 - `scripts/e2e.mjs` 13/13, including vote/undo and tenant isolation.
+- `sql/0013_search_indexes.sql` applied to the dev database; `pg_trgm`
+  installed, all eleven indexes present, and `EXPLAIN` confirms the trigram and
+  genre GIN indexes are chosen when sequential scans are disabled.
 - Concurrency, tie-undo and watchlist probes run against the dev database
   (temporary scripts, removed after use).
