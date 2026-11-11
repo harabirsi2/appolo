@@ -123,8 +123,9 @@ Done in this pass:
 
 - A strict chronological Following mode: `/app?feed=following` renders only
   followed accounts' reviews, newest edit first, without ranking or diversity.
+- For-you cards can be dismissed; dismissed reviews are excluded from that
+  profile's feed through `feed_dismissals`.
 - Coordinated-vote detection for community rankings.
-- Recommendation dismiss controls and cold-start onboarding interests.
 
 ## Phase 6 — Integrations and sharing (Partial)
 
@@ -168,8 +169,8 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Add recommendation dismiss controls to the For-you feed.
-2. Throttle comment posting like the comparison endpoints.
+1. Throttle comment posting like the comparison endpoints.
+2. Add comment pagination beyond the current limit.
 
 ## Explicit non-goals for this pass
 

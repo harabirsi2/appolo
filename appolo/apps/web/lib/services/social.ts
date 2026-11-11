@@ -21,6 +21,7 @@ import { listInterests } from "./interests";
 const {
   profiles,
   follows,
+  feedDismissals,
   pods,
   podItems,
   catalogItems,
@@ -1366,7 +1367,7 @@ export async function matchPercent(orgId: string, otherOrgId: string): Promise<n
  */
 export async function feedForYou(orgId: string, limit = 12): Promise<ReviewView[]> {
   const db = getDb();
-  const [followedRows, ownRatings, interests] = await Promise.all([
+  const [followedRows, ownRatings, interests, dismissals] = await Promise.all([
     db.select({ orgId: follows.followeeOrgId }).from(follows).where(eq(follows.followerOrgId, orgId)),
     db
       .select({ genres: catalogItems.genres })
@@ -1374,6 +1375,9 @@ export async function feedForYou(orgId: string, limit = 12): Promise<ReviewView[
       .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
       .where(eq(itemRatings.orgId, orgId)),
     listInterests(orgId),
+    withOrg(orgId, (tx) =>
+      tx.select({ ratingId: feedDismissals.ratingId }).from(feedDismissals).where(eq(feedDismissals.orgId, orgId)),
+    ),
   ]);
   const followedIds = followedRows.map((row) => row.orgId);
   const followedSet = new Set(followedIds);
@@ -1433,7 +1437,7 @@ export async function feedForYou(orgId: string, limit = 12): Promise<ReviewView[
         comments: stats?.commentCount ?? 0,
       };
     }),
-      { followedAuthorIds: followedSet, genreWeights },
+      { followedAuthorIds: followedSet, genreWeights, seenIds: dismissals.map((row) => row.ratingId) },
     ),
   );
 
@@ -1472,6 +1476,24 @@ export async function feedFollowing(orgId: string, limit = 12): Promise<ReviewVi
     .filter((review) => Boolean(review.text) || Boolean(review.videoUrl) || review.tags.length > 0)
     .slice(0, limit);
   return attachEngagement(orgId, reviews);
+}
+
+/** Hide one review from the viewer's For-you feed. */
+export async function dismissFeedReview(orgId: string, ratingId: string): Promise<void> {
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!isUuid.test(ratingId)) {
+    throw new DomainError("REVIEW_NOT_FOUND", "That review no longer exists.", 404);
+  }
+  try {
+    await withOrg(orgId, (tx) =>
+      tx.insert(feedDismissals).values({ orgId, ratingId }).onConflictDoNothing(),
+    );
+  } catch (error) {
+    if ((error as { code?: string }).code === "23503") {
+      throw new DomainError("REVIEW_NOT_FOUND", "That review no longer exists.", 404);
+    }
+    throw error;
+  }
 }
 
 /* ------------------------------------------------------------------ */

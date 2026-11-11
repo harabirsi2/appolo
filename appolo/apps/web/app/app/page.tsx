@@ -18,6 +18,7 @@ import { MediaArt } from "@/components/media-art";
 import { KindIcon, isAnime } from "@/components/kind-icon";
 import { Avatar, Icon, PodRow, ReviewCard } from "@/components/podiums";
 import { FollowButton } from "@/components/follow-button";
+import { DismissButton } from "@/components/dismiss-button";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Home" };
@@ -288,7 +289,14 @@ export default async function HomePage({
         ) : (
           <div className="grid grid-cols-2 gap-2.5">
             {feed.map((review) => (
-              <ReviewCard key={review.id} review={review} />
+              <div key={review.id}>
+                <ReviewCard review={review} />
+                {!following ? (
+                  <div className="mt-1 flex justify-end">
+                    <DismissButton ratingId={review.id} />
+                  </div>
+                ) : null}
+              </div>
             ))}
           </div>
         )}

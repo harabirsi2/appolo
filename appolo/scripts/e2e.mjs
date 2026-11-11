@@ -258,6 +258,18 @@ await check("home feed ranks followed reviews and explains why", () => {
   assert.match(homeFeed.text, /From someone you follow/);
 });
 
+const alphaFirstRating = rankings.json.rankings.find((item) => item.id === first.id)?.ratingId;
+const dismiss = await call("/api/feed/dismiss", {
+  method: "POST",
+  body: { ratingId: alphaFirstRating },
+  cookie: beta.cookie,
+});
+const dismissedFeed = await call("/app", { cookie: beta.cookie });
+await check("dismissing a recommendation hides it from the For-you feed", () => {
+  assert.equal(dismiss.status, 200, `dismiss failed: ${dismiss.text.slice(0, 160)}`);
+  assert.ok(!dismissedFeed.text.includes(reviewText), "the dismissed review is still in the feed");
+});
+
 const newerReviewText = `E2E newer ${stamp}: chronological check.`;
 const secondReview = await call(`/api/rankings/${second.id}/review`, {
   method: "POST",

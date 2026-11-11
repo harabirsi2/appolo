@@ -1250,6 +1250,20 @@ export const follows = pgTable(
   }),
 );
 
+/** Reviews a profile has hidden from its For-you feed. */
+export const feedDismissals = pgTable(
+  "feed_dismissals",
+  {
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    ratingId: uuid("rating_id").notNull().references(() => itemRatings.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.orgId, t.ratingId] }),
+    orgIdx: index("feed_dismissals_org_idx").on(t.orgId),
+  }),
+);
+
 /** A shareable list ("pod") of catalog items. */
 export const pods = pgTable(
   "pods",
