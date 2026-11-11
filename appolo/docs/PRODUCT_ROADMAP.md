@@ -118,9 +118,16 @@ Open:
 Existing: server-side session checks, RLS, scrypt passwords, Zod validation, audit
 logs/route, reports, export for contacts.
 
+Done in this pass:
+- Self-serve media export (`/api/account/export`) covering the profile, ratings,
+  written reviews, matchups and ranking order.
+- Password-confirmed account deletion (`/api/account/delete`, owner only) removes
+  the workspace and everything cascading from it — ratings, matchups, reviews,
+  ranking order, watchlist, pods and follows — plus the user, memberships and
+  sessions. The shared demo account is protected.
+
 Open:
-- Rate limiting on auth and comparison endpoints.
-- Account deletion/data export covering the media layer.
+- Rate limiting on comparison endpoints.
 - Accessibility pass (focus states exist; screen-reader labelling for icon-only
   controls needs work).
 - Browser-driven (Playwright) visuals; the HTTP e2e suite covers flows, not pixels.

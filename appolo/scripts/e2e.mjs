@@ -257,5 +257,43 @@ await check("session data survives a fresh login", async () => {
   assert.ok(after.json.rankings.some((item) => item.id === first.id));
 });
 
+const mediaExport = await call("/api/account/export", { cookie: alpha.cookie });
+await check("media export covers ratings, reviews, matchups and ranking order", () => {
+  assert.equal(mediaExport.status, 200, `export failed: ${mediaExport.text.slice(0, 160)}`);
+  const data = JSON.parse(mediaExport.text);
+  assert.ok(Array.isArray(data.ratings) && data.ratings.length >= 4);
+  assert.ok(Array.isArray(data.reviews) && data.reviews.some((review) => review.text.includes("E2E review")));
+  assert.ok(Array.isArray(data.matchups));
+  assert.ok(data.rankingOrder.some((row) => row.kind === "movie"));
+});
+
+const badDelete = await call("/api/account/delete", {
+  method: "POST",
+  body: { password: "not-the-password", confirm: "DELETE" },
+  cookie: beta.cookie,
+});
+const weakConfirm = await call("/api/account/delete", {
+  method: "POST",
+  body: { password, confirm: "delete" },
+  cookie: beta.cookie,
+});
+await check("deletion requires the password and the typed confirmation", () => {
+  assert.equal(badDelete.status, 400);
+  assert.equal(weakConfirm.status, 400);
+});
+
+const deleted = await call("/api/account/delete", {
+  method: "POST",
+  body: { password, confirm: "DELETE" },
+  cookie: beta.cookie,
+});
+const betaLoginAfter = await call("/api/auth/login", { method: "POST", body: { email: beta.email, password } });
+const alphaLoginAfter = await call("/api/auth/login", { method: "POST", body: { email: alpha.email, password } });
+await check("account deletion removes the user, workspace and media data", () => {
+  assert.equal(deleted.status, 200, `delete failed: ${deleted.text.slice(0, 160)}`);
+  assert.equal(betaLoginAfter.status, 401, "deleted account can still sign in");
+  assert.equal(alphaLoginAfter.status, 200, "deleting one account removed another");
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) process.exitCode = 1;

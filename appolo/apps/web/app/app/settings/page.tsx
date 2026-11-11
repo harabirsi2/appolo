@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/session";
 import { getDb, withOrg, schema } from "@/lib/db";
 import { listOrgChannels, listSavedReplies } from "@/lib/services/messaging";
 import { createSavedReplyAction } from "@/lib/actions";
+import { DeleteAccount } from "@/components/delete-account";
 
 const { memberships, users, locations } = schema;
 
@@ -199,11 +200,28 @@ export default async function SettingsPage({
       </Card>
 
       <Card>
+        <CardTitle>Your data</CardTitle>
+        <p className="text-sm text-muted">
+          Download everything in your media profile — ratings, written reviews, matchups and your saved
+          ranking order — as JSON.
+        </p>
+        <a
+          href="/api/account/export"
+          className="mt-3 inline-flex h-9 items-center rounded-lg border border-border bg-surface-2 px-3 text-sm text-ink hover:border-border-strong"
+        >
+          Export my media data
+        </a>
+        <div className="mt-4 border-t border-border pt-4">
+          <DeleteAccount />
+        </div>
+      </Card>
+
+      <Card>
         <CardTitle>Data &amp; compliance</CardTitle>
         <ul className="space-y-2 text-sm text-muted">
           <li>Every tenant table is protected by row-level security keyed to the active org.</li>
           <li>Consent records are append-only and checked before any outbound message.</li>
-          <li>Exports and deletion run through audited jobs (Phase 4).</li>
+          <li>Exports and account deletion are self-serve and require your password.</li>
           <li>No payment data is collected or stored — payments are out of scope.</li>
         </ul>
       </Card>
