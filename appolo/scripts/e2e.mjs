@@ -338,6 +338,20 @@ await check("a burst of reactions is rate limited with a retry hint", () => {
   assert.ok(Number(lastReaction.headers.get("retry-after")) >= 1);
 });
 
+let lastComment = null;
+for (let attempt = 0; attempt < 21; attempt += 1) {
+  lastComment = await call(`/api/ratings/${reactionRatingId}/comments`, {
+    method: "POST",
+    body: { body: `E2E comment burst ${attempt}` },
+    cookie: beta.cookie,
+  });
+}
+await check("a burst of comments is rate limited with a retry hint", () => {
+  assert.equal(lastComment.status, 429);
+  assert.equal(lastComment.json?.code, "RATE_LIMITED");
+  assert.ok(Number(lastComment.headers.get("retry-after")) >= 1);
+});
+
 const badDelete = await call("/api/account/delete", {
   method: "POST",
   body: { password: "not-the-password", confirm: "DELETE" },

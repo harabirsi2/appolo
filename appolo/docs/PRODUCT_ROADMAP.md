@@ -125,6 +125,9 @@ Done in this pass:
   followed accounts' reviews, newest edit first, without ranking or diversity.
 - For-you cards can be dismissed; dismissed reviews are excluded from that
   profile's feed through `feed_dismissals`.
+
+- Comment posting goes through the shared action limiter (20 per minute per
+  profile) like votes, matchups and reactions.
 - Coordinated-vote detection for community rankings.
 
 ## Phase 6 — Integrations and sharing (Partial)
@@ -157,7 +160,6 @@ Done in this pass:
   tapping speed and stop scripted bursts.
 
 Open:
-- Spam limits for comments beyond the comparison endpoints.
 - Accessibility pass (focus states exist; screen-reader labelling for icon-only
   controls needs work).
 - Browser-driven (Playwright) visuals; the HTTP e2e suite covers flows, not pixels.
@@ -169,8 +171,8 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Throttle comment posting like the comparison endpoints.
-2. Add comment pagination beyond the current limit.
+1. Add comment pagination beyond the current limit.
+2. Add screen-reader labelling for icon-only controls.
 
 ## Explicit non-goals for this pass
 

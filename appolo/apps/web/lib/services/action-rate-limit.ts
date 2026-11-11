@@ -11,8 +11,10 @@ import { consumeAttempt, type AttemptWindow } from "./auth-rate-limit";
 export const VOTE_WINDOW: AttemptWindow = { max: 120, windowMs: 60_000 };
 export const MATCHUP_WINDOW: AttemptWindow = { max: 240, windowMs: 60_000 };
 export const REACTION_WINDOW: AttemptWindow = { max: 60, windowMs: 60_000 };
+/** Comments notify the review author, so they are capped tighter than reactions. */
+export const COMMENT_WINDOW: AttemptWindow = { max: 20, windowMs: 60_000 };
 
-export type ActionScope = "vote" | "matchup" | "reaction";
+export type ActionScope = "vote" | "matchup" | "reaction" | "comment";
 
 export type ActionLimitResult =
   | { allowed: true }
