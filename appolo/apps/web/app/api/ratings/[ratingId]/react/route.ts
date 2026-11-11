@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { apiError, jsonError } from "@/lib/api";
+import { apiError, jsonError, rateLimited } from "@/lib/api";
 import { getSession } from "@/lib/session";
+import { consumeAction, REACTION_WINDOW } from "@/lib/services/action-rate-limit";
 import { toggleReaction } from "@/lib/services/social";
 
 const schema = z.object({ emoji: z.string().trim().min(1).max(8) });
@@ -14,6 +15,10 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   try {
     const session = await getSession();
     if (!session) return jsonError("Not authenticated", 401, "UNAUTHENTICATED");
+
+    const limit = await consumeAction("reaction", session.org.id, REACTION_WINDOW);
+    if (!limit.allowed) return rateLimited(limit.retryAfterSeconds);
+
     const { ratingId } = await params;
     let body: unknown;
     try {

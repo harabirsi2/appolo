@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { firstIssue, voteInputSchema } from "@appolo/core";
 import { getSession } from "@/lib/session";
-import { apiError, jsonError } from "@/lib/api";
+import { apiError, jsonError, rateLimited } from "@/lib/api";
+import { consumeAction, VOTE_WINDOW } from "@/lib/services/action-rate-limit";
 import { submitVote } from "@/lib/services/rankings";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,9 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   try {
     const session = await getSession();
     if (!session) return jsonError("Not authenticated", 401, "UNAUTHENTICATED");
+
+    const limit = await consumeAction("vote", session.org.id, VOTE_WINDOW);
+    if (!limit.allowed) return rateLimited(limit.retryAfterSeconds);
 
     const { itemId } = await params;
 

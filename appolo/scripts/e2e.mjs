@@ -267,6 +267,21 @@ await check("media export covers ratings, reviews, matchups and ranking order", 
   assert.ok(data.rankingOrder.some((row) => row.kind === "movie"));
 });
 
+const reactionRatingId = reordered.json.rankings[0].ratingId;
+let lastReaction = null;
+for (let attempt = 0; attempt < 61; attempt += 1) {
+  lastReaction = await call(`/api/ratings/${reactionRatingId}/react`, {
+    method: "POST",
+    body: { emoji: "🔥" },
+    cookie: beta.cookie,
+  });
+}
+await check("a burst of reactions is rate limited with a retry hint", () => {
+  assert.equal(lastReaction.status, 429);
+  assert.equal(lastReaction.json?.code, "RATE_LIMITED");
+  assert.ok(Number(lastReaction.headers.get("retry-after")) >= 1);
+});
+
 const badDelete = await call("/api/account/delete", {
   method: "POST",
   body: { password: "not-the-password", confirm: "DELETE" },

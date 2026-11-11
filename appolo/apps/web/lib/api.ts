@@ -13,6 +13,17 @@ export function jsonError(message: string, status = 400, code?: string): NextRes
   return NextResponse.json(code ? { error: message, code } : { error: message }, { status });
 }
 
+/** 429 with the standard retry hint used by the credential endpoints. */
+export function rateLimited(retryAfterSeconds: number): NextResponse {
+  return NextResponse.json(
+    {
+      error: `Too many requests. Try again in ${retryAfterSeconds} second${retryAfterSeconds === 1 ? "" : "s"}.`,
+      code: "RATE_LIMITED",
+    },
+    { status: 429, headers: { "retry-after": String(retryAfterSeconds) } },
+  );
+}
+
 export function clientIpFrom(headers: Headers): string | null {
   const forwarded = headers.get("x-forwarded-for");
   if (forwarded) return forwarded.split(",")[0]!.trim();

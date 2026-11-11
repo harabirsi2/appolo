@@ -126,8 +126,14 @@ Done in this pass:
   ranking order, watchlist, pods and follows — plus the user, memberships and
   sessions. The shared demo account is protected.
 
+Done in this pass:
+- Interactive endpoints are throttled per org using the same Postgres fixed-window
+  counters as sign-in: matchup fetches 240/min, votes 120/min and reactions
+  60/min, each returning 429 with a `retry-after` header. Limits sit above human
+  tapping speed and stop scripted bursts.
+
 Open:
-- Rate limiting on comparison endpoints.
+- Spam limits for comments beyond the comparison endpoints.
 - Accessibility pass (focus states exist; screen-reader labelling for icon-only
   controls needs work).
 - Browser-driven (Playwright) visuals; the HTTP e2e suite covers flows, not pixels.
