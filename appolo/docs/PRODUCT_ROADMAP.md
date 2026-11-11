@@ -104,6 +104,11 @@ Done in this pass:
   and the page offers a starter title from those genres so the first comparison
   is seeded from real picks rather than fabricated ratings.
 
+Done in this pass:
+- Onboarding interests now act as a genre prior for the For-you feed (35% of
+  the genre weight until ratings dominate) and suggested profiles are ordered by
+  shared genres with those interests instead of alphabetically.
+
 Open:
 - Diversity reranking and a strict chronological Following mode.
 - Coordinated-vote detection for community rankings.

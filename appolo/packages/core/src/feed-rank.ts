@@ -107,6 +107,39 @@ export function normalizeGenreWeights(genres: Iterable<string>): Record<string, 
   return counts;
 }
 
+/**
+ * Merge rating-derived genre weights with onboarding interests.
+ *
+ * Interests act as a prior: they keep `priorShare` of the total weight even as
+ * ratings accumulate, so a brand-new profile still gets a relevant feed while an
+ * established profile is nudged rather than overridden by a few picks.
+ */
+export function blendGenreWeights(
+  ratingWeights: Readonly<Record<string, number>>,
+  interests: Iterable<string>,
+  options: { priorShare?: number } = {},
+): Record<string, number> {
+  const prior = normalizeGenreWeights(interests);
+  const priorShare = Math.min(0.9, Math.max(0, options.priorShare ?? 0.35));
+
+  if (Object.keys(prior).length === 0) return { ...ratingWeights };
+  if (Object.keys(ratingWeights).length === 0) return prior;
+
+  const blended: Record<string, number> = {};
+  for (const [genre, weight] of Object.entries(ratingWeights)) {
+    blended[genre] = (blended[genre] ?? 0) + weight * (1 - priorShare);
+  }
+  for (const [genre, weight] of Object.entries(prior)) {
+    blended[genre] = (blended[genre] ?? 0) + weight * priorShare;
+  }
+
+  let total = 0;
+  for (const weight of Object.values(blended)) total += weight;
+  if (total <= 0) return {};
+  for (const genre of Object.keys(blended)) blended[genre] = (blended[genre] ?? 0) / total;
+  return blended;
+}
+
 function ageHours(createdAt: FeedInput["createdAt"], now: Date): number {
   const time = createdAt instanceof Date ? createdAt.getTime() : new Date(createdAt).getTime();
   if (!Number.isFinite(time)) return DEFAULT_HALF_LIFE_HOURS * 4;

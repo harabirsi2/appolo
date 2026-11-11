@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   MEDIA_KINDS,
+  blendGenreWeights,
   genreProfile,
   mediaKindSchema,
   normalizeGenreWeights,
@@ -14,6 +15,7 @@ import {
 import { getDb, withOrg, schema } from "@/lib/db";
 import { DomainError } from "./errors";
 import { rankedRatings, watchlistFor, type CatalogItem, type RankedItem } from "./rankings";
+import { listInterests } from "./interests";
 
 const {
   profiles,
@@ -344,21 +346,57 @@ export async function searchProfiles(query: string, limit = 8): Promise<ProfileS
 
 export async function suggestedProfiles(orgId: string, limit = 8): Promise<ProfileSummary[]> {
   const db = getDb();
-  const followed = await db
-    .select({ orgId: follows.followeeOrgId })
-    .from(follows)
-    .where(eq(follows.followerOrgId, orgId));
+  const [followed, ownGenres, interests] = await Promise.all([
+    db.select({ orgId: follows.followeeOrgId }).from(follows).where(eq(follows.followerOrgId, orgId)),
+    db
+      .select({ genres: catalogItems.genres })
+      .from(itemRatings)
+      .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
+      .where(eq(itemRatings.orgId, orgId)),
+    listInterests(orgId),
+  ]);
   const excluded = [orgId, ...followed.map((row) => row.orgId)];
+
+  // Genres the viewer rated, plus onboarding picks, so a brand-new profile can
+  // still be matched instead of falling back to alphabetical order.
+  const genres = [
+    ...new Set([
+      ...ownGenres.flatMap((row) => row.genres ?? []),
+      ...interests.map((pick) => pick.genre),
+    ]),
+  ];
 
   // Exclude in SQL, not after taking the first 40 rows. Previously a user who
   // followed the first alphabetically sorted profiles got no suggestions even
   // though plenty of others existed.
-  const rows = await db
-    .select()
-    .from(profiles)
-    .where(notInArray(profiles.orgId, excluded))
-    .orderBy(profiles.displayName)
-    .limit(limit);
+  let rows: Array<typeof profiles.$inferSelect>;
+  if (genres.length > 0) {
+    const matches = await db
+      .select({ profile: profiles, shared: sql<number>`count(*)::int` })
+      .from(profiles)
+      .innerJoin(itemRatings, eq(itemRatings.orgId, profiles.orgId))
+      .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
+      .where(
+        and(
+          notInArray(profiles.orgId, excluded),
+          sql`${catalogItems.genres} && array[${sql.join(
+            genres.map((genre) => sql`${genre}`),
+            sql`, `,
+          )}]::text[]`,
+        ),
+      )
+      .groupBy(profiles.id)
+      .orderBy(sql`count(*) desc`, profiles.displayName)
+      .limit(limit);
+    rows = matches.map((row) => row.profile);
+  } else {
+    rows = await db
+      .select()
+      .from(profiles)
+      .where(notInArray(profiles.orgId, excluded))
+      .orderBy(profiles.displayName)
+      .limit(limit);
+  }
   if (rows.length === 0) return [];
 
   const counts = await followCountsFor(rows.map((row) => row.orgId));
@@ -1327,13 +1365,14 @@ export async function matchPercent(orgId: string, otherOrgId: string): Promise<n
  */
 export async function feedForYou(orgId: string, limit = 12): Promise<ReviewView[]> {
   const db = getDb();
-  const [followedRows, ownRatings] = await Promise.all([
+  const [followedRows, ownRatings, interests] = await Promise.all([
     db.select({ orgId: follows.followeeOrgId }).from(follows).where(eq(follows.followerOrgId, orgId)),
     db
       .select({ genres: catalogItems.genres })
       .from(itemRatings)
       .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
       .where(eq(itemRatings.orgId, orgId)),
+    listInterests(orgId),
   ]);
   const followedIds = followedRows.map((row) => row.orgId);
   const followedSet = new Set(followedIds);
@@ -1372,7 +1411,10 @@ export async function feedForYou(orgId: string, limit = 12): Promise<ReviewView[
     null,
     candidates.map((review) => review.id),
   );
-  const genreWeights = normalizeGenreWeights(ownRatings.flatMap((row) => row.genres ?? []));
+  const genreWeights = blendGenreWeights(
+    normalizeGenreWeights(ownRatings.flatMap((row) => row.genres ?? [])),
+    interests.map((pick) => pick.genre),
+  );
 
   const ranked = rankFeed(
     candidates.map((review) => {

@@ -1,8 +1,31 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hashUnit, normalizeGenreWeights, rankFeed, type FeedInput } from "./feed-rank.js";
+import {
+  blendGenreWeights,
+  hashUnit,
+  normalizeGenreWeights,
+  rankFeed,
+  type FeedInput,
+} from "./feed-rank.js";
 
 const now = new Date("2026-05-01T12:00:00.000Z");
+
+test("onboarding interests keep a share of the genre weights", () => {
+  const blended = blendGenreWeights(normalizeGenreWeights(["Comedy", "Comedy", "Drama"]), ["Horror"]);
+  assert.ok((blended.horror ?? 0) > 0.3, `horror share was ${blended.horror}`);
+  assert.ok((blended.comedy ?? 0) > (blended.drama ?? 0), "ratings should still dominate");
+});
+
+test("interests alone produce a usable prior", () => {
+  const blended = blendGenreWeights({}, ["Drama", "Horror", "Drama"]);
+  assert.ok(Math.abs((blended.drama ?? 0) - 2 / 3) < 1e-9);
+  assert.ok(Math.abs((blended.horror ?? 0) - 1 / 3) < 1e-9);
+});
+
+test("an empty prior leaves the rating weights untouched", () => {
+  const ratings = normalizeGenreWeights(["Drama", "Comedy"]);
+  assert.deepEqual(blendGenreWeights(ratings, []), ratings);
+});
 
 function review(overrides: Partial<FeedInput> & { id: string }): FeedInput {
   return {
