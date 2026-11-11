@@ -138,6 +138,18 @@ Catalog search, profile lookup, review search and contact search all use
   create it. On a database that forbids extensions the migration fails inside
   its transaction and is not recorded.
 
+### 10. Catalog provider enrichment blocked searches
+
+With `CATALOG_PROVIDERS` enabled, `listCatalog` awaited up to 4 s of external
+calls before returning anything, even though the local rows were already known.
+
+- Enrichment is now queued with Next's `after()`, so the response is sent with
+  local matches first and provider hits are written afterwards for the next
+  search. A three-at-a-time cap bounds concurrent provider traffic on top of the
+  existing 15/minute limiter and 10-minute query cache.
+- Outside a request scope (scripts, tests) the lookup still runs, just without
+  the request lifecycle.
+
 ## Remaining risks (not changed in this pass)
 
 Ordered by expected impact. None are regressions from this review.
@@ -152,11 +164,7 @@ Ordered by expected impact. None are regressions from this review.
 3. **Sessions are never pruned.** Expired rows accumulate because there is no
    cron/worker job. A periodic `delete from sessions where expires_at < now()`
    belongs with whichever scheduler the project adopts.
-4. **Catalog provider enrichment is synchronous.** When `CATALOG_PROVIDERS` is
-   enabled, a search with 3+ characters can await up to 4 s of external calls
-   before returning local results. Move insertion to the background and return
-   local matches immediately.
-5. **Global discovery queries scan across tenants by design** (`popularThisWeek`,
+4. **Global discovery queries scan across tenants by design** (`popularThisWeek`,
    the global branch of `feedForYou`). They are candidates for caching or a
    materialized view once profile/review volume grows; today they are the main
    source of per-page DB reads.

@@ -20,7 +20,7 @@ import {
 } from "@appolo/core";
 import { getDb, withOrg, schema, type Tx } from "@/lib/db";
 import { DomainError } from "./errors";
-import { enrichCatalogFromProviders } from "./catalog-providers";
+import { scheduleCatalogEnrichment } from "./catalog-providers";
 import { nextEloAdaptive } from "@appolo/core/ranking";
 
 const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, catalogCredits, rankingModels, rankingOrder } = schema;
@@ -263,7 +263,9 @@ export async function listCatalog(options: {
 } = {}): Promise<CatalogItem[]> {
   const db = getDb();
   if (options.q && options.q.trim().length >= 3) {
-    await enrichCatalogFromProviders(options.kind, options.q.trim());
+    // Never block the local result set on a third-party lookup; hits are stored
+    // in the background and picked up by the next search.
+    scheduleCatalogEnrichment(options.kind, options.q.trim());
   }
   const filters = [];
   if (options.kind) filters.push(eq(catalogItems.kind, options.kind as MediaKind));

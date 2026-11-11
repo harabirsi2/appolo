@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import type { MediaKind } from "@appolo/core";
 import { getDb, schema } from "@/lib/db";
@@ -193,6 +194,37 @@ async function searchForKind(kind: MediaKind, query: string, on: Set<string>): P
       return on.has("openlibrary") ? searchOpenLibrary(query) : [];
     default:
       return [];
+  }
+}
+
+let pendingEnrichments = 0;
+/** Providers are slow and shared; never run more than a few lookups at once. */
+const MAX_PENDING_ENRICHMENTS = 3;
+
+function runEnrichment(kind: string | undefined, query: string): Promise<void> {
+  pendingEnrichments += 1;
+  return enrichCatalogFromProviders(kind, query)
+    .catch(() => {})
+    .finally(() => {
+      pendingEnrichments -= 1;
+    });
+}
+
+/**
+ * Queue provider enrichment for after the response has been sent.
+ *
+ * Searching the catalog should never wait on a third-party API: the local rows
+ * are returned immediately and any provider hits land in the shared catalog for
+ * the next search. `after` keeps the work alive past the response in both
+ * route handlers and server components; outside a request scope (scripts,
+ * tests) the lookup still runs, just without the request lifecycle.
+ */
+export function scheduleCatalogEnrichment(kind: string | undefined, query: string): void {
+  if (pendingEnrichments >= MAX_PENDING_ENRICHMENTS) return;
+  try {
+    after(() => runEnrichment(kind, query));
+  } catch {
+    void runEnrichment(kind, query);
   }
 }
 

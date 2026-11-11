@@ -41,6 +41,11 @@ Existing: shared catalog, six kinds (+anime as a TV/movie genre), providers, sea
 detail pages, credits/people, reviews with attachments, spoilers, reactions, comments,
 pods, watchlist, history.
 
+Done in this pass:
+- Provider enrichment no longer blocks a search. Local results return immediately
+  and provider hits are inserted after the response via `after()`, capped at
+  three concurrent lookups.
+
 Open:
 - Duplicate detection across providers beyond `external_ref` uniqueness.
 - Episode/season/artist entities (currently folded into titles/subtitles).
@@ -157,7 +162,7 @@ on failure.
 ## Immediate next three tasks
 
 1. Make the "All" rankings view use the fitted model rather than raw Elo.
-2. Finish the asynchronous catalog-provider enrichment.
+2. Add diversity reranking to the For-you feed.
 
 ## Explicit non-goals for this pass
 
