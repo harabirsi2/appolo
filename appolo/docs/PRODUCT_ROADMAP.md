@@ -74,8 +74,12 @@ Done in this pass:
   rows are fabricated, so comparison counts and the model stay honest. A saved
   order overrides the model order for that kind until the next reorder.
 
+Done in this pass:
+- The "All" rankings view combines each kind's fitted model, ordering by the
+  comparable 0–10 expected-wins score instead of raw Elo, and shows the combined
+  comparison count.
+
 Open:
-- "All" rankings view spanning kinds still uses Elo.
 - Estimate `ν`/`λ` per user; add sub-category (genre) models.
 - Ranking history view ("why is A above B"): expose the comparison path.
 - Coordinated-vote detection for community rankings.
@@ -164,8 +168,8 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Make the "All" rankings view use the fitted model rather than raw Elo.
-2. Add recommendation dismiss controls to the For-you feed.
+1. Add recommendation dismiss controls to the For-you feed.
+2. Throttle comment posting like the comparison endpoints.
 
 ## Explicit non-goals for this pass
 

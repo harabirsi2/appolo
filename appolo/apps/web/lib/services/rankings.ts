@@ -251,6 +251,32 @@ export async function getRankingModel(
   return modelFromRow(stored);
 }
 
+export interface CrossKindFits {
+  byId: Map<string, FittedItem>;
+  comparisons: number;
+  kindCount: number;
+}
+
+/**
+ * Combine per-kind fitted models for the "All" rankings view. `personalScore`
+ * is a 0–10 expected-wins score against that kind's own field, so it is
+ * comparable across categories in a way raw theta is not.
+ */
+export async function rankingFitsForKinds(orgId: string, kinds: MediaKind[]): Promise<CrossKindFits> {
+  const unique = [...new Set(kinds)];
+  const models = await Promise.all(unique.map((kind) => getRankingModel(orgId, kind).catch(() => null)));
+  const byId = new Map<string, FittedItem>();
+  let comparisons = 0;
+  let kindCount = 0;
+  for (const model of models) {
+    if (!model || model.items.length === 0) continue;
+    kindCount += 1;
+    comparisons += model.comparisons;
+    for (const item of model.items) byId.set(item.id, item);
+  }
+  return { byId, comparisons, kindCount };
+}
+
 /* ------------------------------------------------------------------ */
 /* catalog (shared, not tenant-scoped)                                 */
 /* ------------------------------------------------------------------ */

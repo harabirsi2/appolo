@@ -1,7 +1,14 @@
 import Link from "next/link";
 import { MEDIA_KIND_LABELS, MEDIA_KINDS, scoreBand, type MediaKind } from "@appolo/core";
 import { requireSession } from "@/lib/session";
-import { getRankingModel, hasManualOrder, rankedRatings, tasteStats } from "@/lib/services/rankings";
+import {
+  getRankingModel,
+  hasManualOrder,
+  rankedRatings,
+  rankingFitsForKinds,
+  tasteStats,
+  type CrossKindFits,
+} from "@/lib/services/rankings";
 import { BackButton } from "@/components/back-button";
 import { RankingsList } from "@/components/rankings-list";
 import { KindIcon } from "@/components/kind-icon";
@@ -27,16 +34,22 @@ export default async function RankingsPage({
     activeKind ? hasManualOrder(session.org.id, activeKind) : Promise.resolve(false),
   ]);
 
-  const hasModel = Boolean(model && model.items.length > 0);
+  // The All view combines each kind's fitted model; single-kind views already
+  // have one model in hand.
+  const fits: CrossKindFits = activeKind
+    ? { byId: model?.byId ?? new Map(), comparisons: model?.comparisons ?? 0, kindCount: 1 }
+    : await rankingFitsForKinds(session.org.id, [...new Set(rankings.map((item) => item.kind))]);
+  const hasModel = fits.byId.size > 0;
+
   // A saved manual order already comes back in order; only fall back to the
   // fitted model when the user has not overridden it.
   const ordered = manual
     ? rankings
-    : hasModel && model
+    : hasModel
       ? [...rankings].sort((a, b) => {
-          const fitA = model.byId.get(a.id);
-          const fitB = model.byId.get(b.id);
-          if (fitA && fitB) return fitB.theta - fitA.theta;
+          const fitA = fits.byId.get(a.id);
+          const fitB = fits.byId.get(b.id);
+          if (fitA && fitB) return fitB.personalScore - fitA.personalScore;
           if (fitA) return -1;
           if (fitB) return 1;
           return b.elo - a.elo;
@@ -56,10 +69,13 @@ export default async function RankingsPage({
       <p className="mt-1 text-[13px] text-muted">
         {stats.rated} ranked · {stats.matchups} matchups · {stats.averageScore.toFixed(1)} avg
       </p>
-      {hasModel && model ? (
+      {hasModel ? (
         <p className="mt-1 text-[11px] text-muted-2">
-          Model order from {model.comparisons} comparisons · tie parameter ν{" "}
-          {model.tieParameter.toFixed(2)} · {model.converged ? "converged" : "approximate"}
+          {activeKind && model
+            ? `Model order from ${model.comparisons} comparisons · tie parameter ν ${model.tieParameter.toFixed(2)} · ${model.converged ? "converged" : "approximate"}`
+            : `Model order from ${fits.comparisons} comparisons across ${fits.kindCount} ${
+                fits.kindCount === 1 ? "category" : "categories"
+              }`}
         </p>
       ) : null}
 
@@ -93,7 +109,7 @@ export default async function RankingsPage({
       <RankingsList
         kind={activeKind ?? null}
         items={ordered.map((item) => {
-          const fit = model?.byId.get(item.id) ?? null;
+          const fit = fits.byId.get(item.id) ?? null;
           const confidence =
             fit === null
               ? null

@@ -220,6 +220,12 @@ await check("model rebuilds from comparison history and records the tie", () => 
   assert.ok(modelAfterVote.json.items.some((item) => item.ties === 1));
 });
 
+const allRankings = await call("/app/rankings", { cookie: alpha.cookie });
+await check("all rankings view uses the fitted model", () => {
+  assert.equal(allRankings.status, 200);
+  assert.match(allRankings.text, /Model order from \d+ comparisons across/);
+});
+
 const undo = await call(`/api/rankings/${first.id}/undo`, { method: "POST", cookie: alpha.cookie });
 const modelAfterUndo = await call("/api/rankings/model?kind=movie", { cookie: alpha.cookie });
 await check("undo removes the comparison and rebuilds the model", () => {
