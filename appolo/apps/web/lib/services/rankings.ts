@@ -23,7 +23,7 @@ import { DomainError } from "./errors";
 import { enrichCatalogFromProviders } from "./catalog-providers";
 import { nextEloAdaptive } from "@appolo/core/ranking";
 
-const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, catalogCredits, rankingModels } = schema;
+const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, catalogCredits, rankingModels, rankingOrder } = schema;
 
 /**
  * Model rebuilds are coalesced per org and kind so a burst of votes pays for
@@ -330,26 +330,46 @@ export async function rankedRatings(orgId: string, options: { kind?: string; lim
           : eq(itemRatings.orgId, orgId),
       );
 
-    const ranked = withPositions(
-      rows.map(({ item, rating }) => ({
-        ...mapCatalogItem(item),
-        ratingId: rating.id,
-        elo: rating.elo,
-        matches: rating.matches,
-        wins: rating.wins,
-        losses: rating.losses,
-        skips: rating.skips,
-        score: toScore(rating.elo),
-        reviewText: rating.reviewText ?? null,
-        reviewTags: rating.reviewTags ?? [],
-        spoiler: rating.spoiler,
-        photoUrl: rating.photoUrl ?? null,
-        videoUrl: rating.videoUrl ?? null,
-        favoriteCharacter: rating.favoriteCharacter ?? null,
-        favoriteTracks: rating.favoriteTracks ?? [],
-        position: 0,
-      })),
-    );
+    const manual = options.kind
+      ? await tx
+          .select({ itemId: rankingOrder.itemId, position: rankingOrder.position })
+          .from(rankingOrder)
+          .where(and(eq(rankingOrder.orgId, orgId), eq(rankingOrder.kind, options.kind as MediaKind)))
+      : [];
+    const manualPositions = new Map(manual.map((row) => [row.itemId, row.position]));
+
+    const items = rows.map(({ item, rating }) => ({
+      ...mapCatalogItem(item),
+      ratingId: rating.id,
+      elo: rating.elo,
+      matches: rating.matches,
+      wins: rating.wins,
+      losses: rating.losses,
+      skips: rating.skips,
+      score: toScore(rating.elo),
+      reviewText: rating.reviewText ?? null,
+      reviewTags: rating.reviewTags ?? [],
+      spoiler: rating.spoiler,
+      photoUrl: rating.photoUrl ?? null,
+      videoUrl: rating.videoUrl ?? null,
+      favoriteCharacter: rating.favoriteCharacter ?? null,
+      favoriteTracks: rating.favoriteTracks ?? [],
+      position: 0,
+    }));
+
+    // A saved manual order wins over Elo for that kind; unplaced titles keep
+    // their Elo order after the placed ones.
+    const ranked = manualPositions.size
+      ? items
+          .slice()
+          .sort((a, b) => {
+            const positionA = manualPositions.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+            const positionB = manualPositions.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+            if (positionA !== positionB) return positionA - positionB;
+            return b.elo - a.elo;
+          })
+          .map((item, index) => ({ ...item, position: index + 1 }))
+      : withPositions(items);
     return options.limit ? ranked.slice(0, options.limit) : ranked;
   });
 }
@@ -891,6 +911,95 @@ export async function setManualRating(orgId: string, itemId: string, score: numb
       favoriteTracks: saved.favoriteTracks ?? [],
       position: 0,
     };
+  });
+}
+
+/** Whether this org has saved an explicit order for a media kind. */
+export async function hasManualOrder(orgId: string, kind: MediaKind): Promise<boolean> {
+  return withOrg(orgId, async (tx) => {
+    const rows = await tx
+      .select({ itemId: rankingOrder.itemId })
+      .from(rankingOrder)
+      .where(and(eq(rankingOrder.orgId, orgId), eq(rankingOrder.kind, kind)))
+      .limit(1);
+    return rows.length > 0;
+  });
+}
+
+export interface ReorderResult {
+  order: string[];
+  /** Titles whose position actually changed and produced an audit event. */
+  moved: number;
+}
+
+/**
+ * Replace the org's manual order for one kind. The caller must send every
+ * ranked title in that kind exactly once, so the stored order always covers the
+ * whole list instead of leaving ambiguous gaps.
+ *
+ * Positions are recorded in `ranking_order` and each changed title gets a
+ * `manual-order` entry in `rating_events`; no matchups are fabricated.
+ */
+export async function reorderRankings(
+  orgId: string,
+  kind: MediaKind,
+  itemIds: string[],
+): Promise<ReorderResult> {
+  const unique = [...new Set(itemIds)];
+  if (unique.length !== itemIds.length) {
+    throw new DomainError("ORDER_DUPLICATE", "Each title may appear only once in a manual order.", 400);
+  }
+  if (unique.length === 0) {
+    throw new DomainError("ORDER_EMPTY", "Send at least one ranked title.", 400);
+  }
+
+  return withOrg(orgId, async (tx) => {
+    const rated = await tx
+      .select({ itemId: itemRatings.itemId })
+      .from(itemRatings)
+      .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
+      .where(and(eq(itemRatings.orgId, orgId), eq(catalogItems.kind, kind)));
+    const ratedIds = new Set(rated.map((row) => row.itemId));
+    if (unique.length !== ratedIds.size || unique.some((itemId) => !ratedIds.has(itemId))) {
+      throw new DomainError(
+        "ORDER_INCOMPLETE",
+        "Reorder every ranked title in this category, using only titles you have rated.",
+        400,
+      );
+    }
+
+    const previous = await tx
+      .select({ itemId: rankingOrder.itemId, position: rankingOrder.position })
+      .from(rankingOrder)
+      .where(and(eq(rankingOrder.orgId, orgId), eq(rankingOrder.kind, kind)));
+    const previousPositions = new Map(previous.map((row) => [row.itemId, row.position]));
+
+    await tx.delete(rankingOrder).where(and(eq(rankingOrder.orgId, orgId), eq(rankingOrder.kind, kind)));
+    await tx.insert(rankingOrder).values(
+      unique.map((itemId, index) => ({
+        orgId,
+        kind,
+        itemId,
+        position: index + 1,
+        updatedAt: new Date(),
+      })),
+    );
+
+    const events = unique.flatMap((itemId, index) => {
+      const before = previousPositions.get(itemId);
+      if (before === index + 1) return [];
+      return [
+        {
+          orgId,
+          itemId,
+          kind: "manual-order",
+          detail: before === undefined ? `Placed at #${index + 1}` : `Moved #${before} → #${index + 1}`,
+        },
+      ];
+    });
+    if (events.length > 0) await tx.insert(ratingEvents).values(events);
+
+    return { order: unique, moved: events.length } satisfies ReorderResult;
   });
 }
 

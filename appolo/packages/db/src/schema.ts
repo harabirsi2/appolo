@@ -1114,6 +1114,26 @@ export const itemRatings = pgTable(
 );
 
 /** Immutable log of every head-to-head vote, for history and stats. */
+/**
+ * A user's explicit order for one media kind. Written by dragging on the
+ * rankings screen and kept separate from matchups so manual moves never count
+ * as played comparisons.
+ */
+export const rankingOrder = pgTable(
+  "ranking_order",
+  {
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    kind: mediaKindEnum("kind").notNull(),
+    itemId: uuid("item_id").notNull().references(() => catalogItems.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.orgId, t.kind, t.itemId] }),
+    positionIdx: index("ranking_order_org_kind_position_idx").on(t.orgId, t.kind, t.position),
+  }),
+);
+
 export const itemMatchups = pgTable(
   "item_matchups",
   {

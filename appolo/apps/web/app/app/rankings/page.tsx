@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { MEDIA_KIND_LABELS, MEDIA_KINDS, scoreBand, type MediaKind } from "@appolo/core";
 import { requireSession } from "@/lib/session";
-import { getRankingModel, rankedRatings, tasteStats } from "@/lib/services/rankings";
-import { MediaArt } from "@/components/media-art";
+import { getRankingModel, hasManualOrder, rankedRatings, tasteStats } from "@/lib/services/rankings";
 import { BackButton } from "@/components/back-button";
-import { ScoreText } from "@/components/podiums";
+import { RankingsList } from "@/components/rankings-list";
 import { KindIcon } from "@/components/kind-icon";
 
 export const dynamic = "force-dynamic";
@@ -19,25 +18,30 @@ export default async function RankingsPage({
   const { kind } = await searchParams;
   const activeKind = MEDIA_KINDS.includes(kind as MediaKind) ? (kind as MediaKind) : undefined;
 
-  const [rankings, stats, model] = await Promise.all([
+  const [rankings, stats, model, manual] = await Promise.all([
     rankedRatings(session.org.id, { kind: activeKind }),
     tasteStats(session.org.id),
     activeKind
       ? getRankingModel(session.org.id, activeKind).catch(() => null)
       : Promise.resolve(null),
+    activeKind ? hasManualOrder(session.org.id, activeKind) : Promise.resolve(false),
   ]);
 
   const hasModel = Boolean(model && model.items.length > 0);
-  const ordered = hasModel && model
-    ? [...rankings].sort((a, b) => {
-        const fitA = model.byId.get(a.id);
-        const fitB = model.byId.get(b.id);
-        if (fitA && fitB) return fitB.theta - fitA.theta;
-        if (fitA) return -1;
-        if (fitB) return 1;
-        return b.elo - a.elo;
-      })
-    : rankings;
+  // A saved manual order already comes back in order; only fall back to the
+  // fitted model when the user has not overridden it.
+  const ordered = manual
+    ? rankings
+    : hasModel && model
+      ? [...rankings].sort((a, b) => {
+          const fitA = model.byId.get(a.id);
+          const fitB = model.byId.get(b.id);
+          if (fitA && fitB) return fitB.theta - fitA.theta;
+          if (fitA) return -1;
+          if (fitB) return 1;
+          return b.elo - a.elo;
+        })
+      : rankings;
 
   return (
     <div className="px-5 pt-4">
@@ -86,9 +90,9 @@ export default async function RankingsPage({
         ))}
       </div>
 
-      <ol className="mt-5 space-y-2 pb-10">
-        {ordered.map((item, index) => {
-          const band = scoreBand(item.score);
+      <RankingsList
+        kind={activeKind ?? null}
+        items={ordered.map((item) => {
           const fit = model?.byId.get(item.id) ?? null;
           const confidence =
             fit === null
@@ -98,39 +102,21 @@ export default async function RankingsPage({
                 : fit.comparisons >= 8
                   ? "medium"
                   : "low";
-          return (
-            <li key={item.id}>
-              <Link
-                href={`/app/item/${item.id}`}
-                className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-2.5 transition-colors hover:border-white/15"
-              >
-                <span className="grid w-6 shrink-0 place-items-center text-[16px] font-extrabold text-white/25">
-                  {index + 1}
-                </span>
-                <MediaArt kind={item.kind} title={item.title} genres={item.genres} className="h-12 w-12 rounded-lg" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[14px] font-semibold text-ink">{item.title}</p>
-                  <p className="truncate text-[11px] text-muted-2">
-                    {item.subtitle || MEDIA_KIND_LABELS[item.kind]}
-                    {item.year ? ` · ${item.year}` : ""} · {band.label}
-                  </p>
-                  {fit ? (
-                    <p className="truncate text-[10px] text-muted-2">
-                      {`model ${fit.personalScore.toFixed(1)}/10 · ±${(1.96 * fit.standardError).toFixed(2)} · ${fit.comparisons} cmp · ${confidence} confidence`}
-                    </p>
-                  ) : null}
-                </div>
-                <ScoreText score={item.score} className="text-[15px]" />
-              </Link>
-            </li>
-          );
+          return {
+            id: item.id,
+            kind: item.kind,
+            title: item.title,
+            subtitle: item.subtitle,
+            year: item.year,
+            genres: item.genres,
+            score: item.score,
+            bandLabel: scoreBand(item.score).label,
+            fitText: fit
+              ? `model ${fit.personalScore.toFixed(1)}/10 · ±${(1.96 * fit.standardError).toFixed(2)} · ${fit.comparisons} cmp · ${confidence} confidence`
+              : null,
+          };
         })}
-        {ordered.length === 0 ? (
-          <p className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 text-[13px] text-muted">
-            Nothing ranked in this category yet.
-          </p>
-        ) : null}
-      </ol>
+      />
     </div>
   );
 }

@@ -62,9 +62,15 @@ Also done:
 - Undo endpoint + "Undo last" control; restores stored Elo/counters and refits.
 - Community scores use Bayesian-style shrinkage with a confidence label.
 
+Done in this pass:
+- Manual order: the rankings screen has a reorder mode with drag and arrow
+  controls. A move saves the whole category order to `ranking_order` and writes
+  one `rating_events` row per title whose position changed; no `item_matchups`
+  rows are fabricated, so comparison counts and the model stay honest. A saved
+  order overrides the model order for that kind until the next reorder.
+
 Open:
 - "All" rankings view spanning kinds still uses Elo.
-- Manual drag mode that creates explicit manual events rather than fake comparisons.
 - Estimate `ν`/`λ` per user; add sub-category (genre) models.
 - Ranking history view ("why is A above B"): expose the comparison path.
 - Coordinated-vote detection for community rankings.
@@ -126,9 +132,9 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Implement manual drag reordering without fabricating comparison events.
-2. Add auth/comparison rate limiting and media-layer account deletion/export.
-3. Cold-start onboarding: pick interests and seed the first comparisons from them.
+1. Add auth/comparison rate limiting and media-layer account deletion/export.
+2. Cold-start onboarding: pick interests and seed the first comparisons from them.
+3. Make the "All" rankings view use the fitted model rather than raw Elo.
 
 ## Explicit non-goals for this pass
 

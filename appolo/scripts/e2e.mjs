@@ -147,6 +147,39 @@ await check("ratings persist and are ordered", () => {
   }
 });
 
+const movieIds = rankings.json.rankings.map((item) => item.id);
+const reversedOrder = [...movieIds].reverse();
+const reorder = await call("/api/rankings/order", {
+  method: "POST",
+  body: { kind: "movie", itemIds: reversedOrder },
+  cookie: alpha.cookie,
+});
+const reordered = await call("/api/rankings?kind=movie", { cookie: alpha.cookie });
+const partialOrder = await call("/api/rankings/order", {
+  method: "POST",
+  body: { kind: "movie", itemIds: reversedOrder.slice(0, 2) },
+  cookie: alpha.cookie,
+});
+await check("manual drag order is stored as explicit events, not matchups", () => {
+  assert.equal(reorder.status, 200, `reorder failed: ${reorder.text.slice(0, 160)}`);
+  assert.deepEqual(reorder.json.order, reversedOrder);
+  assert.ok(reorder.json.moved > 0);
+  assert.equal(reordered.json.rankings[0].id, reversedOrder[0]);
+  assert.equal(reordered.json.rankings.at(-1).id, reversedOrder.at(-1));
+  assert.equal(partialOrder.status, 400, "a partial order should be rejected");
+});
+
+const modelAfterReorder = await call("/api/rankings/model?kind=movie", { cookie: alpha.cookie });
+await check("reordering does not fabricate comparisons", () => {
+  assert.equal(modelAfterReorder.json.comparisons, 0);
+});
+
+const rankingsPage = await call("/app/rankings?kind=movie", { cookie: alpha.cookie });
+await check("rankings screen renders the reorder control for a saved order", () => {
+  assert.equal(rankingsPage.status, 200);
+  assert.match(rankingsPage.text, /Reorder/);
+});
+
 const [first, second] = sample;
 const tieVote = await call(`/api/rankings/${first.id}/vote`, {
   method: "POST",
