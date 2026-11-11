@@ -117,8 +117,8 @@ Done in this pass:
 - The For-you feed reranks greedily so the same kind or primary genre does
   not cluster, without dropping any candidate.
 
-Open:
-- A strict chronological Following mode.
+- A strict chronological Following mode: `/app?feed=following` renders only
+  followed accounts' reviews, newest edit first, without ranking or diversity.
 - Coordinated-vote detection for community rankings.
 - Recommendation dismiss controls and cold-start onboarding interests.
 
@@ -165,7 +165,7 @@ on failure.
 ## Immediate next three tasks
 
 1. Make the "All" rankings view use the fitted model rather than raw Elo.
-2. Add diversity reranking to the For-you feed.
+2. Add recommendation dismiss controls to the For-you feed.
 
 ## Explicit non-goals for this pass
 

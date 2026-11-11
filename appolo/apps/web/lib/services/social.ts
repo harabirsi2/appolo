@@ -1445,6 +1445,35 @@ export async function feedForYou(orgId: string, limit = 12): Promise<ReviewView[
   return attachEngagement(orgId, reviews);
 }
 
+/**
+ * Strict chronological Following feed: only reviews by accounts the viewer
+ * follows, newest edit first. No ranking, diversity or exploration is applied,
+ * so this is exactly what the people you follow posted, in order.
+ */
+export async function feedFollowing(orgId: string, limit = 12): Promise<ReviewView[]> {
+  const db = getDb();
+  const followed = await db
+    .select({ orgId: follows.followeeOrgId })
+    .from(follows)
+    .where(eq(follows.followerOrgId, orgId));
+  if (followed.length === 0) return [];
+
+  const rows = await db
+    .select(reviewSelect)
+    .from(itemRatings)
+    .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
+    .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
+    .where(inArray(itemRatings.orgId, followed.map((row) => row.orgId)))
+    .orderBy(desc(itemRatings.updatedAt))
+    .limit(Math.max(limit * 3, limit));
+
+  const reviews = rows
+    .map(toReview)
+    .filter((review) => Boolean(review.text) || Boolean(review.videoUrl) || review.tags.length > 0)
+    .slice(0, limit);
+  return attachEngagement(orgId, reviews);
+}
+
 /* ------------------------------------------------------------------ */
 /* pod editing                                                         */
 /* ------------------------------------------------------------------ */

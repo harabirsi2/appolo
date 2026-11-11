@@ -7,6 +7,7 @@ import { ratingStreak } from "@/lib/services/streaks";
 import { popularThisWeek, weeklyMovers } from "@/lib/services/rankings";
 import {
   ensureProfile,
+  feedFollowing,
   feedForYou,
   getProfileByOrgId,
   podsForProfile,
@@ -30,8 +31,14 @@ function rankTone(index: number): string {
   return "bg-black/70 text-white/60";
 }
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ feed?: string }>;
+}) {
   const session = await requireSession();
+  const { feed: feedMode } = await searchParams;
+  const following = feedMode === "following";
   const profile =
     (await getProfileByOrgId(session.org.id)) ??
     (await ensureProfile(session.org.id, session.org.name, session.org.slug));
@@ -39,7 +46,7 @@ export default async function HomePage() {
   const [stats, top, feed, suggestions, pods, popular, unread, streak, movers] = await Promise.all([
     tasteStats(session.org.id),
     topFive(session.org.id),
-    feedForYou(session.org.id, 6),
+    following ? feedFollowing(session.org.id, 6) : feedForYou(session.org.id, 6),
     suggestedProfiles(session.org.id, 4),
     podsForProfile(profile.orgId, profile.username, profile.displayName),
     popularThisWeek(8),
@@ -242,10 +249,41 @@ export default async function HomePage() {
       </section>
 
       <section className="mt-8">
-        <SectionHeader title="For you" href="/app/browse" action="Discover" />
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-ink">
+            {following ? "Following" : "For you"}
+          </h2>
+          <div className="flex items-center gap-1">
+            <Link
+              href="/app"
+              className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                !following
+                  ? "border-brand/40 bg-brand/15 text-brand"
+                  : "border-white/10 bg-white/5 text-muted hover:text-ink"
+              }`}
+            >
+              For you
+            </Link>
+            <Link
+              href="/app?feed=following"
+              className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                following
+                  ? "border-brand/40 bg-brand/15 text-brand"
+                  : "border-white/10 bg-white/5 text-muted hover:text-ink"
+              }`}
+            >
+              Following
+            </Link>
+            <Link href="/app/browse" className="ml-1 text-[11px] text-muted-2 hover:text-ink">
+              Discover
+            </Link>
+          </div>
+        </div>
         {feed.length === 0 ? (
           <p className="card-surface rounded-2xl p-4 text-[13px] text-muted">
-            Follow someone or rate a few titles and your feed will fill in.
+            {following
+              ? "Follow someone and their reviews will appear here, newest first."
+              : "Follow someone or rate a few titles and your feed will fill in."}
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-2.5">

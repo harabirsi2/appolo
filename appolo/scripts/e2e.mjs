@@ -252,6 +252,23 @@ await check("home feed ranks followed reviews and explains why", () => {
   assert.match(homeFeed.text, /From someone you follow/);
 });
 
+const newerReviewText = `E2E newer ${stamp}: chronological check.`;
+const secondReview = await call(`/api/rankings/${second.id}/review`, {
+  method: "POST",
+  body: { text: newerReviewText, tags: ["e2e"] },
+  cookie: alpha.cookie,
+});
+const followingFeed = await call("/app?feed=following", { cookie: beta.cookie });
+await check("following feed shows followed reviews newest-first", () => {
+  assert.equal(secondReview.status, 200);
+  assert.equal(followingFeed.status, 200);
+  assert.match(followingFeed.text, /Following/);
+  const newerAt = followingFeed.text.indexOf(newerReviewText);
+  const olderAt = followingFeed.text.indexOf(reviewText);
+  assert.ok(newerAt >= 0 && olderAt >= 0, "reviews missing from the following feed");
+  assert.ok(newerAt < olderAt, "following feed is not newest-first");
+});
+
 const compare = await call(`/app/compare/${alpha.username}`, { cookie: beta.cookie });
 await check("taste comparison renders with evidence and confidence", () => {
   assert.equal(compare.status, 200);
