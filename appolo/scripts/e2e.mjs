@@ -102,6 +102,27 @@ await check("two accounts get distinct public profiles", () => {
   assert.notEqual(alpha.username, beta.username);
 });
 
+const onboarding = await call("/app/onboarding", { cookie: alpha.cookie });
+const badInterests = await call("/api/onboarding/interests", {
+  method: "POST",
+  body: { picks: [{ kind: "not-a-kind", genre: "Drama" }] },
+  cookie: alpha.cookie,
+});
+const savedInterests = await call("/api/onboarding/interests", {
+  method: "POST",
+  body: { picks: [{ kind: "movie", genre: "Drama" }, { kind: "movie", genre: "Action" }] },
+  cookie: alpha.cookie,
+});
+const onboardingAfter = await call("/app/onboarding", { cookie: alpha.cookie });
+await check("onboarding saves interests and surfaces a starter comparison", () => {
+  assert.equal(onboarding.status, 200);
+  assert.match(onboarding.text, /Pick what you love/);
+  assert.equal(badInterests.status, 400);
+  assert.equal(savedInterests.status, 200);
+  assert.equal(savedInterests.json.saved, 2);
+  assert.match(onboardingAfter.text, /Start comparing/);
+});
+
 const catalog = await call("/api/catalog?kind=movie&limit=6", { cookie: alpha.cookie });
 const items = catalog.json?.items ?? [];
 await check("catalog returns at least four movie titles", () => {

@@ -138,9 +138,16 @@ export default async function HomePage() {
             <p className="mx-auto mt-1 max-w-[280px] text-[13px] text-muted">
               Play a few quick “which is better?” matchups and your top five builds itself.
             </p>
-            <Link href="/app/rate" className="mt-4 inline-block">
-              <Button size="sm">Start rating</Button>
-            </Link>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Link href="/app/rate">
+                <Button size="sm">Start rating</Button>
+              </Link>
+              <Link href="/app/onboarding">
+                <Button size="sm" variant="secondary">
+                  Pick interests
+                </Button>
+              </Link>
+            </div>
           </div>
         ) : (
           <div className="snap-rail no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">

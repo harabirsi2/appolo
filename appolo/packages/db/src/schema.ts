@@ -1222,6 +1222,21 @@ export const profiles = pgTable(
   }),
 );
 
+/** Genres a profile picked when starting out, per media kind. */
+export const profileInterests = pgTable(
+  "profile_interests",
+  {
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    kind: mediaKindEnum("kind").notNull(),
+    genre: text("genre").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.orgId, t.kind, t.genre] }),
+    orgKindIdx: index("profile_interests_org_kind_idx").on(t.orgId, t.kind),
+  }),
+);
+
 export const follows = pgTable(
   "follows",
   {

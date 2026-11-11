@@ -124,7 +124,7 @@ export async function signupAction(formData: FormData): Promise<void> {
     redirect(`/signup?error=${encodeURIComponent(result.error)}`);
   }
 
-  redirect("/app");
+  redirect("/app/onboarding");
 }
 
 export async function loginAction(formData: FormData): Promise<void> {

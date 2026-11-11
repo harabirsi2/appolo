@@ -98,6 +98,12 @@ Done in this pass:
   a per-card explanation ("From someone you follow", "Matches your taste", …).
 - Community ranking shrinkage and confidence labels.
 
+Done in this pass:
+- Cold-start onboarding: after signup the app opens `/app/onboarding`, where the
+  user picks genres per media kind. Interests are stored in `profile_interests`,
+  and the page offers a starter title from those genres so the first comparison
+  is seeded from real picks rather than fabricated ratings.
+
 Open:
 - Diversity reranking and a strict chronological Following mode.
 - Coordinated-vote detection for community rankings.
@@ -145,9 +151,8 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Add auth/comparison rate limiting and media-layer account deletion/export.
-2. Cold-start onboarding: pick interests and seed the first comparisons from them.
-3. Make the "All" rankings view use the fitted model rather than raw Elo.
+1. Make the "All" rankings view use the fitted model rather than raw Elo.
+2. Finish the asynchronous catalog-provider enrichment.
 
 ## Explicit non-goals for this pass
 
