@@ -162,9 +162,12 @@ Done in this pass:
   counters as sign-in: matchup fetches 240/min, votes 120/min and reactions
   60/min, each returning 429 with a `retry-after` header. Limits sit above human
   tapping speed and stop scripted bursts.
+- Browser-driven visual checks (`pnpm visual`) sign in as the demo account, visit the
+  six main screens, fail on page/console/5xx errors or an empty screen, and save
+  viewport screenshots under `scripts/visual-output/` for review.
 
 Open:
-- Browser-driven (Playwright) visuals; the HTTP e2e suite covers flows, not pixels.
+- Nothing queued for this phase.
 
 Done: `scripts/e2e.mjs` (`pnpm e2e`) drives the running app with fetch only and covers
 health, auth guards, signup, ratings, tie vote, model rebuild, undo, follow, follow-ranked
@@ -173,7 +176,7 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Add browser-driven (Playwright) visual checks for the main screens.
+1. Add pixel-diff baselines for the Playwright visual snapshots.
 
 ## Explicit non-goals for this pass
 

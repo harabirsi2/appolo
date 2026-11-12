@@ -17,3 +17,5 @@ coverage/
 
 .DS_Store
 Thumbs.db
+# screenshots from scripts/visual.mjs
+scripts/visual-output/
