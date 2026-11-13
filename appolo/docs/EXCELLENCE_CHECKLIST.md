@@ -114,7 +114,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 | Indexing for real query shapes | Done | trigram + GIN indexes (`0013_search_indexes.sql`), rating indexes |
 | RLS / tenant isolation | Done | `withOrg`, RLS policies, `db:rls-test` |
 | Pagination | Done | comments paginated; catalog/feed limits |
-| Seed integrity (no fabricated ratings) | Done | `packages/db/src/seed.ts` — 338 titles, covers only |
+| Seed integrity (no fabricated ratings) | Done | `packages/db/src/seed.ts` — 1,180 titles, covers only |
 
 ## 10. Security and reliability
 

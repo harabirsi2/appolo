@@ -2,6 +2,7 @@ import "dotenv/config";
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import { fileURLToPath } from "node:url";
 import { eq, and, sql } from "drizzle-orm";
 import { hashPassword, sha256, DEFAULT_REVIEW_TEMPLATES } from "@appolo/core";
@@ -17,6 +18,8 @@ for (const candidate of [path.join(pkgRoot, ".env"), path.join(pkgRoot, "..", ".
 
 import { getAdminDb, withOrgAdmin } from "./client";
 import * as schema from "./schema";
+import { EXPANSION_MOVIES, EXPANSION_TV, EXPANSION_GAMES } from "./catalog-expansion-a";
+import { EXPANSION_MUSIC, EXPANSION_PODCASTS, EXPANSION_BOOKS } from "./catalog-expansion-b";
 const {
   orgs,
   locations,
@@ -85,7 +88,7 @@ type CatalogSeed = {
  * (title, creator, year) so the app works offline; real provider adapters can
  * replace this later behind env keys. No provider content is copied.
  */
-const MEDIA_CATALOG: CatalogSeed[] = [
+const BASE_CATALOG: CatalogSeed[] = [
   // movies
   { kind: "movie", title: "The Godfather", subtitle: "Francis Ford Coppola", year: 1972, tags: ["crime", "drama"], elo: 1700, matches: 14, wins: 11, losses: 3 },
   { kind: "movie", title: "Parasite", subtitle: "Bong Joon-ho", year: 2019, tags: ["thriller", "drama"] },
@@ -433,6 +436,44 @@ const MEDIA_CATALOG: CatalogSeed[] = [
 
 ];
 
+/** Parse pipe-delimited expansion rows into catalog seeds. */
+function parseExpansionRows(rows: string[], kind: CatalogSeed["kind"]): CatalogSeed[] {
+  return rows.map((row) => {
+    const [title, subtitle, year, genres = ""] = row.split("|");
+    const tags = genres.split(",").map((genre) => genre.trim()).filter(Boolean);
+    return {
+      kind,
+      title: (title ?? "").trim(),
+      subtitle: (subtitle ?? "").trim(),
+      year: Number(year),
+      tags,
+      genres: tags,
+    };
+  });
+}
+
+const EXPANSION_CATALOG: CatalogSeed[] = [
+  ...parseExpansionRows(EXPANSION_MOVIES, "movie"),
+  ...parseExpansionRows(EXPANSION_TV, "tv"),
+  ...parseExpansionRows(EXPANSION_MUSIC, "music"),
+  ...parseExpansionRows(EXPANSION_PODCASTS, "podcast"),
+  ...parseExpansionRows(EXPANSION_BOOKS, "book"),
+  ...parseExpansionRows(EXPANSION_GAMES, "game"),
+];
+
+/** One row per kind/title: Postgres rejects duplicate conflict keys in one insert. */
+function dedupeCatalog(rows: CatalogSeed[]): CatalogSeed[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = `${row.kind}:${slugify(row.title)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+const MEDIA_CATALOG: CatalogSeed[] = dedupeCatalog([...BASE_CATALOG, ...EXPANSION_CATALOG]);
+
 /** Short, original overview blurbs (factual metadata only). */
 const DESCRIPTIONS: Record<string, string> = {
   "The Godfather": "Francis Ford Coppola's crime saga follows the Corleone family across a decade of loyalty, power, and loss.",
@@ -654,7 +695,12 @@ async function fetchCoverUrl(item: CoverSeed): Promise<string | null> {
         item.kind === "game" ? [" (video game)"] : [" (film)", " (movie)"];
       return await wikipediaCover([
         ...(item.year
-          ? [`${item.title} (${item.year} film)`, `${item.title} (${item.year})`]
+          ? [
+              item.kind === "game"
+                ? `${item.title} (${item.year} video game)`
+                : `${item.title} (${item.year} film)`,
+              `${item.title} (${item.year})`,
+            ]
           : []),
         ...suffixes.map((suffix) => item.title + suffix),
         item.title,
@@ -703,8 +749,17 @@ async function cacheCover(row: CoverSeed, remoteUrl: string): Promise<string | n
       if (!res.ok) return null;
       const bytes = Buffer.from(await res.arrayBuffer());
       if (bytes.length < 1000) return null;
+      // Normalise at download time: provider originals can be several MB, and
+      // every UI slot renders at 728 px or less.
+      const resized = await sharp(bytes)
+        .rotate()
+        .resize(720, 720, { fit: "inside", withoutEnlargement: true });
+      const normalized = ext === "png"
+        ? await resized.png({ compressionLevel: 9, palette: true }).toBuffer()
+        : await resized.jpeg({ quality: 80, mozjpeg: true }).toBuffer();
+      if (normalized.length < 1000) return null;
       await mkdir(COVERS_DIR, { recursive: true });
-      await writeFile(file, bytes);
+      await writeFile(file, normalized);
       return `/covers/${filename}`;
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
