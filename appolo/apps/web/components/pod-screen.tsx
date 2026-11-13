@@ -30,7 +30,7 @@ export function PodScreen({ pod, viewerUsername }: { pod: PodDetail; viewerUsern
               <span className="grid w-6 shrink-0 place-items-center text-[18px] font-extrabold text-white/25">
                 {index + 1}
               </span>
-              <MediaArt kind={entry.kind} title={entry.title} sizes="56px" className="h-14 w-14 rounded-lg" />
+              <MediaArt kind={entry.kind} title={entry.title} imageUrl={entry.imageUrl} sizes="56px" className="h-14 w-14 rounded-lg" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[14px] font-semibold text-ink">{entry.title}</p>
                 <p className="truncate text-[11px] text-muted-2">

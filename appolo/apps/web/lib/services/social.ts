@@ -66,6 +66,7 @@ export interface ReviewView {
   itemId: string;
   itemTitle: string;
   itemSubtitle: string;
+  imageUrl: string | null;
   kind: MediaKind;
   year: number | null;
   score: number;
@@ -475,6 +476,7 @@ function toReview(row: {
     itemId: row.item.id,
     itemTitle: row.item.title,
     itemSubtitle: row.item.subtitle,
+    imageUrl: row.item.imageUrl ?? null,
     kind: row.item.kind,
     year: row.item.year ?? null,
     score: scoreForElo(row.rating.elo),

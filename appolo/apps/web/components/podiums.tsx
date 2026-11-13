@@ -447,7 +447,7 @@ export function PodRow({
     description: string | null;
     count: number;
     ownerUsername: string;
-    items: Array<{ id: string; kind: MediaKind; title: string }>;
+    items: Array<{ id: string; kind: MediaKind; title: string; imageUrl?: string | null }>;
   };
 }) {
   return (
@@ -457,7 +457,7 @@ export function PodRow({
     >
       <div className="flex gap-1.5">
         {pod.items.slice(0, 3).map((item) => (
-          <MediaArt key={item.id} kind={item.kind} title={item.title} sizes="64px" className="aspect-square flex-1 rounded-md border-0" />
+          <MediaArt key={item.id} kind={item.kind} title={item.title} imageUrl={item.imageUrl} sizes="64px" className="aspect-square flex-1 rounded-md border-0" />
         ))}
       </div>
       <div>

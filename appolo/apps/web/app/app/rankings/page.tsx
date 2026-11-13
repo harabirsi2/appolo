@@ -126,6 +126,7 @@ export default async function RankingsPage({
             year: item.year,
             genres: item.genres,
             score: item.score,
+            imageUrl: item.imageUrl,
             bandLabel: scoreBand(item.score).label,
             fitText: fit
               ? `model ${fit.personalScore.toFixed(1)}/10 · ±${(1.96 * fit.standardError).toFixed(2)} · ${fit.comparisons} cmp · ${confidence} confidence`

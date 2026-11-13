@@ -113,7 +113,7 @@ export function PodEditor({ pod: initial }: { pod: PodDetail }) {
         <ul className="space-y-2">
           {pod.entries.map((entry, index) => (
             <li key={entry.id} className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-2.5">
-              <MediaArt kind={entry.kind} title={entry.title} sizes="40px" className="h-10 w-10 rounded-lg" />
+              <MediaArt kind={entry.kind} title={entry.title} imageUrl={entry.imageUrl} sizes="40px" className="h-10 w-10 rounded-lg" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13px] font-medium text-ink">{entry.title}</p>
                 <p className="truncate text-[11px] text-muted-2">{entry.subtitle}</p>

@@ -26,7 +26,7 @@ export default async function NewPodPage({
         Group anything — a top five, a mood, a year in review — and share the link.
       </p>
       <CreatePodForm
-        initialItem={item ? { id: item.id, title: item.title, kind: item.kind } : null}
+        initialItem={item ? { id: item.id, title: item.title, kind: item.kind, imageUrl: item.imageUrl } : null}
       />
     </div>
   );

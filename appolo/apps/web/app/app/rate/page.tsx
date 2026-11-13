@@ -96,7 +96,7 @@ export default async function RatePage({
               <li key={item.id}>
                 <Link href={`/app/rate/${item.id}`} className="group block">
                   <div className="relative">
-                    <MediaArt kind={item.kind} title={item.title} genres={item.genres} className="aspect-square w-full rounded-lg" />
+                    <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} sizes="(max-width: 768px) 30vw, 200px" className="aspect-square w-full rounded-lg" />
                     {ratedSet.has(item.id) ? (
                       <span className="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-black/70 text-[10px] text-brand backdrop-blur">
                         ✓

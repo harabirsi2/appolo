@@ -15,6 +15,7 @@ interface RatingSide {
   title: string;
   subtitle: string;
   year: number | null;
+  imageUrl: string | null;
   score: number;
   reviewText: string;
   reviewTags: string[];
@@ -228,7 +229,7 @@ export function FinishRating({
       </div>
 
       <div className="mt-4 flex flex-col items-center text-center">
-        <MediaArt kind={item.kind} title={item.title} sizes="156px" className="aspect-square w-[156px] rounded-2xl shadow-xl" />
+        <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} sizes="156px" className="aspect-square w-[156px] rounded-2xl shadow-xl" />
         <h1 className="mt-4 text-[24px] font-bold leading-tight tracking-tight text-ink">{item.title}</h1>
         <p className="mt-1 text-[12px] text-muted">
           {[item.subtitle, kindLabel, item.year ? String(item.year) : null].filter(Boolean).join(" · ")}

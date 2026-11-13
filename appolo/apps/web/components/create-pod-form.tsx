@@ -9,7 +9,7 @@ import type { MediaKind } from "@appolo/core/ranking";
 export function CreatePodForm({
   initialItem,
 }: {
-  initialItem: { id: string; title: string; kind: MediaKind } | null;
+  initialItem: { id: string; title: string; kind: MediaKind; imageUrl: string | null } | null;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState("");
@@ -78,7 +78,7 @@ export function CreatePodForm({
 
       {initialItem ? (
         <div className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-3">
-          <MediaArt kind={initialItem.kind} title={initialItem.title} sizes="48px" className="h-12 w-12 rounded-lg" />
+          <MediaArt kind={initialItem.kind} title={initialItem.title} imageUrl={initialItem.imageUrl} sizes="48px" className="h-12 w-12 rounded-lg" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-medium text-ink">{initialItem.title}</p>
             <p className="text-[11px] text-muted-2">Starts this pod</p>

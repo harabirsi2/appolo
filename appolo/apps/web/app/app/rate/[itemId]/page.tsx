@@ -57,6 +57,7 @@ export default async function RateItemPage({ params }: Params) {
         title: item.title,
         subtitle: item.subtitle,
         year: item.year,
+        imageUrl: item.imageUrl,
         score: rating?.score ?? matchup.item.score,
         reviewText: rating?.reviewText ?? "",
         reviewTags: rating?.reviewTags ?? [],
