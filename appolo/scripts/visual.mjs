@@ -37,6 +37,8 @@ const MIN_SCREENSHOT_BYTES = 20_000;
 const MAX_DIFF_RATIO = 0.001;
 
 const SCREENS = [
+  { name: "landing", path: "/", title: "Appolo", heading: "anything", public: true },
+  { name: "login", path: "/login", title: "Sign in", heading: "Welcome back", public: true },
   { name: "home", path: "/app", title: "Home", heading: "Hey, Demo" },
   { name: "rankings", path: "/app/rankings?kind=movie", title: "Rankings", heading: "Rankings" },
   { name: "profile", path: "/app/profile", title: "Profile", heading: "Demo Profile" },
@@ -89,11 +91,9 @@ const browser = await chromium.launch({ channel: "chromium-headless-shell" });
 const failures = [];
 
 try {
-  const context = await browser.newContext({
-    viewport: { width: 1280, height: 900 },
-    colorScheme: "dark",
-    deviceScaleFactor: 1,
-  });
+  const viewport = { width: 1280, height: 900 };
+  const contextOptions = { viewport, colorScheme: "dark", deviceScaleFactor: 1 };
+  const context = await browser.newContext(contextOptions);
 
   // context.request shares its cookie jar with the pages, so this session is
   // already signed in when the first screen loads.
@@ -105,27 +105,35 @@ try {
   }
 
   const page = await context.newPage();
+  // Public screens get a fresh context so /login is not redirected away by the
+  // signed-in session.
+  const publicContext = await browser.newContext(contextOptions);
+  const publicPage = await publicContext.newPage();
+
   let pageErrors = [];
   let consoleErrors = [];
   let serverErrors = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
-  page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
-  });
-  page.on("response", (response) => {
-    if (response.status() >= 500) serverErrors.push(`${response.status()} ${new URL(response.url()).pathname}`);
-  });
+  for (const target of [page, publicPage]) {
+    target.on("pageerror", (error) => pageErrors.push(error.message));
+    target.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+    target.on("response", (response) => {
+      if (response.status() >= 500) serverErrors.push(`${response.status()} ${new URL(response.url()).pathname}`);
+    });
+  }
 
   for (const screen of SCREENS) {
     pageErrors = [];
     consoleErrors = [];
     serverErrors = [];
     const problems = [];
-    const main = page.locator("main").first();
+    const activePage = screen.public ? publicPage : page;
+    const main = activePage.locator("main").first();
     let response = null;
 
     try {
-      response = await page.goto(`${BASE}${screen.path}`, { waitUntil: "networkidle", timeout: 45_000 });
+      response = await activePage.goto(`${BASE}${screen.path}`, { waitUntil: "networkidle", timeout: 45_000 });
       await main.waitFor({ state: "visible", timeout: 15_000 });
       await main
         .getByRole("heading", { level: 1, name: screen.heading })
@@ -138,7 +146,7 @@ try {
     let pixelNote = "";
     let saved = false;
     try {
-      await page.screenshot({ path: file, animations: "disabled" });
+      await activePage.screenshot({ path: file, animations: "disabled" });
       saved = true;
       const size = (await stat(file)).size;
       if (size < MIN_SCREENSHOT_BYTES) problems.push(`screenshot looks blank (${size} bytes)`);
@@ -156,7 +164,7 @@ try {
     }
 
     if (!response || !response.ok()) problems.push(`page returned ${response?.status() ?? "no response"}`);
-    const title = await page.title().catch(() => "");
+    const title = await activePage.title().catch(() => "");
     if (!title.includes(screen.title)) problems.push(`title "${title}" does not include "${screen.title}"`);
     const markup = (await main.textContent().catch(() => "")) ?? "";
     if (markup.trim().length < 40) problems.push("main content looks empty");

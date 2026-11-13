@@ -162,8 +162,9 @@ Done in this pass:
   counters as sign-in: matchup fetches 240/min, votes 120/min and reactions
   60/min, each returning 429 with a `retry-after` header. Limits sit above human
   tapping speed and stop scripted bursts.
-- Browser-driven visual checks (`pnpm visual`) sign in as the demo account, visit the
-  six main screens, fail on page/console/5xx errors or an empty screen, save viewport
+- Browser-driven visual checks (`pnpm visual`) visit the public landing and login
+  screens in a cookie-free context, sign in as the demo account for the six app
+  screens, fail on page/console/5xx errors or an empty screen, save viewport
   screenshots under `scripts/visual-output/`, and pixel-diff them against committed
   baselines in `scripts/visual-baselines/` (0.1% tolerance; `VISUAL_UPDATE=1 pnpm
   visual` accepts intentional changes and writes a `.diff.png` for review).
@@ -178,7 +179,7 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Extend the visual checks and baselines to the public landing and login screens.
+1. Add a cross-platform `pnpm verify` that runs typecheck, e2e and visual against the running app.
 
 ## Explicit non-goals for this pass
 
