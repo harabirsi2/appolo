@@ -246,6 +246,9 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
 | `pnpm smoke` | HTTP end-to-end test (server must be running) |
 | `pnpm run ci` | install → typecheck → migrate → seed → RLS test → build |
 
+> Install the browser once with `pnpm exec playwright install chromium` before using
+> `pnpm visual` or `pnpm verify`.
+
 > Use `pnpm run ci`, not `pnpm ci` — `ci` is a pnpm builtin command.
 
 ## Repo layout
