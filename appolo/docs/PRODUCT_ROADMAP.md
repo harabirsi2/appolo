@@ -168,6 +168,9 @@ Done in this pass:
   screenshots under `scripts/visual-output/`, and pixel-diff them against committed
   baselines in `scripts/visual-baselines/` (0.1% tolerance; `VISUAL_UPDATE=1 pnpm
   visual` accepts intentional changes and writes a `.diff.png` for review).
+- `pnpm verify` runs a preflight health check (which queries the database), then
+  typecheck, the HTTP e2e suite and the visual suite, against an app that is
+  already running.
 
 Open:
 - Nothing queued for this phase.
@@ -179,7 +182,7 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Add a cross-platform `pnpm verify` that runs typecheck, e2e and visual against the running app.
+1. Add the `pnpm verify` run to the documented local CI path.
 
 ## Explicit non-goals for this pass
 

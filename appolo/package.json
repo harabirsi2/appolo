@@ -22,7 +22,9 @@
     "db:down": "powershell -ExecutionPolicy Bypass -File scripts/dev-db.ps1 -Stop",
     "smoke": "powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1",
     "e2e": "node scripts/e2e.mjs",
+    "preflight": "node scripts/preflight.mjs",
     "visual": "node scripts/visual.mjs",
+    "verify": "pnpm preflight && pnpm typecheck && pnpm e2e && pnpm visual",
     "ci": "powershell -ExecutionPolicy Bypass -File scripts/ci.ps1"
   },
   "devDependencies": {
