@@ -91,7 +91,6 @@ pinned review, privacy-ish profile layout.
 
 Open:
 - Private accounts and follow requests; block/mute UI enforcement across every query.
-- Comment pagination and spam rate limits beyond auth-level limits.
 - Collection collaboration permissions and invitations.
 - Notification preferences, grouping and dedupe guarantees under retries.
 
@@ -132,7 +131,6 @@ Done in this pass:
 
 - Icon-only controls (navigation, notifications, dismiss, reactions and reorder
   arrows) expose `aria-label` names, and decorative icons are `aria-hidden`.
-- Coordinated-vote detection for community rankings.
 
 ## Phase 6 — Integrations and sharing (Partial)
 
@@ -182,7 +180,7 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Add the `pnpm verify` run to the documented local CI path.
+1. Add a coordinated-vote signal to community rankings (reviewer pairs voting in lockstep), with tests in `packages/core`.
 
 ## Explicit non-goals for this pass
 

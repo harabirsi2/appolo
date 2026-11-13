@@ -187,7 +187,10 @@ pnpm test                 # packages/core unit tests (30)
 pnpm --filter @appolo/web build
 # with a PostgreSQL instance:
 pnpm db:migrate && pnpm db:seed && pnpm db:rls-test
+pnpm preflight            # health + database check
 pnpm e2e                  # HTTP e2e against a running server (creates test accounts)
+pnpm visual               # Playwright screens + pixel-diff baselines
+pnpm verify               # preflight + typecheck + e2e + visual
 pnpm smoke                # PowerShell, needs a running server
 ```
 
