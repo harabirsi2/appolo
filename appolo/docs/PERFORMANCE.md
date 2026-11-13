@@ -185,8 +185,8 @@ Prioritised gaps:
    grows.
 5. **No response caching** for catalog/popular reads, which are shared across
    tenants and repeated on every navigation.
-6. **E2E leaves accounts behind** in the dev database. A cleanup step or
-   transaction-scoped fixtures would keep local data predictable.
+6. **E2E cleanup (resolved).** The suite now deletes every test account it
+   creates, so community rankings and local data stay predictable.
 7. **Documentation drift**: test count (18 vs 31), lint claim, and
    `ARCHITECTURE.md` describing a broader CRM stack than is currently wired.
 

@@ -395,5 +395,16 @@ await check("account deletion removes the user, workspace and media data", () =>
   assert.equal(alphaLoginAfter.status, 200, "deleting one account removed another");
 });
 
+// Leave no test accounts behind: their ratings would otherwise show up in
+// community rankings and make the visual snapshots drift between runs.
+const alphaDeleted = await call("/api/account/delete", {
+  method: "POST",
+  body: { password, confirm: "DELETE" },
+  cookie: alpha.cookie,
+});
+await check("e2e cleans up its remaining test account", () => {
+  assert.equal(alphaDeleted.status, 200, `alpha delete failed: ${alphaDeleted.text.slice(0, 160)}`);
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) process.exitCode = 1;
