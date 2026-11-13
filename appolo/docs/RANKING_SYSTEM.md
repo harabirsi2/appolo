@@ -126,6 +126,21 @@ nested transaction is required.
 - Community scores are shrunk toward a neutral prior (see `community.ts`) before
   they are shown publicly, with a confidence label.
 
+## 5b. Coordinated-vote detection
+
+Reviewer pairs are compared across every title they both rated. A pair is
+flagged when it shares at least **5** titles and agrees within **0.5** points on
+at least **90%** of them (`packages/core/src/coordination.ts`). Each flagged
+vote then carries **half weight** in community shrinkage, so coordination lowers
+confidence instead of deleting anyone's opinion.
+
+- The detector is conservative: small communities share titles by nature, so a
+  few coincidental agreements never flag.
+- It reports the pair, shared count, agreement and a 0–1 suspicion score rather
+  than making an accusation.
+- `catalogLeaderboard` runs it over the per-profile votes behind the items on the
+  page and exposes `suspicious` and `coordination` on each community item.
+
 ## 6. Tests
 
 `packages/core/src/ranking-model.test.ts` (11 tests) covers:
@@ -142,8 +157,7 @@ nested transaction is required.
 - entropy peaks at an even matchup;
 - selection prefers an uncertain, unshown opponent and avoids an obvious one.
 
-Run with `pnpm test` (uses `tsx --test`, so Node 20+ works). Including
-`community.test.ts`, the suite is 24 tests.
+Run with `pnpm test` (uses `tsx --test`, so Node 20+ works). Including community, coordination and taste tests, the core suite is 44 tests.
 
 ## 7. Known limitations
 
@@ -153,9 +167,7 @@ Run with `pnpm test` (uses `tsx --test`, so Node 20+ works). Including
   with no shared titles it is the only signal and is labelled as such.
 - The fit is per media kind only; sub-category (genre) models and per-collection
   models are not implemented.
-- Community scores now use fixed Bayesian-style shrinkage (`packages/core/src/community.ts`),
-  but coordinated-voting detection and per-item robust aggregation are not implemented.
-- No undo endpoint yet; because comparisons are durable events, undo can be added by
-  appending a reversing event or deleting a row and refitting — no schema change
-  needed.
+- Community scores use fixed Bayesian-style shrinkage and coordinated-vote down-weighting;
+  per-item robust aggregation beyond that is not implemented.
+- Undo exists and is covered by e2e; it restores Elo/counters and drops the matchup row.
 - The "All" rankings view still orders by Elo; only a specific media kind uses θ.

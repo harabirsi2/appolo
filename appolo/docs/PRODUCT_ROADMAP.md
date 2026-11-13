@@ -80,10 +80,14 @@ Done in this pass:
   comparable 0–10 expected-wins score instead of raw Elo, and shows the combined
   comparison count.
 
+Done in this pass:
+- Coordinated-vote detection (`packages/core/src/coordination.ts`): reviewer
+  pairs with sustained near-identical scores across ≥5 shared titles are
+  flagged, and their votes carry half weight in community shrinkage.
+
 Open:
 - Estimate `ν`/`λ` per user; add sub-category (genre) models.
 - Ranking history view ("why is A above B"): expose the comparison path.
-- Coordinated-vote detection for community rankings.
 
 ## Phase 4 — Social system (Partial)
 
@@ -187,7 +191,9 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Add a coordinated-vote signal to community rankings (reviewer pairs voting in lockstep), with tests in `packages/core`.
+1. Enforce block/mute and private accounts at the query layer.
+2. Add a CSRF/origin guard for mutating route handlers.
+3. Record a change log entry and keep `docs/EXCELLENCE_CHECKLIST.md` current.
 
 ## Explicit non-goals for this pass
 

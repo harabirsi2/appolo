@@ -212,7 +212,7 @@ export default async function BrowsePage({
                 key={twin.profile.orgId}
                 className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-3"
               >
-                <Link href={`/${twin.profile.username}`} className="shrink-0">
+                <Link href={`/${twin.profile.username}`} aria-label={`View ${twin.profile.displayName}'s profile`} className="shrink-0">
                   <Avatar name={twin.profile.displayName} hue={twin.profile.avatarHue} size={40} />
                 </Link>
                 <div className="min-w-0 flex-1">

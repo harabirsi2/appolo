@@ -1,211 +1,120 @@
-# Appolo — Feature Map
+# Appolo — Feature inventory
 
-Clean-room feature map for a Podium-class reputation & messaging platform.
-Everything below is derived from **publicly visible product information** (marketing
-pages, help centers, public docs, app store listings) and generic industry practice.
-No Podium source code, private API, or authenticated UI was used.
+The product is a taste-ranking platform: you rate what you have seen, heard or
+read through pairwise comparisons, and Appolo turns those choices into a
+personal ranking, a public profile and a shared catalog. This file describes
+what the application in this repository actually ships.
 
-**Scope:** reviews + messaging + AI + contacts + reporting + listings.
-**Explicitly out of scope:** payments, financing, wallet, loans, card processing.
-
-Legend: **B** = build in-house · **I** = integrate a provider · **D** = defer · **X** = excluded.
+Legend: **Shipped** · **Partial** · **Not built**
 
 ---
 
-## 1. Product pillars
+## 1. Catalog
 
-| # | Pillar | What it does | Why it matters |
-|---|--------|--------------|----------------|
-| P1 | **Reviews** | Ask for reviews, route customers to the right platform, manage and reply to every review in one inbox | Core reputation loop; primary acquisition wedge |
-| P2 | **Messaging** | Shared team inbox across SMS, webchat, email, social DMs | Where review requests and leads actually happen |
-| P3 | **AI Employee** | 24/7 answering, qualification, booking, reminders, re-engagement | The current market differentiator |
-| P4 | **Contacts / CRM** | One profile per customer with a full timeline and consent state | Makes P1–P3 coherent |
-| P5 | **Reporting** | Volume, rating, response rate, conversion, team and AI performance | Retention + upsell proof |
-| P6 | **Listings & web** | Google Business Profile management, review widget, optional site builder | Feeds the review funnel |
+| Area | Status | Detail |
+|---|---|---|
+| Shared catalog | Shipped | 1,180 titles: 357 movies, 173 TV, 204 albums, 80 podcasts, 196 books, 170 games |
+| Metadata | Shipped | Title, creator/author/studio, year, genres, descriptions where curated, tags |
+| Cover art | Shipped | 1,165 locally cached covers (720 px long edge, JPEG-80); the rest use distinct generated tiles |
+| Credits | Shipped | Actor/director/artist pages linked from items (`catalog_credits`) |
+| Search | Shipped | Trigram-indexed title/subtitle search, genre filters, kind filters |
+| Provider enrichment | Shipped | Optional external providers insert new titles after the response (never block search) |
+| Watchlist | Shipped | Per-profile watchlist |
+| Rating history | Shipped | Timeline of rating events per profile |
+| Duplicate detection | Partial | Uniqueness by `external_ref`; fuzzy matching across providers is not implemented |
 
----
+## 2. Ranking engine
 
-## 2. Reviews (RV)
+| Area | Status | Detail |
+|---|---|---|
+| Pairwise comparisons | Shipped | Append-only `item_matchups` is the source of truth |
+| Elo ladder | Shipped | Fast incremental scoring; drives the 0–10 score in every screen |
+| Bradley–Terry + Davidson | Shipped | MAP fit with L2 prior, ties modelled explicitly, uncertainty from Fisher information |
+| Ties / undecided / skip | Shipped | Distinct outcomes; skips never change scores |
+| Comparison selection | Shipped | Information gain × uncertainty × exposure balance, with repeat penalty |
+| Undo | Shipped | Restores Elo/counters and removes the matching timeline event |
+| Manual order | Shipped | Reorder mode writes `ranking_order` plus audit events, never fake matchups |
+| Confidence labels | Shipped | Interval, comparison count and low/medium/high confidence in the UI |
+| Community shrinkage | Shipped | Bayesian-style prior pulls thin samples toward neutral |
+| Coordinated-vote detection | Shipped | Reviewer pairs with sustained near-identical votes are down-weighted (see `RANKING_SYSTEM.md`) |
+| Per-user model parameters | Not built | `ν`/`λ` are global constants, stored in the snapshot for replay |
+| Sub-category models | Not built | One model per media kind, no genre-level fits |
+| Ranking history ("why A > B") | Not built | Comparison path is not surfaced |
 
-| ID | Feature | Description | How | Phase |
-|----|---------|-------------|-----|-------|
-| RV-01 | Review request via SMS/email | Send a personalized ask after a visit, job, or transaction | B | 2 |
-| RV-02 | Review request via QR / short link / NFC | Printable and counter-top capture for walk-ins | B | 2 |
-| RV-03 | Multi-platform routing | One request link that lets the customer choose Google / Facebook / BBB / DealerRater / industry sites | B | 2 |
-| RV-04 | Policy-safe private feedback | Optional "tell us first" step that collects private feedback **without** blocking or filtering public reviews | B | 2 |
-| RV-05 | Template library + variables | `{{first_name}}`, `{{service}}`, `{{employee}}`, `{{location}}`, `{{review_link}}` | B | 2 |
-| RV-06 | Send timing & throttling | Delay after visit, quiet hours, max asks per contact per period | B | 2 |
-| RV-07 | Follow-up cadence | One polite reminder max by default; stop on click/review/opt-out | B | 2 |
-| RV-08 | Consent & opt-out ledger | Per-channel consent, STOP/HELP handling, immutable audit trail | B | 2 |
-| RV-09 | Contact review status | invited → clicked → posted → declined → opted-out, per platform | B | 2 |
-| RV-10 | Unified review inbox | Aggregate reviews from connected platforms, filter by location/platform/rating/status | B | 3 |
-| RV-11 | Reply drafting (AI) | Draft on-brand, policy-safe replies; human approves | B | 3 |
-| RV-12 | Reply publishing | Post replies back to the source platform where an API allows | I | 3 |
-| RV-13 | Google Business Profile sync | Import reviews and publish replies via the official Business Profile API | I | 3 |
-| RV-14 | Facebook Page reviews | Import and reply via Meta Graph API (subject to app review) | I | 3 |
-| RV-15 | BBB / DealerRater / Yelp / others | API-less platforms: manual entry, email parsing, or CSV import | B/I | 4 |
-| RV-16 | Review widget / public feed | Embeddable, SEO-friendly wall of reviews with schema.org markup | B | 3 |
-| RV-17 | Public review landing page | Branded page per location with rating summary and platform buttons | B | 2 |
-| RV-18 | Analytics | Volume, average rating, response rate, platform mix, trend, location/employee comparison | B | 3 |
-| RV-19 | Employee attribution | Track which tech/agent drove the review; leaderboard | B | 4 |
-| RV-20 | Historical import | Backfill past reviews and contacts via CSV | B | 4 |
-| RV-21 | AI-personalized invite copy | Per-contact message variants generated from service context | B | 4 |
-| RV-22 | Review request automation triggers | Fire on appointment completed, invoice paid (status only), tag added, or manual | B | 3 |
-| RV-23 | Dispute / flag workflow | Internal flagging of policy-violating reviews with evidence notes | B | 5 |
-| RV-24 | Competitor / local benchmark | Aggregate public rating comparison per market | D | 6 |
+## 3. Reviews
 
-**Policy guardrails baked into the design**
-- No review gating: every customer can always reach the public review form.
-- No incentives for positive reviews, no stipulating a minimum rating.
-- Private feedback is optional and never a condition of the public link.
-- Platform terms respected; unsupported platforms are manual/import only.
+| Area | Status | Detail |
+|---|---|---|
+| Written reviews | Shipped | Long-form text, saved with the rating |
+| Structured extras | Shipped | Tags, spoiler flag, favourite character, favourite tracks |
+| Media attachments | Shipped | Photo and video attachment after a review threshold |
+| Reactions | Shipped | Emoji reactions with per-viewer state |
+| Comments | Shipped | Paginated 20 at a time, rate-limited |
+| Pinned review | Shipped | One pinned review per profile |
+| Pros/cons fields | Not built | |
+| Helpfulness voting | Not built | |
+| Edit history | Not built | Only the current revision is stored |
+| Moderation queue / spam detection | Partial | User reports exist; no automated duplicate or spam detection |
 
----
+## 4. Discovery
 
-## 3. Messaging (MS)
+| Area | Status | Detail |
+|---|---|---|
+| Browse | Shipped | Community leaderboard by top/rated/new, kind and genre filters |
+| Weekly movers | Shipped | Largest score swings in the last week |
+| Popular this week | Shipped | Most-rated titles in seven days, cached for 60 seconds |
+| For-you feed | Shipped | Freshness, follow affinity, genre relevance, engagement, exploration, per-card explanation |
+| Following feed | Shipped | Strict chronological |
+| Feed dismissals | Shipped | Hidden reviews stay out of that profile's feed |
+| Taste DNA | Shipped | Per-genre distribution, top picks, insights |
+| Taste comparison | Shipped | Kendall tau-b, rating similarity, genre cosine, per-kind match cards, confidence |
+| Cold-start onboarding | Shipped | Genre picks act as a prior before ratings exist |
+| Suggested profiles | Shipped | Ordered by shared genres, excludes already-followed accounts |
+| Collaborative filtering | Not built | No user-item matrix factorisation |
 
-| ID | Feature | Description | How | Phase |
-|----|---------|-------------|-----|-------|
-| MS-01 | Shared inbox | One queue for SMS, webchat, email, Facebook/Instagram DMs | B | 1 |
-| MS-02 | Conversation states | open / pending / snoozed / closed, priority, spam | B | 1 |
-| MS-03 | Assignment & mentions | Assign to a teammate, @mention, internal notes | B | 1 |
-| MS-04 | Saved replies / snippets | Team-level and personal, with variables | B | 1 |
-| MS-05 | MMS & attachments | Images, PDFs, voice notes; size/type validation | I | 2 |
-| MS-06 | Broadcasts | Segment-based mass SMS/email with schedule and throttling | B | 3 |
-| MS-07 | Keyword automations | "STOP", "HOURS", "BOOK", custom keywords → action | B | 3 |
-| MS-08 | Business hours & away messages | Per-location schedule, holiday overrides, auto-reply | B | 2 |
-| MS-09 | Consent management | Consent source, timestamp, IP, channel; hard block without consent | B | 1 |
-| MS-10 | Phone number management | Provision local numbers, A2P 10DLC registration, port requests | I | 2 |
-| MS-11 | Calls | Click-to-call, call log, recording (with consent), voicemail + transcription | I | 4 |
-| MS-12 | Webchat widget | Embeddable, themeable, mobile-friendly, SSE/WebSocket delivery | B | 1 |
-| MS-13 | Two-way email | Threaded email channel with reply parsing | I | 2 |
-| MS-14 | Social DMs | Facebook Messenger + Instagram DM ingestion and reply | I | 4 |
-| MS-15 | Scheduled messages | Send later, per-contact timezone | B | 3 |
-| MS-16 | Contact merge from inbox | Create/merge a contact inline from an unknown number | B | 1 |
-| MS-17 | Team metrics | First response time, resolution time, volume per agent | B | 4 |
-| MS-18 | Mobile inbox | Responsive PWA; native wrappers later | B | 5 |
-| MS-19 | Spam & abuse handling | Rate limits, blocklist, duplicate detection | B | 2 |
+## 5. Social
 
----
+| Area | Status | Detail |
+|---|---|---|
+| Profiles | Shipped | Public profile page, avatar hue, bio, followers/following |
+| Follow / unfollow | Shipped | Follow graph, feed integration, notifications |
+| Pods (collections) | Shipped | Ranked lists with notes, public share pages, add/remove/reorder |
+| Notifications | Shipped | Follow, reaction and comment notifications, unread count, mark read |
+| Reports | Shipped | Report a review/profile for moderation |
+| Private accounts | Not built | |
+| Block / mute | Not built | Reports exist but blocking is not enforced across queries |
+| Private lists | Not built | Pods are public |
+| Notification preferences | Not built | |
 
-## 4. AI Employee (AI)
+## 6. Sharing and public surface
 
-| ID | Feature | Description | How | Phase |
-|----|---------|-------------|-----|-------|
-| AI-01 | 24/7 auto-response | Answer inbound SMS/webchat/email when no human is active | B/I | 4 |
-| AI-02 | Intent & lead qualification | Extract service need, urgency, location, contactability; score the lead | B | 4 |
-| AI-03 | Calendar booking | Offer slots, book/reschedule/cancel against a real calendar | B | 4 |
-| AI-04 | Confirmations & reminders | Appointment confirmation and reminder sequences | B | 4 |
-| AI-05 | Database reactivation | Re-engage dormant contacts with consented, throttled campaigns | B | 5 |
-| AI-06 | Knowledge base / RAG | Ingest hours, services, pricing ranges, policies, FAQs; cite sources | B | 4 |
-| AI-07 | Custom playbooks | Per-location goals, tone, allowed actions, escalation rules, banned topics | B | 4 |
-| AI-08 | Human handoff | Escalate with a full summary and suggested reply | B | 4 |
-| AI-09 | Summaries & next best action | Thread summary, sentiment, suggested next step | B | 4 |
-| AI-10 | AI Studio | Performance dashboard, sandbox tester, transcript review, escalation rules editor | B | 5 |
-| AI-11 | Brand voice & languages | Tone presets, per-location voice, multilingual replies | B | 5 |
-| AI-12 | Guardrails | No medical/legal/financial advice, PII redaction, prompt-injection defense, tool allowlist | B | 4 |
-| AI-13 | Review reply generation | Draft replies per review with platform-length and policy limits | B | 3 |
-| AI-14 | Voice agent (calls) | Answer calls, qualify, book, transfer; requires telephony + STT/TTS | D | 6 |
-| AI-15 | AI invite copy | Personalized review asks | B | 4 |
-| AI-16 | Eval harness | Golden-set regression tests for tone, correctness, escalation, injection resistance | B | 4 |
-| AI-17 | Cost & usage controls | Per-org token budgets, model routing, caching | B | 5 |
+| Area | Status | Detail |
+|---|---|---|
+| Public review pages | Shipped | `/review/:id`, OG metadata |
+| Public pod pages | Shipped | `/:username/:slug` |
+| Embed widgets | Shipped | `/embed/:key` and review embeds |
+| Share buttons | Shipped | Web share / clipboard fallback |
+| Generated share cards | Not built | Image cards would need a renderer |
 
----
+## 7. Account and platform
 
-## 5. Contacts / CRM (CT)
-
-| ID | Feature | Description | Phase |
-|----|---------|-------------|-------|
-| CT-01 | Unified profile | Name, phones, emails, addresses, tags, custom fields, owner | 1 |
-| CT-02 | Timeline | Messages, reviews, appointments, notes, consent events in one feed | 2 |
-| CT-03 | CSV import/export | Mapping UI, dedupe preview, error report | 1 |
-| CT-04 | Tags & segments | Static and dynamic (e.g. "no review in 90 days") | 2 |
-| CT-05 | Custom fields | Text, number, date, select, multi-select per org | 2 |
-| CT-06 | Duplicate detection & merge | Phone/email normalization, merge with history preservation | 3 |
-| CT-07 | Consent state | Channel-level status surfaced on the profile and enforced everywhere | 1 |
-| CT-08 | Location assignment | Contacts belong to one or more locations | 2 |
-| CT-09 | Data export & deletion | GDPR/CCPA delete with audit trail | 4 |
+| Area | Status | Detail |
+|---|---|---|
+| Email + password auth | Shipped | scrypt hashes, database sessions, active-membership checks |
+| Multi-tenant orgs | Shipped | Every row is org-scoped; Postgres RLS enforces isolation |
+| Onboarding | Shipped | Interest picker after signup, starter title |
+| Settings | Shipped | Display name, avatar hue, manual mode, connected-service flags |
+| Data export | Shipped | `/api/account/export` (profile, ratings, reviews, matchups, order) |
+| Account deletion | Shipped | Password-confirmed, cascades, demo account protected |
+| Rate limiting | Shipped | Sign-in/sign-up and interactive endpoints, `Retry-After` |
+| Audit log | Shipped | Sensitive actions recorded in `audit_log` |
+| Theme switch | Not built | Single dark editorial theme by design |
+| Native apps | Not built | Responsive web only |
 
 ---
 
-## 6. Platform / admin (PL)
+## Explicit non-goals
 
-| ID | Feature | Description | Phase |
-|----|---------|-------------|-------|
-| PL-01 | Multi-location orgs | Org → locations → users; per-location settings | 1 |
-| PL-02 | Roles & permissions | Owner, admin, manager, agent, viewer; per-module scopes | 1 |
-| PL-03 | Audit log | Who changed what, when, before/after for sensitive objects | 2 |
-| PL-04 | Notifications | In-app, email, web push; per-user preferences | 2 |
-| PL-05 | API keys & webhooks | Org-scoped keys, signed outbound webhooks, retries | 4 |
-| PL-06 | Integrations | Google/Outlook calendar, HubSpot, Salesforce, Mailchimp, QuickBooks, Shopify, Mindbody, Nextech | 5 |
-| PL-07 | Branding | Logo, colors, custom domain for landing pages/widget | 4 |
-| PL-08 | Plan gating | Tiers, seat limits, feature flags, trial state (**no payment processing**) | 5 |
-| PL-09 | Onboarding | Checklist + sample data + guided first review request | 3 |
-| PL-10 | Status & support | Health page, in-app help, impersonation with audit | 5 |
-
----
-
-## 7. Reporting (RP)
-
-| ID | Feature | Description | Phase |
-|----|---------|-------------|-------|
-| RP-01 | Home dashboard | Reviews this month, avg rating, response rate, open conversations, bookings | 3 |
-| RP-02 | Review report | Filters: location, platform, employee, date; CSV export | 3 |
-| RP-03 | Messaging report | Volume, response/resolution time, channel mix, opt-outs | 4 |
-| RP-04 | AI report | Deflection, bookings, handoffs, CSAT proxy, token cost | 5 |
-| RP-05 | Scheduled reports | Weekly/monthly email to selected recipients | 5 |
-| RP-06 | Location comparison | Rank locations by rating, volume, response rate | 4 |
-| RP-07 | Free reputation audit | Public lead magnet: enter a business, get a public-rating snapshot | D |
-
----
-
-## 8. Listings & web (WB / LS)
-
-| ID | Feature | Description | How | Phase |
-|----|---------|-------------|-----|-------|
-| WB-01 | Review widget | Embeddable JS + iframe fallback, schema.org `Review`/`AggregateRating` | B | 3 |
-| WB-02 | Review landing pages | Per-location, SEO, fast, brandable | B | 2 |
-| WB-03 | Simple site builder | Templates, sections, lead form → inbox | D | 6 |
-| LS-01 | Google Business Profile management | Hours, photos, posts, Q&A, review replies via official API | I | 5 |
-| LS-02 | Directory sync | Push NAP data to major directories | D | 6 |
-
----
-
-## 9. Explicitly excluded
-
-| Feature | Reason |
-|---|---|
-| Card payments / POS / terminals | Out of scope by request |
-| Financing / lending / wallet | Out of scope by request |
-| Loans, buy-now-pay-later | Out of scope by request |
-| Payment links and invoices with money movement | Out of scope by request |
-
-Plan tiers and seat limits still exist (PL-08) — that is billing **state**, not payment processing.
-
----
-
-## 10. Compliance & policy constraints (design inputs, not afterthoughts)
-
-1. **Google review policy** — no gating, no incentives, no bulk fake reviews, no review swapping. The product must not offer "only ask happy customers."
-2. **TCPA / consent** — explicit opt-in per phone number, recorded with source + timestamp + IP; STOP/HELP honored instantly and permanently until re-consent.
-3. **A2P 10DLC** — US SMS requires brand/campaign registration. Provision through a provider that handles it; surface status in the UI.
-4. **CAN-SPAM / GDPR / CCPA** — unsubscribe, data export, deletion, retention windows.
-5. **Platform API terms** — Google Business Profile API access requires an approved project; Meta requires app review. Fall back to manual/import where not granted.
-6. **AI disclosure** — configurable disclosure that the customer is talking to an AI; never impersonate a named human.
-7. **No scraping** of authenticated competitor surfaces; all integrations use documented APIs or user-provided exports.
-
----
-
-## 11. Parity summary
-
-| Pillar | Podium-class coverage in this map |
-|---|---|
-| Reviews | 24 features — invite → route → collect → manage → reply → report |
-| Messaging | 19 features — multi-channel shared inbox with consent and automations |
-| AI | 17 features — answering, qualification, booking, RAG, playbooks, studio, evals |
-| Contacts | 9 features — unified profile, segments, consent, merge, export |
-| Platform | 10 features — multi-location, RBAC, audit, webhooks, integrations |
-| Reporting | 7 features — operational and reputation analytics |
-| Listings/web | 5 features — widget, landing pages, GBP, deferred site builder |
-
-**Deliberate non-parity:** payments, financing, wallet, lending (excluded), and voice AI / site builder / directory sync (deferred to phase 6).
+- Payments, billing and money movement.
+- A separate CRM/inbox/messaging product.
+- Fabricated ratings or seeded community scores for new catalog entries.

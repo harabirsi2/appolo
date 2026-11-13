@@ -7,7 +7,7 @@ Legend: **Done** · **Partial** · **Open**
 
 Last verification: `pnpm verify` → preflight OK, typecheck clean, e2e **27/27**,
 visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
-**42/42**. Image measurement: Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
+**44/44**; axe **0 violations** on 8 screens. Image measurement: Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 
 ---
 
@@ -24,7 +24,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 
 | Check | Status | Evidence |
 |---|---|---|
-| Competitor feature inventory | Partial | `FEATURE_MAP.md` — but it maps a **business messaging/CRM** product (Podium-class inbox), not the shipped rating/ranking product |
+| Product feature inventory | Done | `FEATURE_MAP.md` — rewritten to the shipped rating product (catalog, ranking, reviews, discovery, social, account) |
 | Gap analysis against the mandate | Done | `docs/PRODUCT_AUDIT.md` §5 |
 | Onboarding, profile, review, discovery, retention analysis | Partial | evidenced by roadmap phases; no standalone UX teardown of Podium's rating product |
 | Own identity, no competitor branding copied | Done | `docs/DESIGN_SYSTEM.md` (editorial dark theme, Fraunces + mint accent) |
@@ -40,7 +40,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 | Ties, undecided, skip handling | Done | `outcome` column, migration `sql/0012_ranking_model.sql` |
 | Cold start / sparse data handled honestly | Done | L2 prior, `converged` flag, confidence labels; no fabricated ratings in seed |
 | Explainable comparison selection | Done | entropy × uncertainty × exposure; `scoreInformativeOpponents` |
-| Manipulation resistance | Partial | Bayesian shrinkage in `community.ts`; coordinated-vote detection still queued |
+| Manipulation resistance | Done | Bayesian shrinkage plus coordinated-vote detection and half-weight down-weighting (`packages/core/src/coordination.ts`) |
 | Personalized / sub-category ranking | Open | per-user `ν`/`λ`, genre-level models, ranking-history ("why A > B") |
 | Engine tests | Done | 11 ranking tests + 7 taste tests; `packages/core` total 42 |
 
@@ -89,7 +89,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 | Touch targets, focus ring, reduced motion | Done | 44 px targets, `:focus-visible`, reduced-motion guard |
 | Icon labelling and keyboard controls | Partial | `aria-label` on icon buttons, keys for tie/undecided; no full keyboard-navigation audit |
 | Visual regression | Done | 8-screen pixel baselines, 0.1% tolerance |
-| Accessibility audit (axe/Lighthouse) | Open | not run; colour contrast not systematically verified |
+| Accessibility audit | Done | axe-core on 8 screens: 0 serious/critical violations; `pnpm a11y`; skip link added |
 | Desktop editorial grid, light theme | Open | explicitly deferred in roadmap Phase 1 |
 
 ## 8. Architecture and engineering
@@ -148,7 +148,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 | Image optimisation | Done | `next/image` + per-slot `sizes` + 96–360 px device widths; Browse −80%, Home −73% |
 | Bundle size checked | Done | 102 kB shared First Load JS in production build |
 | DB latency addressed | Done | indexes, batched follow counts, session cache |
-| Caching | Open | no shared-read cache; `ILIKE` search remains |
+| Caching | Partial | `popularThisWeek` cached 60 s via `unstable_cache`; leaderboard/search uncached |
 | Large-list rendering | Partial | rails/grids are bounded; no virtualisation |
 
 ## 13. Implementation strategy
@@ -173,32 +173,32 @@ no fabricated seed ratings; no unnecessary dependencies (only `sharp`, required
 by the image optimisation); migrations are forward-only; every claim above is
 backed by a command that was run.
 
-Watch items: `FEATURE_MAP.md` and `ARCHITECTURE.md` describe a broader
-CRM/messaging stack than the shipped rating product — documentation drift that
-should be corrected rather than treated as delivered functionality.
+Resolved since the last pass: `FEATURE_MAP.md` and `ARCHITECTURE.md` now describe
+the rating product actually in this repository, and `CHANGELOG.md` records
+what changed.
 
 ## 15. Required deliverables
 
 | Deliverable | Status | Location |
 |---|---|---|
 | Architecture documentation | Done | `docs/TECHNICAL_ARCHITECTURE.md`, `ARCHITECTURE.md` |
-| Product feature inventory | Partial | `FEATURE_MAP.md` (describes the CRM product, not this app) |
+| Product feature inventory | Done | `FEATURE_MAP.md` |
 | Competitive analysis | Partial | `docs/PRODUCT_AUDIT.md` §5 |
-| Technical debt register | Partial | `docs/CODE_REVIEW.md` “Remaining risks”, `docs/PERFORMANCE.md` §6 |
+| Technical debt register | Done | `docs/CODE_REVIEW.md` risks, `docs/PERFORMANCE.md` §6, `docs/SECURITY.md` known risks |
 | Implementation roadmap | Done | `docs/PRODUCT_ROADMAP.md` |
 | Database documentation | Partial | schema and data model sections; no dedicated schema reference |
 | Ranking algorithm documentation | Done | `docs/RANKING_SYSTEM.md` |
-| Testing report | Partial | results recorded in README/roadmap; no standalone report |
+| Testing report | Done | `docs/TESTING.md` |
 | Performance report | Done | `docs/PERFORMANCE.md` |
-| Security audit | Partial | `docs/CODE_REVIEW.md` security sections + remaining risks |
-| Change log | Open | no `CHANGELOG.md`; git history is the record |
+| Security audit | Done | `docs/SECURITY.md` + `docs/CODE_REVIEW.md` |
+| Change log | Done | `CHANGELOG.md` |
 
 ---
 
 ## Highest-impact remaining tasks
 
-1. Coordinated-vote detection for community rankings (already queued), with tests.
-2. Shared-read caching for `popularThisWeek` / global feed, measured before/after.
-3. Block/mute and private accounts enforced at the query layer.
-4. Accessibility audit (axe) plus keyboard traversal on the rating flow.
-5. Reconcile `FEATURE_MAP.md` / `ARCHITECTURE.md` with the shipped product, and add a change log.
+1. Enforce block/mute and private accounts at the query layer.
+2. Add a CSRF/origin guard for mutating route handlers.
+3. Cache the community leaderboard and measure the effect as ratings grow.
+4. Manual keyboard and screen-reader pass on the comparison flow.
+5. Add load testing and API contract tests; wire `pnpm audit` into the gate.

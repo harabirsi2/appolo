@@ -194,6 +194,12 @@ Prioritised gaps:
    `next/image` with a `sizes` value at every call site and 96–360 px device
    widths: Browse fell to 0.33 MB (−80%), Home to 0.07 MB (−73%), and 44–72 px
    rows request 96 px art instead of 360 px, with no layout change.
+9. **Shared reads (partial).** `popularThisWeek` now runs through
+   `unstable_cache` with a 60 s TTL, so one global aggregation serves every
+   home-page request in that window. Measured `/app` TTFB before and after:
+   213–251 ms vs 207–252 ms — inside noise at this data size. The saving is one
+   aggregation per request, which matters as ratings grow, not a visible
+   latency win today. The community leaderboard and search remain uncached.
 
 ## 7. Reproduction
 

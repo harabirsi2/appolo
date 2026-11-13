@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import {
   START_ELO,
@@ -10,6 +11,7 @@ import {
   pairKey,
   selectInformativeOpponent,
   shrinkCommunityScore,
+  detectCoordinatedVoting,
   type CommunityConfidence,
   type ComparisonEvent,
   type CoalescingRunner,
@@ -1109,7 +1111,7 @@ export interface PopularItem extends CatalogItem {
 }
 
 /** Community's most-rated items over the last seven days. */
-export async function popularThisWeek(limit = 8): Promise<PopularItem[]> {
+async function popularThisWeekUncached(limit: number): Promise<PopularItem[]> {
   const db = getDb();
   const rows = await db
     .select({
@@ -1121,13 +1123,28 @@ export async function popularThisWeek(limit = 8): Promise<PopularItem[]> {
     .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
     .where(sql`${itemRatings.updatedAt} > now() - interval '7 days'`)
     .groupBy(catalogItems.id)
-    .orderBy(sql`count(*) desc`)
+    // Tie-break deterministically so the rail does not reshuffle between runs.
+    .orderBy(sql`count(*) desc`, catalogItems.id)
     .limit(limit);
   return rows.map((row) => ({
     ...mapCatalogItem(row.item),
     average: toScore(row.avgElo),
     ratings: row.ratings,
   }));
+}
+
+/**
+ * Every signed-in home page reads the same global "popular this week" list, so
+ * it is cached for 60 seconds instead of re-aggregating all ratings per request.
+ */
+const popularThisWeekCached = unstable_cache(
+  popularThisWeekUncached,
+  ["popular-this-week"],
+  { revalidate: 60, tags: ["community-popular"] },
+);
+
+export async function popularThisWeek(limit = 8): Promise<PopularItem[]> {
+  return popularThisWeekCached(limit);
 }
 
 export interface Credit {
@@ -1192,6 +1209,9 @@ export interface CommunityItem extends CatalogItem {
   /** How much evidence supports the score. */
   confidence: CommunityConfidence;
   ratings: number;
+  /** Votes flagged as coordinated and therefore down-weighted. */
+  suspicious: number;
+  coordination: "none" | "suspected";
 }
 
 /**
@@ -1225,13 +1245,32 @@ export async function catalogLeaderboard(
         : sort === "new"
           ? desc(catalogItems.createdAt)
           : desc(sql`coalesce(avg(${itemRatings.elo}), 0)`),
+      // Stable tie-break: equal counts or averages otherwise come back in an
+      // arbitrary order, which makes the page (and visual baselines) jitter.
+      catalogItems.id,
     )
     .limit(Math.min(options.limit ?? 24, 60));
 
+  // Down-weight reviewer pairs that vote in lockstep. Detection needs the
+  // per-profile votes, not just the aggregate, so it runs over the same items.
+  const itemIds = rows.map((row) => row.item.id);
+  const votes =
+    itemIds.length > 0
+      ? await db
+          .select({ orgId: itemRatings.orgId, itemId: itemRatings.itemId, elo: itemRatings.elo })
+          .from(itemRatings)
+          .where(inArray(itemRatings.itemId, itemIds))
+      : [];
+  const coordination = detectCoordinatedVoting(
+    votes.map((vote) => ({ reviewerId: vote.orgId, itemId: vote.itemId, score: toScore(vote.elo) })),
+  );
+
   return rows.map((row) => {
+    const suspicious = coordination.suspiciousVotesByItem.get(row.item.id) ?? 0;
     const estimate = shrinkCommunityScore({
       mean: toScore(row.avgElo),
       count: row.ratings,
+      suspicious,
     });
     return {
       ...mapCatalogItem(row.item),
@@ -1239,6 +1278,8 @@ export async function catalogLeaderboard(
       average: estimate.score,
       rawAverage: estimate.raw,
       confidence: estimate.confidence,
+      suspicious: estimate.suspicious,
+      coordination: estimate.coordination,
     };
   });
 }
@@ -1283,6 +1324,8 @@ export async function similarItems(itemId: string, limit = 8): Promise<SimilarIt
         average: estimate.score,
         rawAverage: estimate.raw,
         confidence: estimate.confidence,
+        suspicious: estimate.suspicious,
+        coordination: estimate.coordination,
         overlap,
       };
     })

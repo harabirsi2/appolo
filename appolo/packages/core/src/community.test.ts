@@ -35,3 +35,19 @@ test("shrinkage is monotonic in count for a mean above the prior", () => {
   const hundred = shrinkCommunityScore({ mean: 9, count: 100 }).score!;
   assert.ok(one < ten && ten < hundred && hundred < 9);
 });
+
+test("suspicious ratings carry half weight and lower confidence", () => {
+  const clean = shrinkCommunityScore({ mean: 9, count: 6 });
+  const flagged = shrinkCommunityScore({ mean: 9, count: 6, suspicious: 6 });
+  assert.ok(flagged.score !== null && clean.score !== null && flagged.score < clean.score);
+  assert.equal(flagged.suspicious, 6);
+  assert.equal(flagged.coordination, "suspected");
+  assert.ok(flagged.effectiveCount < clean.effectiveCount);
+  assert.notEqual(flagged.confidence, "high");
+});
+
+test("flags can never exceed the rating count", () => {
+  const result = shrinkCommunityScore({ mean: 7, count: 2, suspicious: 9 });
+  assert.equal(result.suspicious, 2);
+  assert.ok(result.score !== null);
+});

@@ -13,5 +13,6 @@ export * from "./ranking";
 export * from "./ranking-model";
 export * from "./taste-match";
 export * from "./community";
+export * from "./coordination";
 export * from "./feed-rank";
 export * from "./coalesce";
