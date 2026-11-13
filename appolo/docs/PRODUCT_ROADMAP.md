@@ -37,8 +37,8 @@ Open:
 
 ## Phase 2 — Media and review foundation (Mostly Done)
 
-Existing: shared catalog of 160 titles across six kinds — 32 movies, 28 TV, 28 albums,
-20 podcasts, 31 books and 21 games (+anime as a TV/movie genre) — providers, search,
+Existing: shared catalog of 338 titles across six kinds — 69 movies, 59 TV, 60 albums,
+40 podcasts, 63 books and 47 games (+anime as a TV/movie genre) — providers, search,
 detail pages, credits/people, reviews with attachments, spoilers, reactions, comments,
 pods, watchlist, history.
 
@@ -157,9 +157,10 @@ Done in this pass:
   sessions. The shared demo account is protected.
 
 Done in this pass:
-- The demo catalog grew from 56 to 160 titles, adding 21 books plus new movies, TV,
-  albums, podcasts and games with cached cover art, so the comparison flow has a
-  deep pool in every section.
+- The demo catalog grew from 56 to 338 titles, with 63 books plus new movies, TV,
+  albums, podcasts and games, each with cached cover art (generated art for the few
+  titles without a provider cover), so the comparison flow has a deep pool in every
+  section.
 - `pnpm e2e` deletes the test accounts it creates, so community rankings and the
   visual snapshots no longer drift between runs.
 - Interactive endpoints are throttled per org using the same Postgres fixed-window
