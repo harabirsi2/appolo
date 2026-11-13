@@ -4,26 +4,37 @@
  *
  * Signs in with the seeded demo account, visits each main screen, and fails on
  * page errors, console errors, 5xx responses, a wrong title, a missing heading,
- * empty content or a blank screenshot. Each screen is saved as a viewport PNG
- * under scripts/visual-output/ for human review.
+ * empty content, a blank screenshot or a screenshot that differs from its
+ * committed baseline. Snapshots are written to scripts/visual-output/.
+ *
+ * Baselines live in scripts/visual-baselines/. Accept intentional visual
+ * changes with:
+ *   VISUAL_UPDATE=1 pnpm visual
  *
  * Usage:
  *   pnpm exec playwright install chromium
  *   pnpm dev       # in one terminal
  *   pnpm visual    # in another
  *
- * BASE_URL, VISUAL_EMAIL, VISUAL_PASSWORD and VISUAL_OUT_DIR override the
- * defaults. It exits non-zero if any check fails.
+ * BASE_URL, VISUAL_EMAIL, VISUAL_PASSWORD, VISUAL_OUT_DIR and
+ * VISUAL_BASELINE_DIR override the defaults. It exits non-zero if any check fails.
  */
 import { chromium } from "playwright";
-import { mkdir, stat } from "node:fs/promises";
+import pixelmatch from "pixelmatch";
+import { PNG } from "pngjs";
+import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const BASE = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
 const OUT = path.resolve(process.env.VISUAL_OUT_DIR ?? "scripts/visual-output");
+const BASELINES = path.resolve(process.env.VISUAL_BASELINE_DIR ?? "scripts/visual-baselines");
+const UPDATE_BASELINES = process.env.VISUAL_UPDATE === "1";
 const EMAIL = process.env.VISUAL_EMAIL ?? "owner@appolo.test";
 const PASSWORD = process.env.VISUAL_PASSWORD ?? "appolo-demo-1234";
 const MIN_SCREENSHOT_BYTES = 20_000;
+// Causes the check to fail at 0.1% changed pixels, which tolerates font and
+// anti-aliasing differences between machines but catches real layout changes.
+const MAX_DIFF_RATIO = 0.001;
 
 const SCREENS = [
   { name: "home", path: "/app", title: "Home", heading: "Hey, Demo" },
@@ -33,6 +44,42 @@ const SCREENS = [
   { name: "search", path: "/app/search", title: "Search", heading: "Search" },
   { name: "taste", path: "/app/taste", title: "Taste DNA", heading: "Taste DNA" },
 ];
+
+async function compareWithBaseline(file, name) {
+  const baselineFile = path.join(BASELINES, `${name}.png`);
+
+  if (UPDATE_BASELINES) {
+    await mkdir(BASELINES, { recursive: true });
+    await copyFile(file, baselineFile);
+    return { note: "baseline updated" };
+  }
+
+  let baseline;
+  try {
+    baseline = PNG.sync.read(await readFile(baselineFile));
+  } catch {
+    return { problem: `no baseline for ${name}; run VISUAL_UPDATE=1 pnpm visual` };
+  }
+
+  const current = PNG.sync.read(await readFile(file));
+  if (current.width !== baseline.width || current.height !== baseline.height) {
+    return {
+      problem: `size ${current.width}x${current.height} does not match baseline ${baseline.width}x${baseline.height}`,
+    };
+  }
+
+  const diff = new PNG({ width: current.width, height: current.height });
+  const changed = pixelmatch(current.data, baseline.data, diff.data, current.width, current.height, {
+    threshold: 0.2,
+  });
+  if (changed === 0) return { note: "0 px diff" };
+
+  const diffFile = path.join(OUT, `${name}.diff.png`);
+  await writeFile(diffFile, PNG.sync.write(diff));
+  const ratio = changed / (current.width * current.height);
+  const note = `${changed} px differ (${(ratio * 100).toFixed(2)}%) -> ${path.relative(process.cwd(), diffFile)}`;
+  return ratio > MAX_DIFF_RATIO ? { problem: `differs from baseline: ${note}` } : { note };
+}
 
 await mkdir(OUT, { recursive: true });
 
@@ -88,12 +135,24 @@ try {
     }
 
     const file = path.join(OUT, `${screen.name}.png`);
+    let pixelNote = "";
+    let saved = false;
     try {
       await page.screenshot({ path: file, animations: "disabled" });
+      saved = true;
       const size = (await stat(file)).size;
       if (size < MIN_SCREENSHOT_BYTES) problems.push(`screenshot looks blank (${size} bytes)`);
     } catch (error) {
       problems.push(`screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (saved) {
+      try {
+        const comparison = await compareWithBaseline(file, screen.name);
+        if (comparison.problem) problems.push(comparison.problem);
+        pixelNote = comparison.note ?? "";
+      } catch (error) {
+        problems.push(`baseline comparison failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
 
     if (!response || !response.ok()) problems.push(`page returned ${response?.status() ?? "no response"}`);
@@ -106,7 +165,8 @@ try {
     if (serverErrors.length > 0) problems.push(`server errors: ${serverErrors.join(" | ")}`);
 
     if (problems.length === 0) {
-      console.log(`PASS  ${screen.name} (${screen.path}) -> ${path.relative(process.cwd(), file)}`);
+      const suffix = pixelNote ? ` [${pixelNote}]` : "";
+      console.log(`PASS  ${screen.name} (${screen.path}) -> ${path.relative(process.cwd(), file)}${suffix}`);
     } else {
       failures.push({ name: screen.name, problems });
       console.log(`FAIL  ${screen.name} (${screen.path})\n      ${problems.join("\n      ")}`);

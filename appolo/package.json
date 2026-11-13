@@ -26,7 +26,9 @@
     "ci": "powershell -ExecutionPolicy Bypass -File scripts/ci.ps1"
   },
   "devDependencies": {
+    "pixelmatch": "6.0.0",
     "playwright": "1.50.1",
+    "pngjs": "7.0.0",
     "typescript": "^5.7.3"
   }
 }

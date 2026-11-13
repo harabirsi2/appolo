@@ -163,8 +163,10 @@ Done in this pass:
   60/min, each returning 429 with a `retry-after` header. Limits sit above human
   tapping speed and stop scripted bursts.
 - Browser-driven visual checks (`pnpm visual`) sign in as the demo account, visit the
-  six main screens, fail on page/console/5xx errors or an empty screen, and save
-  viewport screenshots under `scripts/visual-output/` for review.
+  six main screens, fail on page/console/5xx errors or an empty screen, save viewport
+  screenshots under `scripts/visual-output/`, and pixel-diff them against committed
+  baselines in `scripts/visual-baselines/` (0.1% tolerance; `VISUAL_UPDATE=1 pnpm
+  visual` accepts intentional changes and writes a `.diff.png` for review).
 
 Open:
 - Nothing queued for this phase.
@@ -176,7 +178,7 @@ on failure.
 
 ## Immediate next three tasks
 
-1. Add pixel-diff baselines for the Playwright visual snapshots.
+1. Extend the visual checks and baselines to the public landing and login screens.
 
 ## Explicit non-goals for this pass
 
