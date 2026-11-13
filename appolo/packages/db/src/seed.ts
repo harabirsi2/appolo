@@ -81,9 +81,9 @@ type CatalogSeed = {
 };
 
 /**
- * A small, curated demo catalog. Metadata here is factual (title, creator,
- * year) so the app works offline; real provider adapters can replace this
- * later behind env keys. No provider content is copied.
+ * A curated demo catalog spanning every media kind. Metadata here is factual
+ * (title, creator, year) so the app works offline; real provider adapters can
+ * replace this later behind env keys. No provider content is copied.
  */
 const MEDIA_CATALOG: CatalogSeed[] = [
   // movies
@@ -99,56 +99,6 @@ const MEDIA_CATALOG: CatalogSeed[] = [
   { kind: "movie", title: "The Grand Budapest Hotel", subtitle: "Wes Anderson", year: 2014, tags: ["comedy", "drama"] },
   { kind: "movie", title: "Interstellar", subtitle: "Christopher Nolan", year: 2014, tags: ["sci-fi", "drama"] },
   { kind: "movie", title: "Whiplash", subtitle: "Damien Chazelle", year: 2014, tags: ["drama", "music"] },
-  // tv
-  { kind: "tv", title: "The Sopranos", subtitle: "David Chase", year: 1999, tags: ["crime", "drama"] },
-  { kind: "tv", title: "Breaking Bad", subtitle: "Vince Gilligan", year: 2008, tags: ["crime", "drama"], elo: 1770, matches: 15, wins: 13, losses: 2 },
-  { kind: "tv", title: "The Wire", subtitle: "David Simon", year: 2002, tags: ["crime", "drama"] },
-  { kind: "tv", title: "Fleabag", subtitle: "Phoebe Waller-Bridge", year: 2016, tags: ["comedy", "drama"], elo: 1680, matches: 9, wins: 7, losses: 2 },
-  { kind: "tv", title: "Succession", subtitle: "Jesse Armstrong", year: 2018, tags: ["drama", "comedy"] },
-  { kind: "tv", title: "The Bear", subtitle: "Christopher Storer", year: 2022, tags: ["drama", "comedy"], elo: 1690, matches: 10, wins: 8, losses: 2 },
-  { kind: "tv", title: "Twin Peaks", subtitle: "David Lynch", year: 1990, tags: ["mystery", "drama"] },
-  { kind: "tv", title: "Arcane", subtitle: "Christian Linke", year: 2021, tags: ["animation", "action"] },
-  { kind: "tv", title: "Better Call Saul", subtitle: "Vince Gilligan", year: 2015, tags: ["crime", "drama"] },
-  { kind: "tv", title: "Severance", subtitle: "Dan Erickson", year: 2022, tags: ["sci-fi", "thriller"], elo: 1670, matches: 8, wins: 6, losses: 2 },
-  // music
-  { kind: "music", title: "Blonde", subtitle: "Frank Ocean", year: 2016, tags: ["r&b", "alternative"], elo: 1650, matches: 11, wins: 8, losses: 3 },
-  { kind: "music", title: "Kid A", subtitle: "Radiohead", year: 2000, tags: ["alternative", "electronic"], elo: 1660, matches: 10, wins: 8, losses: 2 },
-  { kind: "music", title: "To Pimp a Butterfly", subtitle: "Kendrick Lamar", year: 2015, tags: ["hip-hop", "jazz"], elo: 1720, matches: 12, wins: 10, losses: 2 },
-  { kind: "music", title: "Rumours", subtitle: "Fleetwood Mac", year: 1977, tags: ["rock", "classic"] },
-  { kind: "music", title: "Blue", subtitle: "Joni Mitchell", year: 1971, tags: ["folk", "singer-songwriter"] },
-  { kind: "music", title: "The Dark Side of the Moon", subtitle: "Pink Floyd", year: 1973, tags: ["rock", "progressive"] },
-  { kind: "music", title: "In Rainbows", subtitle: "Radiohead", year: 2007, tags: ["alternative", "rock"] },
-  { kind: "music", title: "Vespertine", subtitle: "Björk", year: 2001, tags: ["electronic", "art pop"] },
-  { kind: "music", title: "The Miseducation of Lauryn Hill", subtitle: "Lauryn Hill", year: 1998, tags: ["hip-hop", "r&b"] },
-  { kind: "music", title: "Sound of Silver", subtitle: "LCD Soundsystem", year: 2007, tags: ["electronic", "dance"] },
-  // podcasts
-  { kind: "podcast", title: "Serial", subtitle: "Sarah Koenig", year: 2014, tags: ["true crime", "investigative"], elo: 1640, matches: 7, wins: 5, losses: 2 },
-  { kind: "podcast", title: "Radiolab", subtitle: "Jad Abumrad", year: 2002, tags: ["science", "storytelling"] },
-  { kind: "podcast", title: "The Daily", subtitle: "The New York Times", year: 2017, tags: ["news", "daily"], elo: 1600, matches: 6, wins: 4, losses: 2 },
-  { kind: "podcast", title: "99% Invisible", subtitle: "Roman Mars", year: 2010, tags: ["design", "culture"] },
-  { kind: "podcast", title: "Hardcore History", subtitle: "Dan Carlin", year: 2006, tags: ["history", "long-form"] },
-  { kind: "podcast", title: "My Favorite Murder", subtitle: "Karen Kilgariff", year: 2016, tags: ["true crime", "comedy"] },
-  { kind: "podcast", title: "Reply All", subtitle: "PJ Vogt", year: 2014, tags: ["technology", "internet"] },
-  { kind: "podcast", title: "The Ezra Klein Show", subtitle: "Ezra Klein", year: 2016, tags: ["politics", "interviews"] },
-  // books
-  { kind: "book", title: "Beloved", subtitle: "Toni Morrison", year: 1987, tags: ["literary", "historical"], elo: 1680, matches: 8, wins: 6, losses: 2 },
-  { kind: "book", title: "One Hundred Years of Solitude", subtitle: "Gabriel García Márquez", year: 1967, tags: ["magical realism", "literary"] },
-  { kind: "book", title: "The Left Hand of Darkness", subtitle: "Ursula K. Le Guin", year: 1969, tags: ["sci-fi", "literary"] },
-  { kind: "book", title: "Dune", subtitle: "Frank Herbert", year: 1965, tags: ["sci-fi", "epic"], elo: 1620, matches: 7, wins: 5, losses: 2 },
-  { kind: "book", title: "Normal People", subtitle: "Sally Rooney", year: 2018, tags: ["romance", "contemporary"] },
-  { kind: "book", title: "The Secret History", subtitle: "Donna Tartt", year: 1992, tags: ["mystery", "literary"] },
-  { kind: "book", title: "Piranesi", subtitle: "Susanna Clarke", year: 2020, tags: ["fantasy", "mystery"], elo: 1700, matches: 9, wins: 7, losses: 2 },
-  { kind: "book", title: "East of Eden", subtitle: "John Steinbeck", year: 1952, tags: ["classic", "literary"] },
-  { kind: "book", title: "The Remains of the Day", subtitle: "Kazuo Ishiguro", year: 1989, tags: ["literary", "historical"] },
-  { kind: "book", title: "Project Hail Mary", subtitle: "Andy Weir", year: 2021, tags: ["sci-fi", "adventure"] },
-  // games
-  { kind: "game", title: "Hollow Knight", subtitle: "Team Cherry", year: 2017, tags: ["metroidvania", "indie"], genres: ["Action", "Adventure", "Indie"], elo: 1760, matches: 13, wins: 11, losses: 2 },
-  { kind: "game", title: "Elden Ring", subtitle: "FromSoftware", year: 2022, tags: ["rpg", "open world"], genres: ["Action", "RPG"] },
-  { kind: "game", title: "Hades", subtitle: "Supergiant Games", year: 2020, tags: ["roguelike", "indie"], genres: ["Action", "Indie"], elo: 1710, matches: 10, wins: 8, losses: 2 },
-  { kind: "game", title: "Disco Elysium", subtitle: "ZA/UM", year: 2019, tags: ["rpg", "narrative"], genres: ["RPG", "Adventure"] },
-  { kind: "game", title: "The Legend of Zelda: Breath of the Wild", subtitle: "Nintendo", year: 2017, tags: ["adventure", "open world"], genres: ["Adventure", "Action"] },
-  { kind: "game", title: "Portal 2", subtitle: "Valve", year: 2011, tags: ["puzzle", "co-op"], genres: ["Puzzle", "Adventure"], elo: 1690, matches: 9, wins: 7, losses: 2 },
-  // more movies
   { kind: "movie", title: "Seven Samurai", subtitle: "Akira Kurosawa", year: 1954, tags: ["action", "drama"] },
   { kind: "movie", title: "2001: A Space Odyssey", subtitle: "Stanley Kubrick", year: 1968, tags: ["sci-fi", "classic"] },
   { kind: "movie", title: "Do the Right Thing", subtitle: "Spike Lee", year: 1989, tags: ["drama", "comedy"] },
@@ -169,7 +119,17 @@ const MEDIA_CATALOG: CatalogSeed[] = [
   { kind: "movie", title: "Pan's Labyrinth", subtitle: "Guillermo del Toro", year: 2006, tags: ["fantasy", "drama"] },
   { kind: "movie", title: "The Social Network", subtitle: "David Fincher", year: 2010, tags: ["drama"] },
   { kind: "movie", title: "Dune: Part Two", subtitle: "Denis Villeneuve", year: 2024, tags: ["sci-fi", "epic"] },
-  // more tv
+  // tv
+  { kind: "tv", title: "The Sopranos", subtitle: "David Chase", year: 1999, tags: ["crime", "drama"] },
+  { kind: "tv", title: "Breaking Bad", subtitle: "Vince Gilligan", year: 2008, tags: ["crime", "drama"], elo: 1770, matches: 15, wins: 13, losses: 2 },
+  { kind: "tv", title: "The Wire", subtitle: "David Simon", year: 2002, tags: ["crime", "drama"] },
+  { kind: "tv", title: "Fleabag", subtitle: "Phoebe Waller-Bridge", year: 2016, tags: ["comedy", "drama"], elo: 1680, matches: 9, wins: 7, losses: 2 },
+  { kind: "tv", title: "Succession", subtitle: "Jesse Armstrong", year: 2018, tags: ["drama", "comedy"] },
+  { kind: "tv", title: "The Bear", subtitle: "Christopher Storer", year: 2022, tags: ["drama", "comedy"], elo: 1690, matches: 10, wins: 8, losses: 2 },
+  { kind: "tv", title: "Twin Peaks", subtitle: "David Lynch", year: 1990, tags: ["mystery", "drama"] },
+  { kind: "tv", title: "Arcane", subtitle: "Christian Linke", year: 2021, tags: ["animation", "action"] },
+  { kind: "tv", title: "Better Call Saul", subtitle: "Vince Gilligan", year: 2015, tags: ["crime", "drama"] },
+  { kind: "tv", title: "Severance", subtitle: "Dan Erickson", year: 2022, tags: ["sci-fi", "thriller"], elo: 1670, matches: 8, wins: 6, losses: 2 },
   { kind: "tv", title: "The Twilight Zone", subtitle: "Rod Serling", year: 1959, tags: ["sci-fi", "anthology"] },
   { kind: "tv", title: "Cheers", subtitle: "James Burrows", year: 1982, tags: ["comedy"] },
   { kind: "tv", title: "Seinfeld", subtitle: "Larry David", year: 1989, tags: ["comedy"] },
@@ -188,7 +148,17 @@ const MEDIA_CATALOG: CatalogSeed[] = [
   { kind: "tv", title: "Watchmen", subtitle: "Damon Lindelof", year: 2019, tags: ["superhero", "drama"] },
   { kind: "tv", title: "Ted Lasso", subtitle: "Bill Lawrence", year: 2020, tags: ["comedy", "sports"] },
   { kind: "tv", title: "The Last of Us", subtitle: "Craig Mazin", year: 2023, tags: ["drama", "post-apocalyptic"] },
-  // more music
+  // music
+  { kind: "music", title: "Blonde", subtitle: "Frank Ocean", year: 2016, tags: ["r&b", "alternative"], elo: 1650, matches: 11, wins: 8, losses: 3 },
+  { kind: "music", title: "Kid A", subtitle: "Radiohead", year: 2000, tags: ["alternative", "electronic"], elo: 1660, matches: 10, wins: 8, losses: 2 },
+  { kind: "music", title: "To Pimp a Butterfly", subtitle: "Kendrick Lamar", year: 2015, tags: ["hip-hop", "jazz"], elo: 1720, matches: 12, wins: 10, losses: 2 },
+  { kind: "music", title: "Rumours", subtitle: "Fleetwood Mac", year: 1977, tags: ["rock", "classic"] },
+  { kind: "music", title: "Blue", subtitle: "Joni Mitchell", year: 1971, tags: ["folk", "singer-songwriter"] },
+  { kind: "music", title: "The Dark Side of the Moon", subtitle: "Pink Floyd", year: 1973, tags: ["rock", "progressive"] },
+  { kind: "music", title: "In Rainbows", subtitle: "Radiohead", year: 2007, tags: ["alternative", "rock"] },
+  { kind: "music", title: "Vespertine", subtitle: "Björk", year: 2001, tags: ["electronic", "art pop"] },
+  { kind: "music", title: "The Miseducation of Lauryn Hill", subtitle: "Lauryn Hill", year: 1998, tags: ["hip-hop", "r&b"] },
+  { kind: "music", title: "Sound of Silver", subtitle: "LCD Soundsystem", year: 2007, tags: ["electronic", "dance"] },
   { kind: "music", title: "OK Computer", subtitle: "Radiohead", year: 1997, tags: ["alternative", "rock"] },
   { kind: "music", title: "Illmatic", subtitle: "Nas", year: 1994, tags: ["hip-hop"] },
   { kind: "music", title: "The Queen Is Dead", subtitle: "The Smiths", year: 1986, tags: ["indie", "rock"] },
@@ -207,7 +177,15 @@ const MEDIA_CATALOG: CatalogSeed[] = [
   { kind: "music", title: "A Seat at the Table", subtitle: "Solange", year: 2016, tags: ["r&b", "soul"] },
   { kind: "music", title: "Punisher", subtitle: "Phoebe Bridgers", year: 2020, tags: ["indie folk"] },
   { kind: "music", title: "Renaissance", subtitle: "Beyoncé", year: 2022, tags: ["dance", "pop"] },
-  // more podcasts
+  // podcasts
+  { kind: "podcast", title: "Serial", subtitle: "Sarah Koenig", year: 2014, tags: ["true crime", "investigative"], elo: 1640, matches: 7, wins: 5, losses: 2 },
+  { kind: "podcast", title: "Radiolab", subtitle: "Jad Abumrad", year: 2002, tags: ["science", "storytelling"] },
+  { kind: "podcast", title: "The Daily", subtitle: "The New York Times", year: 2017, tags: ["news", "daily"], elo: 1600, matches: 6, wins: 4, losses: 2 },
+  { kind: "podcast", title: "99% Invisible", subtitle: "Roman Mars", year: 2010, tags: ["design", "culture"] },
+  { kind: "podcast", title: "Hardcore History", subtitle: "Dan Carlin", year: 2006, tags: ["history", "long-form"] },
+  { kind: "podcast", title: "My Favorite Murder", subtitle: "Karen Kilgariff", year: 2016, tags: ["true crime", "comedy"] },
+  { kind: "podcast", title: "Reply All", subtitle: "PJ Vogt", year: 2014, tags: ["technology", "internet"] },
+  { kind: "podcast", title: "The Ezra Klein Show", subtitle: "Ezra Klein", year: 2016, tags: ["politics", "interviews"] },
   { kind: "podcast", title: "This American Life", subtitle: "Ira Glass", year: 1995, tags: ["storytelling", "journalism"] },
   { kind: "podcast", title: "Freakonomics Radio", subtitle: "Stephen Dubner", year: 2010, tags: ["economics", "interviews"] },
   { kind: "podcast", title: "WTF with Marc Maron", subtitle: "Marc Maron", year: 2009, tags: ["comedy", "interviews"] },
@@ -220,7 +198,17 @@ const MEDIA_CATALOG: CatalogSeed[] = [
   { kind: "podcast", title: "Pod Save America", subtitle: "Jon Favreau", year: 2017, tags: ["politics"] },
   { kind: "podcast", title: "Darknet Diaries", subtitle: "Jack Rhysider", year: 2017, tags: ["technology", "true crime"] },
   { kind: "podcast", title: "Ologies", subtitle: "Alie Ward", year: 2017, tags: ["science", "interviews"] },
-  // more books
+  // books
+  { kind: "book", title: "Beloved", subtitle: "Toni Morrison", year: 1987, tags: ["literary", "historical"], elo: 1680, matches: 8, wins: 6, losses: 2 },
+  { kind: "book", title: "One Hundred Years of Solitude", subtitle: "Gabriel García Márquez", year: 1967, tags: ["magical realism", "literary"] },
+  { kind: "book", title: "The Left Hand of Darkness", subtitle: "Ursula K. Le Guin", year: 1969, tags: ["sci-fi", "literary"] },
+  { kind: "book", title: "Dune", subtitle: "Frank Herbert", year: 1965, tags: ["sci-fi", "epic"], elo: 1620, matches: 7, wins: 5, losses: 2 },
+  { kind: "book", title: "Normal People", subtitle: "Sally Rooney", year: 2018, tags: ["romance", "contemporary"] },
+  { kind: "book", title: "The Secret History", subtitle: "Donna Tartt", year: 1992, tags: ["mystery", "literary"] },
+  { kind: "book", title: "Piranesi", subtitle: "Susanna Clarke", year: 2020, tags: ["fantasy", "mystery"], elo: 1700, matches: 9, wins: 7, losses: 2 },
+  { kind: "book", title: "East of Eden", subtitle: "John Steinbeck", year: 1952, tags: ["classic", "literary"] },
+  { kind: "book", title: "The Remains of the Day", subtitle: "Kazuo Ishiguro", year: 1989, tags: ["literary", "historical"] },
+  { kind: "book", title: "Project Hail Mary", subtitle: "Andy Weir", year: 2021, tags: ["sci-fi", "adventure"] },
   { kind: "book", title: "The Great Gatsby", subtitle: "F. Scott Fitzgerald", year: 1925, tags: ["classic", "literary"] },
   { kind: "book", title: "1984", subtitle: "George Orwell", year: 1949, tags: ["dystopian", "classic"] },
   { kind: "book", title: "Jane Eyre", subtitle: "Charlotte Brontë", year: 1847, tags: ["classic", "romance"] },
@@ -242,7 +230,13 @@ const MEDIA_CATALOG: CatalogSeed[] = [
   { kind: "book", title: "Pachinko", subtitle: "Min Jin Lee", year: 2017, tags: ["historical", "literary"] },
   { kind: "book", title: "Klara and the Sun", subtitle: "Kazuo Ishiguro", year: 2021, tags: ["sci-fi", "literary"] },
   { kind: "book", title: "Tomorrow, and Tomorrow, and Tomorrow", subtitle: "Gabrielle Zevin", year: 2022, tags: ["contemporary", "games"] },
-  // more games
+  // games
+  { kind: "game", title: "Hollow Knight", subtitle: "Team Cherry", year: 2017, tags: ["metroidvania", "indie"], genres: ["Action", "Adventure", "Indie"], elo: 1760, matches: 13, wins: 11, losses: 2 },
+  { kind: "game", title: "Elden Ring", subtitle: "FromSoftware", year: 2022, tags: ["rpg", "open world"], genres: ["Action", "RPG"] },
+  { kind: "game", title: "Hades", subtitle: "Supergiant Games", year: 2020, tags: ["roguelike", "indie"], genres: ["Action", "Indie"], elo: 1710, matches: 10, wins: 8, losses: 2 },
+  { kind: "game", title: "Disco Elysium", subtitle: "ZA/UM", year: 2019, tags: ["rpg", "narrative"], genres: ["RPG", "Adventure"] },
+  { kind: "game", title: "The Legend of Zelda: Breath of the Wild", subtitle: "Nintendo", year: 2017, tags: ["adventure", "open world"], genres: ["Adventure", "Action"] },
+  { kind: "game", title: "Portal 2", subtitle: "Valve", year: 2011, tags: ["puzzle", "co-op"], genres: ["Puzzle", "Adventure"], elo: 1690, matches: 9, wins: 7, losses: 2 },
   { kind: "game", title: "The Witcher 3: Wild Hunt", subtitle: "CD Projekt Red", year: 2015, tags: ["rpg", "open world"], genres: ["RPG", "Adventure"] },
   { kind: "game", title: "Red Dead Redemption 2", subtitle: "Rockstar Games", year: 2018, tags: ["action", "open world"], genres: ["Action", "Adventure"] },
   { kind: "game", title: "Bloodborne", subtitle: "FromSoftware", year: 2015, tags: ["action", "rpg"], genres: ["Action", "RPG"] },
@@ -258,6 +252,7 @@ const MEDIA_CATALOG: CatalogSeed[] = [
   { kind: "game", title: "Mario Kart 8 Deluxe", subtitle: "Nintendo", year: 2017, tags: ["racing", "multiplayer"], genres: ["Racing"] },
   { kind: "game", title: "Slay the Spire", subtitle: "Mega Crit", year: 2019, tags: ["roguelike", "card"], genres: ["Strategy", "Indie"] },
   { kind: "game", title: "Inside", subtitle: "Playdead", year: 2016, tags: ["puzzle", "platformer"], genres: ["Puzzle", "Adventure"] },
+
 ];
 
 /** Short, original overview blurbs (factual metadata only). */

@@ -58,6 +58,14 @@ async function call(path, { method = "GET", body, cookie, redirect = "manual" } 
   return { status: response.status, json, text, cookie: nextCookie, headers: response.headers };
 }
 
+async function deleteAccount(cookie) {
+  return call("/api/account/delete", {
+    method: "POST",
+    body: { password, confirm: "DELETE" },
+    cookie,
+  });
+}
+
 async function signup(label) {
   const email = `e2e-${label}-${stamp}@appolo.test`;
   const result = await call("/api/auth/signup", {
@@ -382,11 +390,7 @@ await check("deletion requires the password and the typed confirmation", () => {
   assert.equal(weakConfirm.status, 400);
 });
 
-const deleted = await call("/api/account/delete", {
-  method: "POST",
-  body: { password, confirm: "DELETE" },
-  cookie: beta.cookie,
-});
+const deleted = await deleteAccount(beta.cookie);
 const betaLoginAfter = await call("/api/auth/login", { method: "POST", body: { email: beta.email, password } });
 const alphaLoginAfter = await call("/api/auth/login", { method: "POST", body: { email: alpha.email, password } });
 await check("account deletion removes the user, workspace and media data", () => {
@@ -395,13 +399,8 @@ await check("account deletion removes the user, workspace and media data", () =>
   assert.equal(alphaLoginAfter.status, 200, "deleting one account removed another");
 });
 
-// Leave no test accounts behind: their ratings would otherwise show up in
-// community rankings and make the visual snapshots drift between runs.
-const alphaDeleted = await call("/api/account/delete", {
-  method: "POST",
-  body: { password, confirm: "DELETE" },
-  cookie: alpha.cookie,
-});
+// Leave no test data behind to skew community rankings between runs.
+const alphaDeleted = await deleteAccount(alpha.cookie);
 await check("e2e cleans up its remaining test account", () => {
   assert.equal(alphaDeleted.status, 200, `alpha delete failed: ${alphaDeleted.text.slice(0, 160)}`);
 });
