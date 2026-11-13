@@ -27,7 +27,6 @@ const {
   aiKnowledgeDocs,
   aiKnowledgeChunks,
   aiTurns,
-  conversations,
   internalNotes,
 } = schema;
 

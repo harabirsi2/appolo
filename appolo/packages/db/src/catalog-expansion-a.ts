@@ -535,7 +535,7 @@ Half-Life|Valve|1998|sci-fi,shooter
 Half-Life 2|Valve|2004|sci-fi,shooter
 Portal|Valve|2007|puzzle
 Portal 2|Valve|2011|puzzle
-Doom|id Software|1993|shooter
+Doom (1993)|id Software|1993|shooter
 Doom|id Software|2016|shooter
 Doom Eternal|id Software|2020|shooter
 Quake|id Software|1996|shooter

@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { z } from "zod";
 import { firstIssue } from "@appolo/core";
 import { apiError, jsonError } from "@/lib/api";
 import { getSession } from "@/lib/session";

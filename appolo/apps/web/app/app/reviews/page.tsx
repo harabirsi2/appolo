@@ -108,7 +108,6 @@ export default async function ReviewsPage({
   const canRequest = can(session.membership.role, "reviews:request");
   const canRespond = can(session.membership.role, "reviews:respond");
   const smsTemplates = templates.filter((template) => template.channel === "sms" && template.active);
-  const emailTemplates = templates.filter((template) => template.channel === "email" && template.active);
   const defaultTemplate = templates.find((template) => template.isDefault && template.channel === "sms") ?? smsTemplates[0];
   const clickRate = stats.requestsSent > 0 ? Math.round((stats.clicked / stats.requestsSent) * 100) : 0;
 

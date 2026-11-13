@@ -5,7 +5,6 @@ import {
   blendGenreWeights,
   diversifyRankedFeed,
   genreProfile,
-  mediaKindSchema,
   normalizeGenreWeights,
   rankFeed,
   scoreForElo,
@@ -15,7 +14,7 @@ import {
 } from "@appolo/core";
 import { getDb, withOrg, schema } from "@/lib/db";
 import { DomainError } from "./errors";
-import { rankedRatings, watchlistFor, type CatalogItem, type RankedItem } from "./rankings";
+import { mapCatalogItem, rankedRatings, watchlistFor, type CatalogItem, type RankedItem } from "./rankings";
 import { listInterests } from "./interests";
 
 const {
@@ -752,19 +751,7 @@ async function podCardsForRows(rows: Array<typeof pods.$inferSelect>, owner: {
       ownerUsername: owner.username,
       ownerDisplayName: owner.displayName,
       count: items.length,
-      items: items.slice(0, 4).map((item) => ({
-        id: item.id,
-        kind: item.kind,
-        title: item.title,
-        subtitle: item.subtitle,
-        year: item.year ?? null,
-        imageUrl: item.imageUrl ?? null,
-        description: item.description ?? null,
-        links: (item.links ?? {}) as Record<string, string>,
-        genres: item.genres ?? [],
-        trailerUrl: item.trailerUrl ?? null,
-        tags: item.tags ?? [],
-      })),
+      items: items.slice(0, 4).map(mapCatalogItem),
     };
   });
 }
@@ -844,17 +831,7 @@ async function podDetail(
   const scoreById = new Map(ratings.map((rating) => [rating.id, rating.score]));
 
   const entries = rows.map(({ item, note, addedByOrgId }) => ({
-    id: item.id,
-    kind: item.kind,
-    title: item.title,
-    subtitle: item.subtitle,
-    year: item.year ?? null,
-    imageUrl: item.imageUrl ?? null,
-    description: item.description ?? null,
-    links: (item.links ?? {}) as Record<string, string>,
-    genres: item.genres ?? [],
-    trailerUrl: item.trailerUrl ?? null,
-    tags: item.tags ?? [],
+    ...mapCatalogItem(item),
     note: note ?? null,
     score: scoreById.get(item.id) ?? null,
     addedByUsername: addedByOrgId ? (contributorByOrg.get(addedByOrgId) ?? null) : null,

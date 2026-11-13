@@ -114,7 +114,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 | Indexing for real query shapes | Done | trigram + GIN indexes (`0013_search_indexes.sql`), rating indexes |
 | RLS / tenant isolation | Done | `withOrg`, RLS policies, `db:rls-test` |
 | Pagination | Done | comments paginated; catalog/feed limits |
-| Seed integrity (no fabricated ratings) | Done | `packages/db/src/seed.ts` — 1,180 titles, covers only |
+| Seed integrity (no fabricated ratings) | Done | `packages/db/src/seed.ts` — 1,181 titles, covers only |
 
 ## 10. Security and reliability
 
@@ -148,7 +148,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 | Image optimisation | Done | `next/image` + per-slot `sizes` + 96–360 px device widths; Browse −80%, Home −73% |
 | Bundle size checked | Done | 102 kB shared First Load JS in production build |
 | DB latency addressed | Done | indexes, batched follow counts, session cache |
-| Caching | Partial | `popularThisWeek` cached 60 s via `unstable_cache`; leaderboard/search uncached |
+| Caching | Done | popular rail 60 s, leaderboard 30 s, both tag-invalidated on rating; search uncached |
 | Large-list rendering | Partial | rails/grids are bounded; no virtualisation |
 
 ## 13. Implementation strategy

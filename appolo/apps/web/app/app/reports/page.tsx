@@ -1,5 +1,5 @@
 import { can } from "@appolo/core";
-import { Badge, Button, Card, CardTitle, Stat } from "@appolo/ui";
+import { Badge, Card, CardTitle, Stat } from "@appolo/ui";
 import { requireSession } from "@/lib/session";
 import { contactsTouched, reviewReport } from "@/lib/services/reports";
 

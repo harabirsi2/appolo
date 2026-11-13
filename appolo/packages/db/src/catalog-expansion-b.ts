@@ -108,7 +108,6 @@ The Velvet Underground & Nico|The Velvet Underground|1967|rock
 Is This It|The Strokes|2001|rock
 Turn on the Bright Lights|Interpol|2002|rock
 Funeral|Arcade Fire|2004|rock
-The Suburbs|Arcade Fire|2010|rock
 Boxer|The National|2007|rock
 Illinois|Sufjan Stevens|2005|folk
 For Emma, Forever Ago|Bon Iver|2007|folk
@@ -180,7 +179,6 @@ Getz/Gilberto|João Gilberto|1964|bossa nova
 Zombie|Fela Kuti|1976|afrobeat
 The Köln Concert|Keith Jarrett|1975|jazz
 Songs from the Big Chair|Tears for Fears|1985|pop
-Hounds of Love|Kate Bush|1985|art pop
 The Downward Spiral|Nine Inch Nails|1994|industrial
 The Fragile|Nine Inch Nails|1999|industrial
 Kid A|Radiohead|2000|electronic

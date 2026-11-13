@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { invalidateCommunity } from "@/lib/cache";
 import { firstIssue, voteInputSchema } from "@appolo/core";
 import { getSession } from "@/lib/session";
 import { apiError, jsonError, rateLimited } from "@/lib/api";
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     if (!parsed.success) return jsonError(firstIssue(parsed.error), 400, "INVALID_VOTE");
 
     const outcome = await submitVote(session.org.id, itemId, parsed.data.opponentId, parsed.data.result);
+    invalidateCommunity();
     return NextResponse.json(outcome);
   } catch (error) {
     return apiError(error);

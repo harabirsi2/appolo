@@ -199,7 +199,13 @@ Prioritised gaps:
    home-page request in that window. Measured `/app` TTFB before and after:
    213–251 ms vs 207–252 ms — inside noise at this data size. The saving is one
    aggregation per request, which matters as ratings grow, not a visible
-   latency win today. The community leaderboard and search remain uncached.
+   latency win today.
+10. **Leaderboard cache.** `catalogLeaderboard` is cached for 30 s and
+    tag-invalidated when a vote, manual score or undo lands. Measured on the
+    dev server, six warm requests to `/app/browse`: median **267 ms → 199 ms**
+    and **13.8 → 13.0** committed transactions per request. The remaining
+    queries are per-viewer (session, profile, watchlist) so they cannot be
+    shared. Search remains uncached.
 
 ## 7. Reproduction
 

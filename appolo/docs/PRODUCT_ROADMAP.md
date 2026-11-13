@@ -37,7 +37,7 @@ Open:
 
 ## Phase 2 — Media and review foundation (Mostly Done)
 
-Existing: shared catalog of 1,180 titles across six kinds — 357 movies, 173 TV, 204 albums,
+Existing: shared catalog of 1,181 titles across six kinds — 357 movies, 173 TV, 204 albums,
 80 podcasts, 196 books and 170 games (+anime as a TV/movie genre) — providers, search,
 detail pages, credits/people, reviews with attachments, spoilers, reactions, comments,
 pods, watchlist, history.
@@ -161,7 +161,7 @@ Done in this pass:
   sessions. The shared demo account is protected.
 
 Done in this pass:
-- The demo catalog grew from 56 to 1,180 titles, with 196 books plus new movies, TV,
+- The demo catalog grew from 56 to 1,181 titles, with 196 books plus new movies, TV,
   albums, podcasts and games, each with cached cover art (generated art for the few
   titles without a provider cover), so the comparison flow has a deep pool in every
   section.

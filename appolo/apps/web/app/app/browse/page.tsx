@@ -4,7 +4,7 @@ import { requireSession } from "@/lib/session";
 import { catalogLeaderboard, rankedRatings, weeklyMovers, type LeaderboardSort } from "@/lib/services/rankings";
 import { followingOrgIds, tasteTwins } from "@/lib/services/social";
 import { MediaArt } from "@/components/media-art";
-import { Avatar, ScoreText } from "@/components/podiums";
+import { Avatar } from "@/components/podiums";
 import { KindIcon } from "@/components/kind-icon";
 import { FollowButton } from "@/components/follow-button";
 import { BackButton } from "@/components/back-button";

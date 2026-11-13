@@ -11,11 +11,6 @@ import {
 export const metadata = { title: "AI Employee" };
 export const dynamic = "force-dynamic";
 
-function formatDate(value: Date | string): string {
-  const date = typeof value === "string" ? new Date(value) : value;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
 export default async function AiPage({
   searchParams,
 }: {

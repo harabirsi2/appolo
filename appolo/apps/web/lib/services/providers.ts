@@ -113,7 +113,6 @@ export interface EmailProvider {
   sendEmail(input: SendEmailInput): Promise<SendEmailResult>;
 }
 
-const DEFAULT_EMAIL_FROM = "Appolo <reviews@appolo.local>";
 const DEFAULT_EMAIL_SUBJECT = "A message from our team";
 
 /** Dev/provider-less adapter; records the send locally as delivered. */

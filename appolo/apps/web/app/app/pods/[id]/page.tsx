@@ -1,8 +1,6 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/session";
 import { podById } from "@/lib/services/social";
-import { MediaArt } from "@/components/media-art";
 import { BackButton } from "@/components/back-button";
 import { PodEditor } from "@/components/pod-editor";
 

@@ -3,13 +3,28 @@
 Notable, user-visible or architectural changes. Dates are ISO. Entries describe
 why the change was made, not every commit.
 
+## Code cleanup and shared-read caching
+
+- Removed dead code: 15 unused imports/locals, two orphaned components
+  (`nav-link`, `phase-notice`), and duplicate catalog rows in the expansion
+  modules.
+- Replaced two hand-rolled catalog mappers in `social.ts` with the canonical
+  `mapCatalogItem`, so a new item field is mapped in one place.
+- Cached the community leaderboard for 30 s and invalidated both community
+  tags on rating changes. Measured Browse: **267 ms → 199 ms** median server
+  response and 13.8 → 13.0 DB transactions per request.
+- Enabled `noUnusedLocals` / `noUnusedParameters` in `tsconfig.base.json` so
+  dead imports fail typecheck from now on.
+- Added `Doom (1993)` as its own catalog entry; the 1993 and 2016 games no
+  longer collide on one slug.
+
 ## 2026-11-13
 
 ### Catalog
-- Grew the shared catalog from 338 to **1,180 titles**: 357 movies, 173 TV, 204
+- Grew the shared catalog from 338 to **1,181 titles**: 357 movies, 173 TV, 204
   albums, 80 podcasts, 196 books, 170 games, all with real metadata and no
   fabricated ratings. Seed de-duplicates by kind and slug so re-runs are safe.
-- Fetched and committed **1,165 covers**. Provider originals were normalized to
+- Fetched and committed **1,174 covers**. Provider originals were normalized to
   720 px / JPEG-80: the directory is 41 MB instead of 145 MB.
 - Cover downloads now normalize at write time, so future seeding cannot add
   multi-megabyte originals.

@@ -13,9 +13,9 @@ Legend: **Shipped** · **Partial** · **Not built**
 
 | Area | Status | Detail |
 |---|---|---|
-| Shared catalog | Shipped | 1,180 titles: 357 movies, 173 TV, 204 albums, 80 podcasts, 196 books, 170 games |
+| Shared catalog | Shipped | 1,181 titles: 357 movies, 173 TV, 204 albums, 80 podcasts, 196 books, 171 games |
 | Metadata | Shipped | Title, creator/author/studio, year, genres, descriptions where curated, tags |
-| Cover art | Shipped | 1,165 locally cached covers (720 px long edge, JPEG-80); the rest use distinct generated tiles |
+| Cover art | Shipped | 1,174 locally cached covers (720 px long edge, JPEG-80); the rest use a provider URL or distinct generated tiles |
 | Credits | Shipped | Actor/director/artist pages linked from items (`catalog_credits`) |
 | Search | Shipped | Trigram-indexed title/subtitle search, genre filters, kind filters |
 | Provider enrichment | Shipped | Optional external providers insert new titles after the response (never block search) |

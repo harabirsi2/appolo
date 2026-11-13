@@ -445,9 +445,6 @@ export async function sendReviewRequest(
   }
 
   const businessName = context.org?.name ?? "our business";
-  const publicUrl =
-    platformPublicUrl(context.platform?.externalRef ?? null) ?? fallbackReviewUrl(businessName);
-
   const rawToken = publicToken();
   const tokenHash = sha256(rawToken);
   const reviewUrl = `${baseUrl()}/r/${rawToken}`;

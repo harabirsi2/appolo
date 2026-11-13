@@ -324,7 +324,7 @@ export async function getCatalogItem(itemId: string): Promise<CatalogItem | null
   return rows[0] ? mapCatalogItem(rows[0]) : null;
 }
 
-function mapCatalogItem(row: typeof catalogItems.$inferSelect): CatalogItem {
+export function mapCatalogItem(row: typeof catalogItems.$inferSelect): CatalogItem {
   return {
     id: row.id,
     kind: row.kind,
@@ -1218,8 +1218,10 @@ export interface CommunityItem extends CatalogItem {
  * The shared catalog ordered by community opinion rather than by one taste
  * profile. `top` ranks by average score, `rated` by how many people weighed
  * in, and `new` by the newest additions to the catalog.
+ *
+ * Global and identical for every viewer, so the public wrapper caches it.
  */
-export async function catalogLeaderboard(
+async function catalogLeaderboardUncached(
   options: { kind?: MediaKind; genre?: string; sort?: LeaderboardSort; limit?: number } = {},
 ): Promise<CommunityItem[]> {
   const db = getDb();
@@ -1282,6 +1284,18 @@ export async function catalogLeaderboard(
       coordination: estimate.coordination,
     };
   });
+}
+
+const catalogLeaderboardCached = unstable_cache(
+  catalogLeaderboardUncached,
+  ["catalog-leaderboard"],
+  { revalidate: 30, tags: ["community-leaderboard"] },
+);
+
+export async function catalogLeaderboard(
+  options: { kind?: MediaKind; genre?: string; sort?: LeaderboardSort; limit?: number } = {},
+): Promise<CommunityItem[]> {
+  return catalogLeaderboardCached(options);
 }
 
 export interface SimilarItem extends CommunityItem {

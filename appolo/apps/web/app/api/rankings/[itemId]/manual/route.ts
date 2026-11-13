@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { invalidateCommunity } from "@/lib/cache";
 import { z } from "zod";
 import { apiError, jsonError } from "@/lib/api";
 import { getSession } from "@/lib/session";
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     const parsed = schema.safeParse(body);
     if (!parsed.success) return jsonError("Score must be between 0 and 10.", 400, "INVALID_SCORE");
     const rating = await setManualRating(session.org.id, itemId, parsed.data.score);
+    invalidateCommunity();
     return NextResponse.json({ rating });
   } catch (error) {
     return apiError(error);

@@ -5,7 +5,7 @@ import { KindIcon } from "@/components/kind-icon";
 import { requireSession } from "@/lib/session";
 import { compareTaste, getProfileByOrgId, getProfileByUsername } from "@/lib/services/social";
 import { MediaArt } from "@/components/media-art";
-import { Avatar, ScoreText } from "@/components/podiums";
+import { Avatar } from "@/components/podiums";
 import { BackButton } from "@/components/back-button";
 
 export const dynamic = "force-dynamic";

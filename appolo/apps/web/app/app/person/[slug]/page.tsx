@@ -2,9 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireSession } from "@/lib/session";
 import { personBySlug } from "@/lib/services/rankings";
-import { MediaArt, mediaHue } from "@/components/media-art";
+import { MediaArt } from "@/components/media-art";
 import { BackButton } from "@/components/back-button";
-import { Icon } from "@/components/podiums";
 
 export const dynamic = "force-dynamic";
 

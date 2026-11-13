@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { invalidateCommunity } from "@/lib/cache";
 import { getSession } from "@/lib/session";
 import { apiError, jsonError } from "@/lib/api";
 import { undoLastComparison } from "@/lib/services/rankings";
@@ -18,6 +19,7 @@ export async function POST(_request: NextRequest, { params }: Params): Promise<N
 
     const { itemId } = await params;
     const result = await undoLastComparison(session.org.id, itemId);
+    invalidateCommunity();
     return NextResponse.json(result);
   } catch (error) {
     return apiError(error);

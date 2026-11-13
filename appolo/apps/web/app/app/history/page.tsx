@@ -2,7 +2,6 @@ import Link from "next/link";
 import { requireSession } from "@/lib/session";
 import { ratingHistory } from "@/lib/services/rankings";
 import { MediaArt } from "@/components/media-art";
-import { ScoreText } from "@/components/podiums";
 import { BackButton } from "@/components/back-button";
 
 export const dynamic = "force-dynamic";

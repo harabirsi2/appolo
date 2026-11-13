@@ -3,7 +3,7 @@ import { MEDIA_KIND_LABELS } from "@appolo/core";
 import { requireSession } from "@/lib/session";
 import { tasteDna } from "@/lib/services/taste";
 import { MediaArt } from "@/components/media-art";
-import { RatingCurve, ScoreText } from "@/components/podiums";
+import { RatingCurve } from "@/components/podiums";
 import { ShareButton } from "@/components/share-button";
 import { BackButton } from "@/components/back-button";
 
