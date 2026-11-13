@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { cn } from "@appolo/ui";
 import type { MediaKind } from "@appolo/core/ranking";
 
@@ -41,12 +42,15 @@ export function MediaArt({
   title,
   imageUrl,
   className,
+  sizes,
 }: {
   kind: MediaKind;
   title: string;
   imageUrl?: string | null;
   genres?: readonly string[] | null;
   className?: string;
+  /** Rendered width hint for the image optimizer; defaults to a grid tile. */
+  sizes?: string;
 }) {
   const hue = mediaHue(title);
   const initials = title
@@ -66,8 +70,13 @@ export function MediaArt({
         )}
         aria-hidden
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={imageUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+        <Image
+          src={imageUrl}
+          alt=""
+          fill
+          sizes={sizes ?? "(max-width: 768px) 45vw, 360px"}
+          className="object-cover"
+        />
         <span className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-inset ring-white/10" />
       </div>
     );

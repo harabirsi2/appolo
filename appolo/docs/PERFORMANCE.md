@@ -189,6 +189,10 @@ Prioritised gaps:
    creates, so community rankings and local data stay predictable.
 7. **Documentation drift**: test count (18 vs 31), lint claim, and
    `ARCHITECTURE.md` describing a broader CRM stack than is currently wired.
+8. **Cover delivery (resolved).** `<img>` loaded the full 720 px file into
+   44–355 px tiles, so Browse transferred 1.65 MB of cover art. Covers now use
+   `next/image` with UI-matched `sizes` and a 360 px device width, cutting the
+   same page to 0.33 MB (−78% total transfer) with no layout change.
 
 ## 7. Reproduction
 
