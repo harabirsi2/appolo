@@ -186,7 +186,7 @@ export default async function SearchPage({
                       href={`/app/item/${item.id}`}
                       className="flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-white/[0.04]"
                     >
-                      <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} className="h-12 w-12 rounded-lg" />
+                      <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} sizes="48px" className="h-12 w-12 rounded-lg" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-ink">{item.title}</p>
                         <p className="truncate text-[12px] text-muted-2">
@@ -234,7 +234,7 @@ export default async function SearchPage({
                 {recentlyRated.map((item) => (
                   <Link key={item.id} href={`/app/item/${item.id}`} className="w-[116px] shrink-0">
                     <div className="relative">
-                      <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} className="aspect-square w-full rounded-xl" />
+                      <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} sizes="116px" className="aspect-square w-full rounded-xl" />
                       <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/75 px-1.5 py-0.5 text-[11px] font-bold text-brand backdrop-blur">
                         {item.score.toFixed(1)}
                       </span>

@@ -12,7 +12,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["postgres"],
   // Covers render between 44 px and 728 px wide; smaller variants avoid
   // downloading the full 720 px file for a thumbnail.
-  images: { deviceSizes: [360, 640, 828, 1080, 1200, 1920] },
+  images: { deviceSizes: [96, 128, 160, 192, 256, 360, 640, 828, 1080, 1200, 1920] },
   poweredByHeader: false,
   // Keep the preview clean; the dev overlay badge sits on top of the bottom nav.
   devIndicators: false,

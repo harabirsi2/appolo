@@ -118,6 +118,7 @@ export default async function TastePage() {
                     kind={pick.item.kind}
                     title={pick.item.title}
                     imageUrl={pick.item.imageUrl}
+                    sizes="44px"
                     className="h-11 w-11 rounded-lg"
                   />
                   <div className="min-w-0 flex-1">

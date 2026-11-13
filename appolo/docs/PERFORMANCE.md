@@ -191,8 +191,9 @@ Prioritised gaps:
    `ARCHITECTURE.md` describing a broader CRM stack than is currently wired.
 8. **Cover delivery (resolved).** `<img>` loaded the full 720 px file into
    44–355 px tiles, so Browse transferred 1.65 MB of cover art. Covers now use
-   `next/image` with UI-matched `sizes` and a 360 px device width, cutting the
-   same page to 0.33 MB (−78% total transfer) with no layout change.
+   `next/image` with a `sizes` value at every call site and 96–360 px device
+   widths: Browse fell to 0.33 MB (−80%), Home to 0.07 MB (−73%), and 44–72 px
+   rows request 96 px art instead of 360 px, with no layout change.
 
 ## 7. Reproduction
 

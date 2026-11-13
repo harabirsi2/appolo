@@ -162,7 +162,7 @@ export default async function HomePage({
             {top.map((item, index) => (
               <Link key={item.id} href={`/app/item/${item.id}`} className="w-[124px] shrink-0">
                 <div className="relative">
-                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} className="aspect-square w-full rounded-xl" />
+                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} sizes="124px" className="aspect-square w-full rounded-xl" />
                   <span
                     className={`absolute left-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full text-[11px] font-extrabold backdrop-blur ${rankTone(index)}`}
                   >
@@ -193,7 +193,7 @@ export default async function HomePage({
                   href={`/app/item/${item.id}`}
                   className="card-surface card-hover flex items-center gap-3 rounded-2xl p-2.5"
                 >
-                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="h-11 w-11 rounded-lg" />
+                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} sizes="44px" className="h-11 w-11 rounded-lg" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-semibold text-ink">{item.title}</p>
                     <p className="truncate text-[11px] text-muted-2">{item.votes} decided matchups this week</p>
@@ -238,7 +238,7 @@ export default async function HomePage({
           <div className="snap-rail no-scrollbar -mx-5 flex gap-3 overflow-x-auto px-5 pb-1">
             {popular.map((item) => (
               <Link key={item.id} href={`/app/item/${item.id}`} className="w-[116px] shrink-0">
-                <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} className="aspect-square w-full rounded-xl" />
+                <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} sizes="116px" className="aspect-square w-full rounded-xl" />
                 <p className="mt-2 truncate text-[13px] font-medium text-ink">{item.title}</p>
                 <p className="truncate text-[11px] text-muted-2">
                   {item.average.toFixed(1)} · {item.ratings} ratings

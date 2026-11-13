@@ -186,7 +186,7 @@ export default async function BrowsePage({
                   href={`/app/item/${item.id}`}
                   className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-2.5 transition-colors hover:border-white/15"
                 >
-                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} className="h-11 w-11 rounded-lg" />
+                  <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} genres={item.genres} sizes="44px" className="h-11 w-11 rounded-lg" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-semibold text-ink">{item.title}</p>
                     <p className="truncate text-[11px] text-muted-2">{item.votes} decided matchups</p>

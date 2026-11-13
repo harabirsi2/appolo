@@ -227,6 +227,7 @@ export function ProfileScreen({
                         title={champion.title}
                         imageUrl={champion.imageUrl}
                         genres={champion.genres}
+                        sizes="96px"
                         className="h-24 w-24 rounded-xl"
                       />
                       <span className="absolute -left-1.5 -top-1.5 grid h-6 w-6 place-items-center rounded-full bg-brand text-[11px] font-extrabold text-black shadow">
@@ -267,7 +268,7 @@ export function ProfileScreen({
                       >
                         {RANKS[index + 1]}
                       </span>
-                      <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} className="h-12 w-12 rounded-lg" />
+                      <MediaArt kind={item.kind} title={item.title} imageUrl={item.imageUrl} sizes="48px" className="h-12 w-12 rounded-lg" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[14px] font-semibold text-ink">{item.title}</p>
                         <p className="truncate text-[11px] text-muted-2">

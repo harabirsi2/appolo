@@ -228,7 +228,7 @@ export function FinishRating({
       </div>
 
       <div className="mt-4 flex flex-col items-center text-center">
-        <MediaArt kind={item.kind} title={item.title} className="aspect-square w-[156px] rounded-2xl shadow-xl" />
+        <MediaArt kind={item.kind} title={item.title} sizes="156px" className="aspect-square w-[156px] rounded-2xl shadow-xl" />
         <h1 className="mt-4 text-[24px] font-bold leading-tight tracking-tight text-ink">{item.title}</h1>
         <p className="mt-1 text-[12px] text-muted">
           {[item.subtitle, kindLabel, item.year ? String(item.year) : null].filter(Boolean).join(" · ")}
@@ -509,7 +509,7 @@ function CompareCard({
       className="group relative flex flex-col items-center gap-2 rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.09] to-white/[0.03] p-3 text-center shadow-card transition-all hover:border-brand/40 hover:from-brand/[0.12] active:scale-[0.98] disabled:opacity-60"
     >
       <span className="absolute right-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[9px] font-bold text-white/50">{hint}</span>
-      <MediaArt kind={kind} title={title} imageUrl={imageUrl} className="h-[72px] w-[72px] rounded-xl" />
+      <MediaArt kind={kind} title={title} imageUrl={imageUrl} sizes="72px" className="h-[72px] w-[72px] rounded-xl" />
       <span className="line-clamp-2 text-[13px] font-semibold leading-tight text-white">{title}</span>
       <span className="text-[11px] text-white/45">{year ?? "—"}</span>
     </button>

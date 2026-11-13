@@ -72,6 +72,7 @@ export default async function ItemPage({ params }: Params) {
             title={item.title}
             imageUrl={item.imageUrl}
             genres={item.genres}
+            sizes="236px"
             className="aspect-square w-[236px] rounded-3xl shadow-[0_30px_70px_-25px_rgba(0,0,0,0.95)] ring-1 ring-white/15"
           />
         </div>
@@ -205,7 +206,7 @@ export default async function ItemPage({ params }: Params) {
             <div className="snap-rail no-scrollbar -mx-5 mt-2.5 flex gap-3 overflow-x-auto px-5 pb-1">
               {similar.map((entry) => (
                 <Link key={entry.id} href={`/app/item/${entry.id}`} className="w-[104px] shrink-0">
-                  <MediaArt kind={entry.kind} title={entry.title} imageUrl={entry.imageUrl} genres={entry.genres} className="aspect-square w-full rounded-xl" />
+                  <MediaArt kind={entry.kind} title={entry.title} imageUrl={entry.imageUrl} genres={entry.genres} sizes="104px" className="aspect-square w-full rounded-xl" />
                   <p className="mt-1.5 truncate text-[12px] font-medium text-ink">{entry.title}</p>
                   <p className="truncate text-[10px] text-muted-2">
                     {entry.average === null ? "Unrated" : `${entry.average.toFixed(1)} avg`}

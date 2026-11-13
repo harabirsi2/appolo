@@ -319,7 +319,7 @@ export function CategoryTile({
               )}
               style={{ zIndex: index === 1 ? 2 : 1 }}
             >
-              <MediaArt kind={kind} title={title} className="aspect-square w-full rounded-md border-0" />
+              <MediaArt kind={kind} title={title} sizes="160px" className="aspect-square w-full rounded-md border-0" />
             </span>
           );
         })}
@@ -457,7 +457,7 @@ export function PodRow({
     >
       <div className="flex gap-1.5">
         {pod.items.slice(0, 3).map((item) => (
-          <MediaArt key={item.id} kind={item.kind} title={item.title} className="aspect-square flex-1 rounded-md border-0" />
+          <MediaArt key={item.id} kind={item.kind} title={item.title} sizes="64px" className="aspect-square flex-1 rounded-md border-0" />
         ))}
       </div>
       <div>

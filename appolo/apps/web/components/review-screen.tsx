@@ -43,7 +43,7 @@ export function ReviewScreen({
 
         <div className="mt-4 flex items-center gap-3 rounded-xl border border-white/[0.06] bg-black/25 p-3">
           <Link href={`/app/item/${review.itemId}`} className="shrink-0">
-            <MediaArt kind={review.kind} title={review.itemTitle} className="h-16 w-16 rounded-lg" />
+            <MediaArt kind={review.kind} title={review.itemTitle} sizes="64px" className="h-16 w-16 rounded-lg" />
           </Link>
           <div className="min-w-0 flex-1">
             <Link href={`/app/item/${review.itemId}`} className="block truncate text-[14px] font-semibold text-ink hover:underline">

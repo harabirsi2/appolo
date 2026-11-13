@@ -27,7 +27,7 @@ export default async function HistoryPage() {
         <ul className="mt-6 space-y-2">
           {entries.map((entry) => (
             <li key={entry.id} className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-3">
-              <MediaArt kind={entry.item.kind} title={entry.item.title} imageUrl={entry.item.imageUrl} className="h-12 w-12 rounded-lg" />
+              <MediaArt kind={entry.item.kind} title={entry.item.title} imageUrl={entry.item.imageUrl} sizes="48px" className="h-12 w-12 rounded-lg" />
               <div className="min-w-0 flex-1">
                 <Link href={`/app/item/${entry.item.id}`} className="block truncate text-sm font-medium text-ink hover:underline">
                   {entry.item.title}

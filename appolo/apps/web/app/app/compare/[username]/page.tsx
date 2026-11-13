@@ -126,6 +126,7 @@ export default async function ComparePage({ params }: Params) {
                     kind={entry.item.kind}
                     title={entry.item.title}
                     imageUrl={entry.item.imageUrl}
+                    sizes="48px"
                     className="h-12 w-12 rounded-lg"
                   />
                   <div className="min-w-0 flex-1">

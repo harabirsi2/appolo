@@ -110,7 +110,7 @@ export function RankingsList({ kind, items }: { kind: MediaKind | null; items: R
               <span className="grid w-6 shrink-0 place-items-center text-[16px] font-extrabold text-white/25">
                 {index + 1}
               </span>
-              <MediaArt kind={item.kind} title={item.title} genres={item.genres} className="h-12 w-12 rounded-lg" />
+              <MediaArt kind={item.kind} title={item.title} genres={item.genres} sizes="48px" className="h-12 w-12 rounded-lg" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[14px] font-semibold text-ink">{item.title}</p>
                 <p className="truncate text-[11px] text-muted-2">
