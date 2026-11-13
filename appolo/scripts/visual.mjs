@@ -2,10 +2,10 @@
 /**
  * Browser-driven visual checks for the main Appolo screens.
  *
- * Starts a real Chromium, signs in with the seeded demo account, visits each
- * main screen, and fails on page errors, console errors, 5xx responses, a
- * wrong title, empty content or a blank screenshot. Every screen is saved as
- * a viewport PNG under scripts/visual-output/ for human review.
+ * Signs in with the seeded demo account, visits each main screen, and fails on
+ * page errors, console errors, 5xx responses, a wrong title, a missing heading,
+ * empty content or a blank screenshot. Each screen is saved as a viewport PNG
+ * under scripts/visual-output/ for human review.
  *
  * Usage:
  *   pnpm exec playwright install chromium
@@ -23,7 +23,6 @@ const BASE = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, ""
 const OUT = path.resolve(process.env.VISUAL_OUT_DIR ?? "scripts/visual-output");
 const EMAIL = process.env.VISUAL_EMAIL ?? "owner@appolo.test";
 const PASSWORD = process.env.VISUAL_PASSWORD ?? "appolo-demo-1234";
-const SESSION_COOKIE = "appolo_session";
 const MIN_SCREENSHOT_BYTES = 20_000;
 
 const SCREENS = [
@@ -35,50 +34,36 @@ const SCREENS = [
   { name: "taste", path: "/app/taste", title: "Taste DNA", heading: "Taste DNA" },
 ];
 
-async function signIn() {
-  const response = await fetch(`${BASE}/api/auth/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
-  });
-  if (!response.ok) {
-    throw new Error(`demo login failed with ${response.status}: ${(await response.text()).slice(0, 160)}`);
-  }
-  const cookies = response.headers.getSetCookie?.() ?? [];
-  const session = cookies.map((value) => value.split(";")[0]).find((value) => value.startsWith(`${SESSION_COOKIE}=`));
-  if (!session) throw new Error("demo login did not set the session cookie");
-  return { name: SESSION_COOKIE, value: session.slice(SESSION_COOKIE.length + 1), url: BASE };
-}
-
-async function waitForHeading(page, heading) {
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
-    const text = await page.locator("main h1:visible").first().textContent().catch(() => "");
-    if (text?.includes(heading)) return true;
-    await page.waitForTimeout(250);
-  }
-  return false;
-}
-
 await mkdir(OUT, { recursive: true });
-const failures = [];
+
+// The headless shell keeps the browser download small; nothing here needs a
+// headed browser or the full Chromium build.
 const browser = await chromium.launch({ channel: "chromium-headless-shell" });
+const failures = [];
+
 try {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     colorScheme: "dark",
     deviceScaleFactor: 1,
   });
-  await context.addCookies([await signIn()]);
+
+  // context.request shares its cookie jar with the pages, so this session is
+  // already signed in when the first screen loads.
+  const login = await context.request.post(`${BASE}/api/auth/login`, {
+    data: { email: EMAIL, password: PASSWORD },
+  });
+  if (!login.ok()) {
+    throw new Error(`demo login failed with ${login.status()}: ${(await login.text()).slice(0, 160)}`);
+  }
+
   const page = await context.newPage();
   let pageErrors = [];
   let consoleErrors = [];
   let serverErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => {
-    if (message.type() === "error" && !message.text().includes("Download the React DevTools")) {
-      consoleErrors.push(message.text());
-    }
+    if (message.type() === "error") consoleErrors.push(message.text());
   });
   page.on("response", (response) => {
     if (response.status() >= 500) serverErrors.push(`${response.status()} ${new URL(response.url()).pathname}`);
@@ -89,18 +74,22 @@ try {
     consoleErrors = [];
     serverErrors = [];
     const problems = [];
+    const main = page.locator("main").first();
     let response = null;
+
     try {
       response = await page.goto(`${BASE}${screen.path}`, { waitUntil: "networkidle", timeout: 45_000 });
-      await page.locator("main").first().waitFor({ state: "visible", timeout: 15_000 });
-      if (!(await waitForHeading(page, screen.heading))) problems.push(`heading "${screen.heading}" did not render`);
+      await main.waitFor({ state: "visible", timeout: 15_000 });
+      await main
+        .getByRole("heading", { level: 1, name: screen.heading })
+        .waitFor({ state: "visible", timeout: 20_000 });
     } catch (error) {
-      problems.push(error instanceof Error ? error.message : String(error));
+      problems.push(error instanceof Error ? error.message.split("\n")[0] : String(error));
     }
 
     const file = path.join(OUT, `${screen.name}.png`);
     try {
-      await page.screenshot({ path: file, fullPage: false, animations: "disabled" });
+      await page.screenshot({ path: file, animations: "disabled" });
       const size = (await stat(file)).size;
       if (size < MIN_SCREENSHOT_BYTES) problems.push(`screenshot looks blank (${size} bytes)`);
     } catch (error) {
@@ -110,7 +99,7 @@ try {
     if (!response || !response.ok()) problems.push(`page returned ${response?.status() ?? "no response"}`);
     const title = await page.title().catch(() => "");
     if (!title.includes(screen.title)) problems.push(`title "${title}" does not include "${screen.title}"`);
-    const markup = (await page.locator("main").first().textContent().catch(() => "")) ?? "";
+    const markup = (await main.textContent().catch(() => "")) ?? "";
     if (markup.trim().length < 40) problems.push("main content looks empty");
     if (pageErrors.length > 0) problems.push(`page errors: ${pageErrors.join(" | ")}`);
     if (consoleErrors.length > 0) problems.push(`console errors: ${consoleErrors.join(" | ")}`);
