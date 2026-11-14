@@ -14,9 +14,7 @@ permissions:
 jobs:
   verify:
     name: Full verify suite
-    # Pinned: Playwright 1.50.1 has no chromium-headless-shell build for the
-    # ubuntu-26.04 image that `ubuntu-latest` now resolves to.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
       run:

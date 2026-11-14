@@ -3,6 +3,16 @@
 Notable, user-visible or architectural changes. Dates are ISO. Entries describe
 why the change was made, not every commit.
 
+## Tooling: Playwright 1.65.1
+
+- Upgraded `playwright` from 1.50.1 to 1.65.1. The old release hardcoded Linux
+  support up to Ubuntu 24.04, so `playwright install --with-deps` refused to run
+  on the Ubuntu 26.04 image that GitHub's `ubuntu-latest` now resolves to
+  (`Playwright does not support chromium-headless-shell on ubuntu26.04-x64`).
+  1.65.1 ships dependency and browser mappings for 26.04, so CI no longer needs
+  a pinned runner. Visual baselines were re-captured against the new Chromium
+  build (emoji glyph rendering changed in the search screen).
+
 ## Messaging and CRM hardening
 
 - **Webhook idempotency.** A provider message id is now unique per org
