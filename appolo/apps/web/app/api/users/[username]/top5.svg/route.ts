@@ -36,8 +36,8 @@ export async function GET(_request: Request, { params }: Params) {
   const rows = items
     .map((item, index) => {
       const y = 250 + index * 66;
-      const accent = index === 0 ? "#4ade80" : "#3f3f46";
-      const rankFill = index === 0 ? "#4ade80" : "#27272a";
+      const accent = index === 0 ? "#10B981" : "#3f3f46";
+      const rankFill = index === 0 ? "#10B981" : "#27272a";
       const rankText = index === 0 ? "#06210f" : "#f4f4f5";
       const meta = [item.subtitle, item.year ? String(item.year) : null].filter(Boolean).join(" · ");
       return `
@@ -47,7 +47,7 @@ export async function GET(_request: Request, { params }: Params) {
       <text x="105" y="${y + 8}" text-anchor="middle" font-family="Arial, sans-serif" font-size="19" font-weight="700" fill="${rankText}">${index + 1}</text>
       <text x="140" y="${y + 2}" font-family="Arial, sans-serif" font-size="21" font-weight="700" fill="#f4f4f5">${clip(item.title, 44)}</text>
       <text x="140" y="${y + 21}" font-family="Arial, sans-serif" font-size="13" fill="#a1a1aa">${clip(meta, 56)}</text>
-      <text x="1108" y="${y + 10}" text-anchor="end" font-family="Arial, sans-serif" font-size="26" font-weight="800" fill="#4ade80">${item.score.toFixed(1)}</text>
+      <text x="1108" y="${y + 10}" text-anchor="end" font-family="Arial, sans-serif" font-size="26" font-weight="800" fill="#10B981">${item.score.toFixed(1)}</text>
     </g>`;
     })
     .join("");
@@ -57,13 +57,13 @@ export async function GET(_request: Request, { params }: Params) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="${clip(`${profile.displayName}'s top five`, 80)}">
   <defs>
     <radialGradient id="glow" cx="18%" cy="6%" r="60%">
-      <stop offset="0%" stop-color="#4ade80" stop-opacity="0.24" />
-      <stop offset="100%" stop-color="#4ade80" stop-opacity="0" />
+      <stop offset="0%" stop-color="#10B981" stop-opacity="0.24" />
+      <stop offset="100%" stop-color="#10B981" stop-opacity="0" />
     </radialGradient>
   </defs>
   <rect width="1200" height="630" fill="#0b0b0d" />
   <rect width="1200" height="630" fill="url(#glow)" />
-  <rect x="72" y="70" width="44" height="44" rx="12" fill="#4ade80" />
+  <rect x="72" y="70" width="44" height="44" rx="12" fill="#10B981" />
   <text x="94" y="101" text-anchor="middle" font-family="Arial, sans-serif" font-size="26" font-weight="900" fill="#06210f">A</text>
   <text x="132" y="99" font-family="Arial, sans-serif" font-size="18" font-weight="700" letter-spacing="4" fill="#a1a1aa">PODIUM</text>
   <text x="72" y="176" font-family="Arial, sans-serif" font-size="46" font-weight="800" fill="#f4f4f5">${clip(profile.displayName, 34)}</text>

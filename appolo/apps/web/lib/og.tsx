@@ -8,14 +8,14 @@ import type { ReactNode } from "react";
  * satori (`next/og`), so only flex layouts and inline styles are safe here.
  */
 export const OG_COLORS = {
-  bg: "#0b0b0d",
-  panel: "#141416",
-  ink: "#f4f4f5",
-  muted: "#a1a1aa",
+  bg: "#07080A",
+  panel: "#111318",
+  ink: "#F2F4F8",
+  muted: "#949BA8",
   faint: "#71717a",
-  brand: "#4ade80",
-  brandDeep: "#22c55e",
-  danger: "#f87171",
+  brand: "#10B981",
+  brandDeep: "#059669",
+  danger: "#ef4444",
   clash: "#e879f9",
 } as const;
 

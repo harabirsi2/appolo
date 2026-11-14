@@ -58,8 +58,8 @@ export async function GET(request: Request, { params }: Params) {
                   gap: story ? 28 : 14,
                   padding: story ? "22px 28px" : "9px 16px",
                   borderRadius: 20,
-                  backgroundColor: index === 0 ? "rgba(74,222,128,0.14)" : OG_COLORS.panel,
-                  border: `1px solid ${index === 0 ? "rgba(74,222,128,0.5)" : "rgba(255,255,255,0.06)"}`,
+                  backgroundColor: index === 0 ? "rgba(16,185,129,0.14)" : OG_COLORS.panel,
+                  border: `1px solid ${index === 0 ? "rgba(16,185,129,0.5)" : "rgba(255,255,255,0.06)"}`,
                 }}
               >
                 <div

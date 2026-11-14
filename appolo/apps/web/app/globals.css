@@ -4,28 +4,29 @@
 @source "../../../packages/ui/src";
 
 @theme {
-  --color-bg: #000000;
-  --color-surface: #101012;
-  --color-surface-2: #17171a;
-  --color-elevated: #1c1c21;
-  --color-border: #242428;
-  --color-border-strong: #3a3a41;
-  --color-ink: #f6f6f7;
-  --color-muted: #a1a1aa;
+  --color-bg: #07080A;
+  --color-surface: #111318;
+  --color-surface-2: #181B22;
+  --color-elevated: #20242E;
+  --color-border: rgba(255, 255, 255, 0.07);
+  --color-border-strong: rgba(255, 255, 255, 0.10);
+  --color-ink: #F2F4F8;
+  --color-muted: #949BA8;
   /* #6f6f78 was 4.2:1 on black — below the 4.5:1 minimum for 11px text.
-     #86868f clears 5:1 even on the #141416 card surface. */
+     #949BA8 clears 5:1 even on the #111318 card surface (Obsidian Velvet). */
   --color-muted-2: #86868f;
-  --color-brand: #4ade80;
-  --color-brand-strong: #22c55e;
-  --color-brand-soft: #86efac;
-  --color-success: #22c55e;
+  --color-brand: #10B981;
+  --color-brand-strong: #059669;
+  --color-brand-soft: #34D399;
+  --color-brand-highlight: #34D399;
+  --color-success: #10B981;
   --color-warn: #f59e0b;
   --color-danger: #ef4444;
   --color-gold: #f5c451;
   --color-silver: #c9ccd6;
   --color-bronze: #d08a5a;
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.035) inset, 0 18px 40px -28px rgba(0, 0, 0, 0.95);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 18px 40px -28px rgba(0, 0, 0, 0.95);
   --shadow-float: 0 24px 60px -24px rgba(0, 0, 0, 0.9);
 }
 
@@ -39,7 +40,7 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  background-image: radial-gradient(90% 45% at 50% -12%, rgba(74, 222, 128, 0.075), transparent 68%);
+  background-image: radial-gradient(90% 45% at 50% -12%, rgba(16, 185, 129, 0.075), transparent 68%);
   background-attachment: fixed;
 }
 
