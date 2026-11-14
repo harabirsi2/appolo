@@ -37,12 +37,7 @@ P(tie)   = ν·e^((θA+θB)/2) / (same denominator)
 ```
 
 `ν` (the Davidson tie parameter) defaults to **0.55**. It is stored in the model
-snapshot and used consistently for predictions and personal scores. Fitting `ν`
-by profile likelihood was evaluated against the probit harness: with no ties it
-runs to the 0.001 boundary, RMSE rises from 0.296 to 0.356 and interval coverage
-falls from 0.959 to 0.721. The fixed tie term therefore stays, and the remaining
-overconfidence is handled by the dispersion and calibration corrections rather
-than by tie estimation.
+snapshot and used consistently for predictions and personal scores.
 
 ### Estimation
 
@@ -170,7 +165,10 @@ Run with `pnpm test` (uses `tsx --test`, so Node 20+ works). Including community
 ## 7. Known limitations
 
 - `ν` and `λ` are fixed constants, not hyperparameters estimated per user. The
-  snapshot stores them so they can be tuned/replayed later.
+  snapshot stores them so they can be tuned/replayed later. Profiling `ν` on
+  no-tie data drives it to the boundary and worsens interval coverage
+  (0.721 vs 0.959), so it stays fixed; the interval corrections handle that
+  overconfidence instead.
 - Taste matching keeps genre similarity to a 20% prior when shared titles exist;
   with no shared titles it is the only signal and is labelled as such.
 - The fit is per media kind only; sub-category (genre) models and per-collection

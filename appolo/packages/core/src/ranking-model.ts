@@ -208,8 +208,6 @@ interface Accumulators {
   /** Dense negative Hessian: Σ w·s·sᵀ + λI. */
   hessian: number[][];
   logLikelihood: number;
-  /** Weighted Pearson statistic, used to estimate overdispersion. */
-  pearson: number;
   stats: Array<{ comparisons: number; wins: number; losses: number; ties: number }>;
 }
 
@@ -226,7 +224,6 @@ function accumulate(
   const stats = Array.from({ length: k }, () => ({ comparisons: 0, wins: 0, losses: 0, ties: 0 }));
   const logNu = Math.log(tieParameter);
   let logLikelihood = 0;
-  let pearson = 0;
 
   for (const event of events) {
     const weight = weightFor(event);
@@ -270,9 +267,6 @@ function accumulate(
       hessian[ib]![ia] = (hessian[ib]![ia] ?? 0) + cross;
     }
 
-    const observedProbability = event.outcome === "a" ? pa : event.outcome === "b" ? pb : pt;
-    pearson += (weight * (1 - observedProbability)) / Math.max(observedProbability, 1e-9);
-
     const eventLogLikelihood =
       event.outcome === "a"
         ? thetaA - logZ
@@ -305,7 +299,28 @@ function accumulate(
     hessian[i]![i] = (hessian[i]![i] ?? 0) + regularization;
   }
 
-  return { gradient, hessian, logLikelihood, pearson, stats };
+  return { gradient, hessian, logLikelihood, stats };
+}
+
+/** Weighted Pearson statistic at the final fit, used to estimate overdispersion. */
+function pearsonStatistic(
+  index: Map<string, number>,
+  events: readonly ComparisonEvent[],
+  theta: number[],
+  tieParameter: number,
+): number {
+  let pearson = 0;
+  for (const event of events) {
+    const weight = weightFor(event);
+    if (weight === 0) continue;
+    const ia = index.get(event.aId);
+    const ib = index.get(event.bId);
+    if (ia === undefined || ib === undefined) continue;
+    const { pa, pb, pt } = davidsonProbabilities(theta[ia] ?? 0, theta[ib] ?? 0, tieParameter);
+    const observed = event.outcome === "a" ? pa : event.outcome === "b" ? pb : pt;
+    pearson += (weight * (1 - observed)) / Math.max(observed, 1e-9);
+  }
+  return pearson;
 }
 
 /**
@@ -326,6 +341,8 @@ function calibrationSlope(
     let curvature = 0;
     for (const event of events) {
       if (event.outcome !== "a" && event.outcome !== "b") continue;
+      const weight = weightFor(event);
+      if (weight === 0) continue;
       const ia = index.get(event.aId);
       const ib = index.get(event.bId);
       if (ia === undefined || ib === undefined) continue;
@@ -333,8 +350,8 @@ function calibrationSlope(
       if (gap === 0) continue;
       const probability = 1 / (1 + Math.exp(-slope * gap));
       const outcome = event.outcome === "a" ? 1 : 0;
-      gradient += (outcome - probability) * gap;
-      curvature += probability * (1 - probability) * gap * gap;
+      gradient += weight * (outcome - probability) * gap;
+      curvature += weight * probability * (1 - probability) * gap * gap;
     }
     if (Math.abs(gradient) < 1e-9) break;
     const next = clamp(slope + gradient / Math.max(curvature, 1e-9), MIN_CALIBRATION_SLOPE, MAX_CALIBRATION_SLOPE);
@@ -463,9 +480,10 @@ export function fitBradleyTerry(
     (sum, event) => sum + (event.outcome === "skip" ? 0 : weightFor(event)),
     0,
   );
+  const pearson = pearsonStatistic(index, events, theta, tieParameter);
   const overdispersion = Math.min(
     MAX_OVERDISPERSION,
-    Math.max(1, final.pearson / Math.max(effectiveObservations - k, 1)),
+    Math.max(1, pearson / Math.max(effectiveObservations - k, 1)),
   );
   const slope = calibrationSlope(index, events, theta);
   const calibrationInflation = slope < 1 ? 1 / slope : 1;
