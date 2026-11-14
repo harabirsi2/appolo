@@ -37,7 +37,12 @@ P(tie)   = ν·e^((θA+θB)/2) / (same denominator)
 ```
 
 `ν` (the Davidson tie parameter) defaults to **0.55**. It is stored in the model
-snapshot and used consistently for predictions and personal scores.
+snapshot and used consistently for predictions and personal scores. Fitting `ν`
+by profile likelihood was evaluated against the probit harness: with no ties it
+runs to the 0.001 boundary, RMSE rises from 0.296 to 0.356 and interval coverage
+falls from 0.959 to 0.721. The fixed tie term therefore stays, and the remaining
+overconfidence is handled by the dispersion and calibration corrections rather
+than by tie estimation.
 
 ### Estimation
 
