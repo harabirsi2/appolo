@@ -6,12 +6,11 @@ import { revalidateTag } from "next/cache";
  */
 export const COMMUNITY_TAGS = {
   popular: "community-popular",
-  leaderboard: "community-leaderboard",
 } as const;
 
 /**
- * Drop the cached community reads after a rating changes, so Browse and the
- * home rail do not serve a stale leaderboard until the TTL expires.
+ * Drop the cached shared reads after a rating changes, so the home rail does
+ * not serve a stale popular list until the TTL expires.
  */
 export function invalidateCommunity(): void {
   for (const tag of Object.values(COMMUNITY_TAGS)) revalidateTag(tag);

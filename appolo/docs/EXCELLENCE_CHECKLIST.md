@@ -99,7 +99,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 | Frontend/backend architecture documented | Done | `docs/TECHNICAL_ARCHITECTURE.md` |
 | Auth, authorization, validation | Done | sessions, `withOrg` RLS, Zod schemas |
 | Query efficiency, N+1, duplicate work | Done | `docs/CODE_REVIEW.md` (session cache, follow counts, batched sync) |
-| Caching of shared reads | Open | no response/data cache for global discovery queries |
+| Caching of shared reads | Partial | popular rail cached 60 s; the leaderboard and catalog reads stay uncached because their A/Bs showed no latency gain |
 | Background jobs | Partial | `apps/worker` runs BullMQ but only processes a heartbeat job; model rebuilds are process-local and self-healing |
 | Logging and observability | Partial | structured server logs; no metrics/tracing |
 | Lint | Open | no ESLint; typecheck only |
@@ -148,7 +148,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 | Image optimisation | Done | `next/image` + per-slot `sizes` + 96–360 px device widths; Browse −80%, Home −73% |
 | Bundle size checked | Done | 102 kB shared First Load JS in production build |
 | DB latency addressed | Done | indexes, batched follow counts, session cache |
-| Caching | Done | popular rail 60 s, leaderboard 30 s, both tag-invalidated on vote/manual/undo/review/account deletion; production A/B shows no measurable latency gain at 300 rated titles; search uncached |
+| Caching | Done | popular rail 60 s, tag-invalidated on vote/manual/undo/review/account deletion; the leaderboard cache was removed after its A/B showed no latency gain; search and catalog reads uncached |
 | Large-list rendering | Partial | rails/grids are bounded; no virtualisation |
 
 ## 13. Implementation strategy
@@ -199,6 +199,5 @@ what changed.
 
 1. Enforce block/mute and private accounts at the query layer.
 2. Add a CSRF/origin guard for mutating route handlers.
-3. Cache the community leaderboard and measure the effect as ratings grow.
-4. Manual keyboard and screen-reader pass on the comparison flow.
-5. Add load testing and API contract tests; wire `pnpm audit` into the gate.
+3. Manual keyboard and screen-reader pass on the comparison flow.
+4. Add load testing and API contract tests; wire `pnpm audit` into the gate.

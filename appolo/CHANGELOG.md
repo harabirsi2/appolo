@@ -38,6 +38,10 @@ why the change was made, not every commit.
   transactions per request. The query costs ~2 ms, so the cache bought no
   visible latency while adding a user-keyed disk cache. The numbers are in
   `docs/PERFORMANCE.md`; the search route stays uncached.
+- Removed the 30 s community leaderboard cache. Its production A/B was a tie
+  (9.4 ms median either way), so it only carried up to 30 s of staleness and
+  invalidation plumbing. Browse now reads the leaderboard directly; the home
+  popular rail keeps its 60 s cache and invalidation.
 - Cached the community leaderboard for 30 s and invalidated both community
   tags on every write that moves rankings: votes, manual scores, undo, review
   saves and account deletion. A production A/B over 60 warm requests per arm found

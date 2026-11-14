@@ -206,10 +206,10 @@ Prioritised gaps:
    latency win today. These figures are dev-server numbers, where framework
    overhead dominates; a production server answers `/app` in ~10 ms, so treat
    the absolute values as dev-only.
-10. **Leaderboard cache — no measurable latency gain.** `catalogLeaderboard`
-    is cached for 30 s and tag-invalidated on every write that changes ratings:
-    vote, manual score, undo, review save and account deletion. A production A/B was run on the same route and session, 60 warm
-    requests per arm, with 300 rated titles:
+10. **Leaderboard cache — removed after measuring no gain.** `catalogLeaderboard`
+    was cached for 30 s and tag-invalidated on vote, manual score, undo, review
+    save and account deletion. A production A/B ran the same route and session,
+    60 warm requests per arm, with 300 rated titles:
 
     | arm | median | p10 | p90 | DB transactions/request |
     | --- | --- | --- | --- | --- |
@@ -221,14 +221,18 @@ Prioritised gaps:
     request, but at this catalog size those cost effectively nothing next to
     the per-viewer session/profile/watchlist queries. An earlier claim of
     **267 ms → 199 ms** came from dev-server measurements, where request
-    handling and compilation overhead dominate; it is retracted. Revisit the
-    cache when the leaderboard query becomes visible in profiling, not before.
+    handling and compilation overhead dominate; it is retracted. Because the
+    cache bought no latency and only added up to 30 s of staleness plus
+    invalidation plumbing, the wrapper was removed rather than kept
+    speculatively. Revisit it when the leaderboard query becomes visible in
+    profiling, with a measurement that shows the gain.
 
     Methodology: `next build --experimental-build-mode compile` plus
     `next start` (the default `next build` currently fails in Next 15.5.29
     while prerendering `/404`/`/500`; see the Next.js issue tracker), TTFB via
     `curl -w '%{time_starttransfer}'`, samples alternated across rebuilds
-    (on, off, on, off) to control drift.
+    (on, off, on, off) to control drift. The only shared read still cached is
+    the home "popular this week" rail (60 s).
 11. **Catalog read cache — tried, measured, removed.** The search/discovery
     query (`listCatalog`, used by `/app/search` and `/app/rate`) was wrapped in
     the same `unstable_cache` pattern: 60 s TTL, a `catalog-reads` tag, and
