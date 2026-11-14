@@ -14,7 +14,7 @@ import { chromium } from "playwright";
 const BASE_URL = process.env.BASE_URL ?? "http://127.0.0.1:3000";
 const AXE_URL = "https://cdn.jsdelivr.net/npm/axe-core@4.10.2/axe.min.js";
 const EMAIL = process.env.DEMO_EMAIL ?? "owner@appolo.test";
-const PASSWORD = process.env.DEMO_PASSWORD ?? "appolo-demo-1234";
+const PASSWORD = process.env.DEMO_PASSWORD ?? "appolo-demo-9f3c2a7e";
 
 const SCREENS = [
   { path: "/", auth: false, name: "landing" },

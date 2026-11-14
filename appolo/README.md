@@ -47,7 +47,7 @@ Open http://localhost:3000 and sign in:
 
 ```
 owner@appolo.test
-appolo-demo-1234
+appolo-demo-9f3c2a7e
 ```
 
 Stop the local database with `pnpm db:down`.

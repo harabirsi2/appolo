@@ -11,7 +11,7 @@ Clean-room, responsive web app/PWA clone of Podiums (https://podiu.ms/). Next.js
 ## Env / DB
 - `appolo/.env`: `DATABASE_URL` (admin) and `MIGRATE_DATABASE_URL`.
 - App DB: `postgresql://appolo_app:appolo_dev_password@127.0.0.1:55432/appolo`; admin: `postgresql://appolo@127.0.0.1:55432/appolo`.
-- Demo login: `owner@appolo.test` / `appolo-demo-1234`.
+- Demo login: `owner@appolo.test` / `appolo-demo-9f3c2a7e`.
 
 ## Gotchas
 - Client components must import from `@appolo/core/ranking` (not the barrel — it pulls `node:crypto`).

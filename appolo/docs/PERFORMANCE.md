@@ -271,7 +271,7 @@ pnpm --filter @appolo/core bench
 # production load (build first; stop `pnpm dev`)
 pnpm --filter @appolo/web build
 pnpm --filter @appolo/web exec next start -p 3100
-# sign in as owner@appolo.test / appolo-demo-1234 and drive the endpoints
+# sign in as owner@appolo.test / appolo-demo-9f3c2a7e and drive the endpoints
 # with any keep-alive load client at 16 concurrency for 5 s.
 ```
 

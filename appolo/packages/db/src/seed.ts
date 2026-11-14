@@ -66,7 +66,7 @@ const db = getAdminDb();
 
 const SEED_SLUG = "demo";
 const email = (process.env.SEED_EMAIL ?? "owner@appolo.test").trim().toLowerCase();
-const password = process.env.SEED_PASSWORD ?? "appolo-demo-1234";
+const password = process.env.SEED_PASSWORD ?? "appolo-demo-9f3c2a7e";
 
 type CatalogSeed = {
   kind: "movie" | "tv" | "music" | "podcast" | "book" | "game";

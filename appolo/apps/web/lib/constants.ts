@@ -7,4 +7,4 @@ export const NAV_ITEMS = [
   { href: "/app/profile", label: "Profile" },
 ] as const;
 
-export const DEMO_HINT = "owner@appolo.test / appolo-demo-1234";
+export const DEMO_HINT = "owner@appolo.test / appolo-demo-9f3c2a7e";

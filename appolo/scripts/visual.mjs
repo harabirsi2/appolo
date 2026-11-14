@@ -30,7 +30,7 @@ const OUT = path.resolve(process.env.VISUAL_OUT_DIR ?? "scripts/visual-output");
 const BASELINES = path.resolve(process.env.VISUAL_BASELINE_DIR ?? "scripts/visual-baselines");
 const UPDATE_BASELINES = process.env.VISUAL_UPDATE === "1";
 const EMAIL = process.env.VISUAL_EMAIL ?? "owner@appolo.test";
-const PASSWORD = process.env.VISUAL_PASSWORD ?? "appolo-demo-1234";
+const PASSWORD = process.env.VISUAL_PASSWORD ?? "appolo-demo-9f3c2a7e";
 const MIN_SCREENSHOT_BYTES = 20_000;
 // Causes the check to fail at 0.1% changed pixels, which tolerates font and
 // anti-aliasing differences on the machine that captured the baselines but

@@ -43,7 +43,7 @@ jobs:
       # Owner/superuser connection for migrations, seeds and RLS fixtures.
       MIGRATE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55432/appolo
       SEED_EMAIL: owner@appolo.test
-      SEED_PASSWORD: appolo-demo-1234
+      SEED_PASSWORD: appolo-demo-9f3c2a7e
       # The pixel baselines were captured on another OS; allow a looser
       # cross-platform diff here. The strict 0.1% bound is the local default.
       VISUAL_MAX_DIFF_RATIO: "0.05"

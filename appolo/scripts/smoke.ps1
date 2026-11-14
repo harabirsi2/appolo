@@ -31,7 +31,7 @@ T "unauth /app redirects to /login" $redirected
 
 # --- login with the seeded demo owner ---
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-$body = @{ email = "owner@appolo.test"; password = "appolo-demo-1234" } | ConvertTo-Json
+$body = @{ email = "owner@appolo.test"; password = "appolo-demo-9f3c2a7e" } | ConvertTo-Json
 $login = Invoke-RestMethod "$Base/api/auth/login" -Method Post -Body $body -ContentType "application/json" -WebSession $session -TimeoutSec 30
 T "demo login succeeds" ($login.ok -eq $true)
 
@@ -57,7 +57,7 @@ $jar = Join-Path $env:TEMP "appolo_smoke_cookies.txt"
 $bodyFile = Join-Path $env:TEMP "appolo_smoke_login.json"
 $dashHtml = Join-Path $env:TEMP "appolo_smoke_dashboard.html"
 
-$dashBody = @{ email = "owner@appolo.test"; password = "appolo-demo-1234" } | ConvertTo-Json -Compress
+$dashBody = @{ email = "owner@appolo.test"; password = "appolo-demo-9f3c2a7e" } | ConvertTo-Json -Compress
 [IO.File]::WriteAllText($bodyFile, $dashBody)
 curl.exe -s -c $jar -H "Content-Type: application/json" --data "@$bodyFile" "$Base/api/auth/login" | Out-Null
 
@@ -141,7 +141,7 @@ function Twilio-Post($to, $from, $smsBody, $sid) {
 }
 
 # Log into the demo org with a curl cookie jar.
-[IO.File]::WriteAllText($p1body, (@{ email = "owner@appolo.test"; password = "appolo-demo-1234" } | ConvertTo-Json -Compress))
+[IO.File]::WriteAllText($p1body, (@{ email = "owner@appolo.test"; password = "appolo-demo-9f3c2a7e" } | ConvertTo-Json -Compress))
 curl.exe -s -c $p1jar -H "Content-Type: application/json" --data "@$p1body" "$Base/api/auth/login" | Out-Null
 
 $p1stamp = [guid]::NewGuid().ToString("N").Substring(0, 8)
@@ -258,7 +258,7 @@ function P2-Patch($url, $obj) {
     return [pscustomobject]@{ code = [int]$code; json = (P2-ReadJson $p2resp) }
 }
 
-[IO.File]::WriteAllText($p2body, (@{ email = "owner@appolo.test"; password = "appolo-demo-1234" } | ConvertTo-Json -Compress))
+[IO.File]::WriteAllText($p2body, (@{ email = "owner@appolo.test"; password = "appolo-demo-9f3c2a7e" } | ConvertTo-Json -Compress))
 curl.exe -s -c $p2jar -H "Content-Type: application/json" --data "@$p2body" "$Base/api/auth/login" | Out-Null
 
 # 1. settings are readable and writable
@@ -496,7 +496,7 @@ function P3-Sql($sql) {
     return $true
 }
 
-[IO.File]::WriteAllText($p3body, (@{ email = "owner@appolo.test"; password = "appolo-demo-1234" } | ConvertTo-Json -Compress))
+[IO.File]::WriteAllText($p3body, (@{ email = "owner@appolo.test"; password = "appolo-demo-9f3c2a7e" } | ConvertTo-Json -Compress))
 curl.exe -s -c $p3jar -H "Content-Type: application/json" --data "@$p3body" "$Base/api/auth/login" | Out-Null
 
 $me3 = P3-Get "$Base/api/me"
@@ -766,7 +766,7 @@ $smokePodSlug = $podCreated.pod.slug
 # A fresh cookie jar for the HTML page checks (the earlier one was removed).
 $mediaJar = Join-Path $env:TEMP "appolo_smoke_media_cookies.txt"
 $mediaBodyFile = Join-Path $env:TEMP "appolo_media_login.json"
-[IO.File]::WriteAllText($mediaBodyFile, (@{ email = "owner@appolo.test"; password = "appolo-demo-1234" } | ConvertTo-Json -Compress))
+[IO.File]::WriteAllText($mediaBodyFile, (@{ email = "owner@appolo.test"; password = "appolo-demo-9f3c2a7e" } | ConvertTo-Json -Compress))
 curl.exe -s -c $mediaJar -H "Content-Type: application/json" --data "@$mediaBodyFile" "$Base/api/auth/login" | Out-Null
 
 $mediaHome = Join-Path $env:TEMP "appolo_media_home.html"

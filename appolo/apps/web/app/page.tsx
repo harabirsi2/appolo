@@ -94,7 +94,7 @@ export default function HomePage() {
                 </Link>
               </div>
               <p className="mt-4 text-xs text-muted-2">
-                Demo login: owner@appolo.test · appolo-demo-1234
+                Demo login: owner@appolo.test · appolo-demo-9f3c2a7e
               </p>
               <p className="mt-6 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-2">
                 <span>
