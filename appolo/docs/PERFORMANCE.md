@@ -228,7 +228,27 @@ Prioritised gaps:
     `next start` (the default `next build` currently fails in Next 15.5.29
     while prerendering `/404`/`/500`; see the Next.js issue tracker), TTFB via
     `curl -w '%{time_starttransfer}'`, samples alternated across rebuilds
-    (on, off, on, off) to control drift. Search remains uncached.
+    (on, off, on, off) to control drift.
+11. **Catalog read cache — tried, measured, removed.** The search/discovery
+    query (`listCatalog`, used by `/app/search` and `/app/rate`) was wrapped in
+    the same `unstable_cache` pattern: 60 s TTL, a `catalog-reads` tag, and
+    invalidation when provider enrichment inserts rows. A production A/B on
+    `/app/search` with 60 warm requests per arm, alternating cache on/off in
+    both orders:
+
+    | query | cache on (median) | cache off (median) | DB transactions/request |
+    | --- | --- | --- | --- |
+    | free-text `?q=the` | 9.5 / 9.9 ms | 9.8 / 9.7 ms | 10.6–10.9 vs 11.5–11.8 |
+    | filtered `?kind=movie` | 9.1 / 9.5 / 9.7 / 8.6 ms | 9.4 / 10.2 / 9.2 / 9.6 ms | 9.2–9.8 vs 9.7–10.6 |
+
+    The query itself costs about 2.0 ms server-side, but the page answers in
+    ~9.5 ms and the arms are indistinguishable. Caching only removes one cheap
+    lookup per request (~0.6 transactions), so there is no latency win to keep.
+    The free-text keys are also user-controlled and unbounded, which makes a
+    60 s disk cache the wrong trade for a query this cheap. Reverted; the route
+    stays uncached beyond the already-cached leaderboard that Browse renders.
+    Revisit if the catalog grows enough for the ILIKE scan to show up in
+    profiling.
 
 ## 7. Reproduction
 

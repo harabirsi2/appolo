@@ -31,6 +31,13 @@ why the change was made, not every commit.
   modules.
 - Replaced two hand-rolled catalog mappers in `social.ts` with the canonical
   `mapCatalogItem`, so a new item field is mapped in one place.
+- Tried caching the search/discovery catalog read (`listCatalog`) with the
+  same `unstable_cache` + tag pattern as the leaderboard, then removed it: a
+  production A/B on `/app/search` showed identical TTFB with and without it
+  (9.1–9.9 ms vs 8.6–10.2 ms, depending on the query) and only ~0.6 fewer DB
+  transactions per request. The query costs ~2 ms, so the cache bought no
+  visible latency while adding a user-keyed disk cache. The numbers are in
+  `docs/PERFORMANCE.md`; the search route stays uncached.
 - Cached the community leaderboard for 30 s and invalidated both community
   tags on every write that moves rankings: votes, manual scores, undo, review
   saves and account deletion. A production A/B over 60 warm requests per arm found
