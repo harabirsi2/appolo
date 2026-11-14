@@ -123,9 +123,10 @@ nested transaction is required.
 - `/app/rankings?kind=…` now orders by fitted θ whenever a model exists and prints
   `model score · ±95% interval · comparisons · confidence` per row. The un-filtered
   "All" view continues to use the Elo ladder because it spans categories.
-- Standard errors carry a capped Pearson overdispersion factor and a one-sided
-  calibration-slope inflation: when decided outcomes are flatter than the
-  fitted probabilities, intervals widen instead of claiming false certainty.
+- Standard errors carry a capped Pearson overdispersion factor. When decided
+  outcomes are flatter than the fitted probabilities, each item's interval is
+  extended outward by the estimated attenuation `(1/slope − 1)·|θ|`, so the
+  bias toward zero is covered without moving the displayed estimate.
 - Community scores are shrunk toward a neutral prior (see `community.ts`) before
   they are shown publicly, with a confidence label.
 
@@ -173,7 +174,7 @@ Run with `pnpm test` (uses `tsx --test`, so Node 20+ works). Including community
   flip rate at about 0.18 on the probit harness, but coverage fell to 0.846 and
   RMSE rose from 0.296 to roughly 0.44. The noise parameter trades off against
   the fixed tie term and adds variance faster than it removes bias, so the
-  one-sided calibration inflation stays.
+  outward attenuation allowance stays.
 - Taste matching keeps genre similarity to a 20% prior when shared titles exist;
   with no shared titles it is the only signal and is labelled as such.
 - The fit is per media kind only; sub-category (genre) models and per-collection

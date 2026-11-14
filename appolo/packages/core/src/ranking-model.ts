@@ -485,8 +485,10 @@ export function fitBradleyTerry(
     MAX_OVERDISPERSION,
     Math.max(1, pearson / Math.max(effectiveObservations - k, 1)),
   );
+  // Attenuation bias points toward zero, so extend the outward side of the
+  // interval by the estimated relative bias instead of widening both sides.
   const slope = calibrationSlope(index, events, theta);
-  const calibrationInflation = slope < 1 ? 1 / slope : 1;
+  const attenuation = slope < 1 ? 1 / slope - 1 : 0;
   const covariance = fitCovariance(final.hessian, k);
 
   // Bradley–Terry is identified only up to a shared shift (only θ_i − θ_j
@@ -506,15 +508,16 @@ export function fitBradleyTerry(
 
   const items: FittedItem[] = ids.map((id, i) => {
     const centeredTheta = (theta[i] ?? 0) - meanTheta;
-    const se = (standardErrors[i] ?? 0) * Math.sqrt(overdispersion) * calibrationInflation;
+    const se = (standardErrors[i] ?? 0) * Math.sqrt(overdispersion);
+    const biasAllowance = attenuation * Math.abs(centeredTheta);
     const stats = final.stats[i] ?? { comparisons: 0, wins: 0, losses: 0, ties: 0 };
     const decided = stats.wins + stats.losses;
     return {
       id,
       theta: centeredTheta,
       standardError: se,
-      lower: centeredTheta - 1.96 * se,
-      upper: centeredTheta + 1.96 * se,
+      lower: centeredTheta - 1.96 * se - (centeredTheta < 0 ? biasAllowance : 0),
+      upper: centeredTheta + 1.96 * se + (centeredTheta > 0 ? biasAllowance : 0),
       comparisons: stats.comparisons,
       wins: stats.wins,
       losses: stats.losses,

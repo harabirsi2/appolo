@@ -5,12 +5,11 @@ why the change was made, not every commit.
 
 ## Ranking interval calibration
 
-- Fit standard errors now include a capped Pearson overdispersion factor and a
-  one-sided calibration-slope inflation: when decided outcomes are flatter than
-  the fitted probabilities, the interval widens instead of claiming precision.
-  Under the probit misspecification scenario coverage rose from 0.825 to 0.959
-  over 20 seeds against nominal 0.95, and the harness now gates pooled coverage
-  at 0.95.
+- Fit standard errors include a capped Pearson overdispersion factor, and an
+  overconfident fit extends each interval outward by its estimated attenuation
+  `(1/slope − 1)·|θ|` instead of claiming precision. Under the probit scenario
+  coverage rose from 0.825 to 0.950 over 20 seeds, the weakest decile improved
+  from 0.910 to 0.935, and the harness gates pooled coverage at 0.95.
 
 ## Service module split
 

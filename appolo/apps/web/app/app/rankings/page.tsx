@@ -129,7 +129,7 @@ export default async function RankingsPage({
             imageUrl: item.imageUrl,
             bandLabel: scoreBand(item.score).label,
             fitText: fit
-              ? `model ${fit.personalScore.toFixed(1)}/10 · ±${(1.96 * fit.standardError).toFixed(2)} · ${fit.comparisons} cmp · ${confidence} confidence`
+              ? `model ${fit.personalScore.toFixed(1)}/10 · 95% ${fit.lower.toFixed(2)}..${fit.upper.toFixed(2)} · ${fit.comparisons} cmp · ${confidence} confidence`
               : null,
           };
         })}

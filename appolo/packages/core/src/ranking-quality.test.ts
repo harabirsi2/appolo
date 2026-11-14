@@ -123,9 +123,10 @@ test("recovers the ordering when outcomes follow a different process", () => {
 });
 
 /**
- * The standard errors carry a Pearson overdispersion correction, so a process
- * with heavier noise than the fitter assumes produces wider intervals instead
- * of false certainty. Gate the pooled rate; individual seeds are noisier.
+ * The intervals carry a Pearson overdispersion correction and an outward
+ * attenuation allowance, so a process with heavier noise than the fitter
+ * assumes covers its true strengths instead of claiming false certainty.
+ * Gate the pooled rate; individual seeds are noisier.
  */
 test("keeps 95% intervals close to nominal coverage under the probit process", (t) => {
   let covered = 0;
@@ -141,7 +142,9 @@ test("keeps 95% intervals close to nominal coverage under the probit process", (
     total += coverage.total;
     perSeed.push(`seed ${seed} ${coverage.covered}/${coverage.total}`);
     for (const item of fit.items) {
-      zScores.push(Math.abs(item.theta - strengths.get(item.id)!) / item.standardError);
+      const error = item.theta - strengths.get(item.id)!;
+      const side = error > 0 ? item.theta - item.lower : item.upper - item.theta;
+      zScores.push(Math.abs(error) / (side / 1.96));
     }
   }
   const ordered = [...zScores].sort((a, b) => a - b);
@@ -150,7 +153,7 @@ test("keeps 95% intervals close to nominal coverage under the probit process", (
   t.diagnostic(
     `probit-process 95% interval coverage ${pooled.toFixed(3)} ` +
       `(${covered}/${total}); ${perSeed.join(", ")}; ` +
-      `95th percentile |error|/SE ${q95.toFixed(2)} vs the 1.96 assumed by the intervals`,
+      `95th percentile error as a fraction of the outward interval side ${q95.toFixed(2)}`,
   );
   assert.ok(
     pooled >= MIN_MISSPECIFIED_COVERAGE,
