@@ -6,7 +6,7 @@
  * without consent is skipped, never silently sent), quiet hours block the whole
  * send, and a daily cap matches the org's existing send policy.
  */
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import {
   campaignSchema,
   isWithinQuietHours,
@@ -207,9 +207,19 @@ export async function sendCampaign(
   const [org] = await withOrg(orgId, (tx) => tx.select({ name: orgs.name }).from(orgs).limit(1));
   const businessName = org?.name ?? "our business";
 
-  await withOrg(orgId, (tx) =>
-    tx.update(campaigns).set({ status: "sending" }).where(eq(campaigns.id, campaignId)),
-  );
+  // Claim the send atomically: only one caller can move a campaign out of a
+  // non-sending state, so a concurrent double POST cannot send twice.
+  const claimed = await withOrg(orgId, async (tx) => {
+    const rows = await tx
+      .update(campaigns)
+      .set({ status: "sending" })
+      .where(and(eq(campaigns.id, campaignId), notInArray(campaigns.status, ["sent", "sending"])))
+      .returning({ id: campaigns.id });
+    return rows.length > 0;
+  });
+  if (!claimed) {
+    throw new DomainError("ALREADY_SENT", "This campaign is already being sent or was already sent.", 409);
+  }
 
   const result: SendCampaignResult = { sent: 0, skipped: 0, failed: 0, results: [] };
 

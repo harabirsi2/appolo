@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
+import { messageStatusesBelow, shouldApplyMessageStatus } from "@appolo/core";
 import { getAdminDb, withOrg, schema } from "@/lib/db";
 import { verifyTwilioSignature } from "@/lib/services/providers";
 
@@ -48,29 +49,45 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!sid || !status) return NextResponse.json({ ok: true, ignored: true });
 
   const [existing] = await getAdminDb()
-    .select({ id: messages.id, orgId: messages.orgId })
+    .select({ id: messages.id, orgId: messages.orgId, status: messages.status })
     .from(messages)
     .where(eq(messages.providerSid, sid))
     .limit(1);
 
   if (!existing) return NextResponse.json({ ok: true, ignored: true });
 
+  // A replayed or out-of-order callback must not regress a later status, and a
+  // repeated status must not stack another event row.
+  if (!shouldApplyMessageStatus(existing.status, status)) {
+    return NextResponse.json({ ok: true, ignored: true, stale: true });
+  }
+
+  let applied = false;
   await withOrg(existing.orgId, async (tx) => {
-    await tx
+    // Guard the write too, so two callbacks racing out of order cannot both
+    // apply: only a status strictly earlier than the incoming one is replaced.
+    const updated = await tx
       .update(messages)
       .set({
         status,
         ...(status === "failed" ? { errorCode: params.ErrorCode ?? "PROVIDER_ERROR" } : {}),
       })
-      .where(eq(messages.id, existing.id));
+      .where(and(eq(messages.id, existing.id), inArray(messages.status, messageStatusesBelow(status))))
+      .returning({ id: messages.id });
 
-    await tx.insert(messageEvents).values({
-      orgId: existing.orgId,
-      messageId: existing.id,
-      event: `status.${status}`,
-      payload: { providerStatus: params.MessageStatus ?? null, errorCode: params.ErrorCode ?? null },
-    });
+    if (updated.length === 0) return;
+    applied = true;
+
+    await tx
+      .insert(messageEvents)
+      .values({
+        orgId: existing.orgId,
+        messageId: existing.id,
+        event: `status.${status}`,
+        payload: { providerStatus: params.MessageStatus ?? null, errorCode: params.ErrorCode ?? null },
+      })
+      .onConflictDoNothing({ target: [messageEvents.messageId, messageEvents.event] });
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, applied });
 }

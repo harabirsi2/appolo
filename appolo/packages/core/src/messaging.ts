@@ -74,3 +74,44 @@ export function firstName(name: string | null | undefined): string {
 export function smsSegments(body: string): number {
   return Math.max(1, Math.ceil(body.length / 160));
 }
+
+/* ------------------------------------------------------------------ */
+/* delivery status ordering (webhook replay protection)                */
+/* ------------------------------------------------------------------ */
+
+/** Every status a stored message may hold, ordered by delivery progress. */
+export const MESSAGE_STATUS_ORDER = ["queued", "sent", "received", "delivered", "failed"] as const;
+export type MessageDeliveryStatus = (typeof MESSAGE_STATUS_ORDER)[number];
+
+/**
+ * Delivery progress for a status. A callback may only move a message forward:
+ * a replayed or out-of-order provider callback reporting an earlier state must
+ * not regress a `delivered` message back to `sent`, and an identical status is
+ * a no-op so replays cannot stack duplicate event rows.
+ */
+const MESSAGE_STATUS_RANK: Record<string, number> = {
+  queued: 1,
+  sent: 2,
+  received: 2,
+  delivered: 3,
+  failed: 3,
+};
+
+export function messageStatusRank(status: string | null | undefined): number {
+  if (!status) return 0;
+  return MESSAGE_STATUS_RANK[status] ?? 0;
+}
+
+/** True when `incoming` represents strictly more progress than `current`. */
+export function shouldApplyMessageStatus(
+  current: string | null | undefined,
+  incoming: string,
+): boolean {
+  return messageStatusRank(incoming) > messageStatusRank(current);
+}
+
+/** The known statuses strictly below `incoming`, for an atomic guarded update. */
+export function messageStatusesBelow(incoming: string): MessageDeliveryStatus[] {
+  const rank = messageStatusRank(incoming);
+  return MESSAGE_STATUS_ORDER.filter((status) => messageStatusRank(status) < rank);
+}

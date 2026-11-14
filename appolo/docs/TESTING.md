@@ -15,14 +15,15 @@ What runs, how to run it, and what is not covered.
 
 | Command | What it covers | Current result |
 |---|---|---|
-| `pnpm test` | Core logic: ranking model, ranking quality, Elo, taste similarity, feed ranking, community shrinkage, coordinated-vote detection | **51/51** |
+| `pnpm test` | Core logic: ranking model, ranking quality, Elo, taste similarity, feed ranking, community shrinkage, coordinated-vote detection, CSV-injection escaping, delivery-status ordering | **62/62** |
 | `pnpm preflight` | App reachable and database answering (`select 1`) | pass |
 | `pnpm typecheck` | All workspaces | pass |
-| `pnpm e2e` | 27 HTTP checks: health, auth guards, signup, rating, tie, undo, model rebuild, follow, feed explanations, taste comparison, moderation, export, deletion | **27/27** |
+| `pnpm e2e` | 29 HTTP checks: health, auth guards, signup, rating, tie, undo, model rebuild, follow, feed explanations, taste comparison, moderation, media export, contact export (formula neutralization + rate limit), deletion | **29/29** |
 | `pnpm visual` | 8 screens, pixel comparison against committed baselines, 0.1% tolerance | **8/8** |
 | `pnpm a11y` | axe-core on 8 screens; fails on serious/critical violations | **0 violations** |
 | `pnpm db:role-guard` | Fails if the app's database role is a superuser or has `BYPASSRLS` | pass |
 | `pnpm db:rls-test` | Cross-tenant isolation through `withOrg()` on orgs, locations, contacts, ratings, reviews, notifications and pods; refuses to run under a role that bypasses RLS | **16/16** |
+| `pnpm db:idempotency-test` | Webhook idempotency: `(org_id, provider_sid)` and `(message_id, event)` are unique, so a replayed provider callback is a no-op | **5/5** |
 | `pnpm verify` | preflight → role guard → media-art → typecheck → unit tests → e2e → visual (the gate used before commits and in CI) | pass |
 
 `VISUAL_UPDATE=1 pnpm visual` accepts intentional rendering changes and rewrites
@@ -90,6 +91,21 @@ the wrapper every service uses — and asserts:
   as before.
 
 Fixtures are deleted by cascade at the end, including the shared catalog item.
+
+## Webhook and messaging idempotency
+
+`pnpm db:idempotency-test` (run by CI after the RLS suite) builds one org with a
+message and asserts the database, not just the service, enforces replay safety:
+
+- a second message with the same `(org_id, provider_sid)` is rejected, and the
+  `onConflictDoNothing` path the inbound webhook uses is a clean no-op;
+- the same provider id is still accepted in a different org;
+- a second `message_events` row for the same `(message_id, event)` is rejected.
+
+The monotonic delivery-status rule and the CSV formula guard are covered as pure
+functions in `packages/core/src/messaging-safety.test.ts`, and the contact export
+(formula neutralization, phone preservation, rate limit) is exercised end to end
+in `scripts/e2e.mjs`.
 
 ## Test data
 

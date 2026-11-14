@@ -488,17 +488,28 @@ export async function receiveInboundSms(input: InboundSms) {
       target.locationId,
     );
 
-    await tx.insert(messages).values({
-      orgId,
-      conversationId,
-      direction: "inbound",
-      senderType: "contact",
-      body: input.body,
-      media: input.media ?? [],
-      providerSid: input.providerSid ?? null,
-      status: "received",
-      sentAt: new Date(),
-    });
+    // Race-safe dedupe: the (org_id, provider_sid) unique index means a
+    // concurrent Twilio retry that slipped past the check above stores nothing
+    // here, so no duplicate message, automation reply or AI answer is produced.
+    const [stored] = await tx
+      .insert(messages)
+      .values({
+        orgId,
+        conversationId,
+        direction: "inbound",
+        senderType: "contact",
+        body: input.body,
+        media: input.media ?? [],
+        providerSid: input.providerSid ?? null,
+        status: "received",
+        sentAt: new Date(),
+      })
+      .onConflictDoNothing({ target: [messages.orgId, messages.providerSid] })
+      .returning({ id: messages.id });
+
+    if (!stored) {
+      return { orgId, conversationId, contactId, duplicate: true, action: "duplicate" as const };
+    }
 
     await tx.insert(contactEvents).values({
       orgId,

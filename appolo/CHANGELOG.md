@@ -3,6 +3,24 @@
 Notable, user-visible or architectural changes. Dates are ISO. Entries describe
 why the change was made, not every commit.
 
+## Messaging and CRM hardening
+
+- **Webhook idempotency.** A provider message id is now unique per org
+  (`messages_org_provider_sid_uq`), so a replayed Twilio inbound webhook cannot
+  create duplicate messages, contacts, keyword automations or AI replies.
+  Delivery status is monotonic and each `(message, event)` pair is stored once,
+  so a replayed or out-of-order status callback cannot regress a `delivered`
+  message or stack `message_events` rows.
+- **Fail closed in production.** `verifyTwilioSignature` refuses unsigned
+  callbacks in production when no auth token is configured, and the provider-less
+  mock now throws instead of reporting "delivered" unless running in
+  development/test or with an explicit override
+  (`TWILIO_ALLOW_UNSIGNED_WEBHOOKS` / `ALLOW_MOCK_PROVIDERS`).
+- **Campaign double-send.** `sendCampaign` claims the campaign with one
+  conditional update, so two concurrent send requests cannot both send.
+- **Contact export.** The CSV export is rate limited (5/min/org) and writes an
+  `audit_logs` entry naming the actor; spreadsheet-formula cells are neutralized.
+
 ## Audit fixes: ranking fit, genre filters, covers, contrast
 
 - **Ranking gradient.** The Davidson score vectors used each item's own

@@ -10,7 +10,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/ranking-model.test.ts src/ranking-quality.test.ts src/taste-match.test.ts src/community.test.ts src/feed-rank.test.ts src/coalesce.test.ts",
+    "test": "tsx --test src/ranking-model.test.ts src/ranking-quality.test.ts src/taste-match.test.ts src/community.test.ts src/feed-rank.test.ts src/coalesce.test.ts src/messaging-safety.test.ts",
     "bench": "tsx bench/core.ts"
   },
   "dependencies": {

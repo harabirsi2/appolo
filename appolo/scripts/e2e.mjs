@@ -334,6 +334,30 @@ await check("media export covers ratings, reviews, matchups and ranking order", 
   assert.ok(data.rankingOrder.some((row) => row.kind === "movie"));
 });
 
+const formulaContact = await call("/api/contacts", {
+  method: "POST",
+  body: { name: "=cmd|' /C calc'!A0", company: "+1 (555) 010-0100" },
+  cookie: alpha.cookie,
+});
+const contactsExport = await call("/api/contacts/export", { cookie: alpha.cookie });
+await check("contact export neutralizes spreadsheet formulas but keeps phone numbers", () => {
+  assert.equal(formulaContact.status, 201, `contact create failed: ${formulaContact.text.slice(0, 160)}`);
+  assert.equal(contactsExport.status, 200, `export failed: ${contactsExport.text.slice(0, 160)}`);
+  assert.match(contactsExport.headers.get("content-disposition") ?? "", /attachment/);
+  assert.ok(contactsExport.text.includes("'=cmd|' /C calc'!A0"), "formula cell was not neutralized");
+  assert.ok(contactsExport.text.includes("+1 (555) 010-0100"), "phone number was mangled");
+});
+
+let lastExport = null;
+for (let attempt = 0; attempt < 5; attempt += 1) {
+  lastExport = await call("/api/contacts/export", { cookie: alpha.cookie });
+}
+await check("a burst of contact exports is rate limited with a retry hint", () => {
+  assert.equal(lastExport.status, 429);
+  assert.equal(lastExport.json?.code, "RATE_LIMITED");
+  assert.ok(Number(lastExport.headers.get("retry-after")) >= 1);
+});
+
 const reactionRatingId = reordered.json.rankings[0].ratingId;
 let lastReaction = null;
 for (let attempt = 0; attempt < 61; attempt += 1) {

@@ -32,11 +32,32 @@ Controls implemented in this repository, and the risks that remain.
 - Media URLs are restricted to https or app-relative paths; `javascript:`,
   `data:` and protocol-relative URLs are rejected.
 - React escapes rendered text; raw HTML is not injected anywhere.
+- Contact CSV export neutralizes spreadsheet formula injection: a cell starting
+  with `=`, `+`, `-`, `@`, tab or carriage return is prefixed with an apostrophe
+  (plain numbers and phone numbers are left intact).
+
+## Webhook intake and messaging idempotency
+
+- Twilio callbacks are verified with `X-Twilio-Signature`. With no auth token
+  configured the check is open outside production (the local/mock path); in
+  production an unsigned callback is refused unless
+  `TWILIO_ALLOW_UNSIGNED_WEBHOOKS=true` is set explicitly.
+- Inbound SMS is stored once per `(org_id, provider_sid)` (unique index), so a
+  concurrent Twilio retry cannot create duplicate messages, contacts,
+  automations or AI replies.
+- Delivery status is monotonic: a replayed or out-of-order callback cannot
+  regress `delivered` back to `sent`, and each `(message, event)` pair is
+  stored once, so replays do not stack event rows.
+- Provider-less sends use a local mock (marked "delivered") only in development
+  and test, or with `ALLOW_MOCK_PROVIDERS=true`. In production an unconfigured
+  provider throws instead of silently reporting success.
 
 ## Abuse controls
 
 - Interactive endpoints (matchup fetches, votes, reactions, comments) use
   Postgres fixed-window counters and return `429` with `Retry-After`.
+- Bulk contact export (PII egress) is limited to 5 per minute per org and writes
+  an `audit_logs` entry recording the actor.
 - Community scores shrink thin samples toward a prior and down-weight votes
   flagged by coordinated-voting detection (five or more shared titles with
   sustained near-identical scores).

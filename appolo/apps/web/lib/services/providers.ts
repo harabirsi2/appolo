@@ -81,12 +81,33 @@ export function isTwilioConfigured(): boolean {
   );
 }
 
+/**
+ * Whether the credential-less mock may stand in for a real provider. Allowed in
+ * development and test so the app runs with no credentials, and in production
+ * only with an explicit opt-in. Otherwise sending fails loudly rather than
+ * marking an undelivered message "delivered".
+ */
+function mockProvidersAllowed(): boolean {
+  return process.env.NODE_ENV !== "production" || process.env.ALLOW_MOCK_PROVIDERS === "true";
+}
+
+function unconfiguredSmsProvider(): SmsProvider {
+  return {
+    name: "unconfigured",
+    async sendSms(): Promise<SendSmsResult> {
+      throw new Error(
+        "SMS provider is not configured (set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER).",
+      );
+    },
+  };
+}
+
 export function getSmsProvider(): SmsProvider {
   const sid = process.env.TWILIO_ACCOUNT_SID?.trim();
   const token = process.env.TWILIO_AUTH_TOKEN?.trim();
   const from = process.env.TWILIO_FROM_NUMBER?.trim();
   if (sid && token && from) return twilioProvider(sid, token, from);
-  return mockProvider();
+  return mockProvidersAllowed() ? mockProvider() : unconfiguredSmsProvider();
 }
 
 /* ------------------------------------------------------------------ */
@@ -165,17 +186,30 @@ export function isEmailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim());
 }
 
+function unconfiguredEmailProvider(): EmailProvider {
+  return {
+    name: "unconfigured",
+    async sendEmail(): Promise<SendEmailResult> {
+      throw new Error("Email provider is not configured (set RESEND_API_KEY and EMAIL_FROM).");
+    },
+  };
+}
+
 export function getEmailProvider(): EmailProvider {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   const from = process.env.EMAIL_FROM?.trim();
   if (apiKey && from) return resendProvider(apiKey, from);
-  return mockEmailProvider();
+  return mockProvidersAllowed() ? mockEmailProvider() : unconfiguredEmailProvider();
 }
 
 /**
  * Validates Twilio's X-Twilio-Signature: base64(HMAC-SHA1(authToken,
- * url + sorted(key+value))). Skipped when no auth token is configured, which
- * is the local/mock path.
+ * url + sorted(key+value))).
+ *
+ * With no auth token configured this is the local/mock path, which is allowed
+ * outside production. In production an unsigned callback is refused unless the
+ * operator explicitly opts in, so a deployment that forgets the token cannot
+ * silently accept forged webhooks.
  */
 export function verifyTwilioSignature(
   url: string,
@@ -183,7 +217,9 @@ export function verifyTwilioSignature(
   signature: string | null,
 ): boolean {
   const token = process.env.TWILIO_AUTH_TOKEN?.trim();
-  if (!token) return true;
+  if (!token) {
+    return process.env.NODE_ENV !== "production" || process.env.TWILIO_ALLOW_UNSIGNED_WEBHOOKS === "true";
+  }
   if (!signature) return false;
 
   const data = Object.keys(params)

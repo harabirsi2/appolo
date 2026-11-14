@@ -13,8 +13,10 @@ export const MATCHUP_WINDOW: AttemptWindow = { max: 240, windowMs: 60_000 };
 export const REACTION_WINDOW: AttemptWindow = { max: 60, windowMs: 60_000 };
 /** Comments notify the review author, so they are capped tighter than reactions. */
 export const COMMENT_WINDOW: AttemptWindow = { max: 20, windowMs: 60_000 };
+/** Bulk PII exports are legitimate but should not be scriptable in a loop. */
+export const EXPORT_WINDOW: AttemptWindow = { max: 5, windowMs: 60_000 };
 
-export type ActionScope = "vote" | "matchup" | "reaction" | "comment";
+export type ActionScope = "vote" | "matchup" | "reaction" | "comment" | "export";
 
 export type ActionLimitResult =
   | { allowed: true }

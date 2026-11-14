@@ -1,3 +1,5 @@
+import { escapeCsvCell } from "@appolo/core";
+
 /** Minimal RFC-4180-ish CSV parser (quotes, escaped quotes, embedded commas/newlines). */
 export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
@@ -50,9 +52,7 @@ export function parseCsv(text: string): string[][] {
 }
 
 export function csvEscape(value: string | null | undefined): string {
-  const raw = value ?? "";
-  if (/[",\n\r]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
-  return raw;
+  return escapeCsvCell(value);
 }
 
 export function toCsv(headers: string[], rows: (string | null | undefined)[][]): string {

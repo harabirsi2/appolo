@@ -17,6 +17,7 @@
     "db:migrate": "pnpm --filter @appolo/db migrate",
     "db:seed": "pnpm --filter @appolo/db seed",
     "db:rls-test": "pnpm --filter @appolo/db rls-test",
+    "db:idempotency-test": "pnpm --filter @appolo/db idempotency-test",
     "db:reset": "pnpm --filter @appolo/db reset",
     "db:up": "powershell -ExecutionPolicy Bypass -File scripts/dev-db.ps1",
     "db:down": "powershell -ExecutionPolicy Bypass -File scripts/dev-db.ps1 -Stop",

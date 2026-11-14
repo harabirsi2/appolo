@@ -434,6 +434,7 @@ export const messages = pgTable(
   (t) => ({
     conversationIdx: index("messages_conversation_created_idx").on(t.conversationId, t.createdAt),
     providerIdx: index("messages_provider_sid_idx").on(t.providerSid),
+    providerOrgUq: uniqueIndex("messages_org_provider_sid_uq").on(t.orgId, t.providerSid),
   }),
 );
 
@@ -449,6 +450,7 @@ export const messageEvents = pgTable(
   },
   (t) => ({
     messageIdx: index("message_events_message_idx").on(t.messageId, t.occurredAt),
+    messageEventUq: uniqueIndex("message_events_message_event_uq").on(t.messageId, t.event),
   }),
 );
 
