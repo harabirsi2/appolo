@@ -24,6 +24,16 @@ why the change was made, not every commit.
   applies them without the network pacing delay. A reseed dropped from tens of
   minutes of rate-limited art lookups to under a minute.
 
+## Ranking quality evaluation
+
+- Added `packages/core/src/ranking-quality.ts`, a seeded harness that simulates
+  users with different activity levels and noise, samples pairwise outcomes
+  (wins, losses, ties) from latent strengths, then scores a fit on ordering
+  recovery (Spearman ≥ 0.85), held-out predictive accuracy (≥ 0.65), 95%
+  interval coverage (≥ 0.75), invariance to event order and a/b side
+  assignment, cold-start shrinkage, and a 5 s runtime budget for 300 items.
+  The seven checks run in `pnpm test` and `pnpm verify`.
+
 ## Continuous integration
 
 - Added `.github/workflows/verify.yml`, which runs on every push: Postgres 16
