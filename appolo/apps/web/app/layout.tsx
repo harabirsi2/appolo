@@ -21,13 +21,15 @@ export const metadata: Metadata = {
 };
 
 export const viewport = {
-  themeColor: "#000000",
+  themeColor: "#07080A",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className={`${display.variable} min-h-screen bg-bg text-ink antialiased`}>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${display.variable} min-h-screen bg-bg text-ink antialiased`} suppressHydrationWarning>
+        {children}
+      </body>
     </html>
   );
 }
