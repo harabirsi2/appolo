@@ -33,8 +33,12 @@ const EMAIL = process.env.VISUAL_EMAIL ?? "owner@appolo.test";
 const PASSWORD = process.env.VISUAL_PASSWORD ?? "appolo-demo-1234";
 const MIN_SCREENSHOT_BYTES = 20_000;
 // Causes the check to fail at 0.1% changed pixels, which tolerates font and
-// anti-aliasing differences between machines but catches real layout changes.
-const MAX_DIFF_RATIO = 0.001;
+// anti-aliasing differences on the machine that captured the baselines but
+// catches real layout changes. On a machine whose fonts differ (for example
+// Linux CI comparing against baselines captured on another OS) set
+// VISUAL_MAX_DIFF_RATIO to a looser bound; the structural checks (h1, non-empty
+// main, no console/page/5xx errors, non-blank screenshot) still run regardless.
+const MAX_DIFF_RATIO = Number(process.env.VISUAL_MAX_DIFF_RATIO ?? 0.001);
 
 const SCREENS = [
   { name: "landing", path: "/", title: "Appolo", heading: "anything", public: true },
