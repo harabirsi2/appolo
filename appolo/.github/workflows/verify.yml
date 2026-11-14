@@ -1,0 +1,140 @@
+name: Verify
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Full verify suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: appolo
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d appolo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      APP_URL: http://localhost:3000
+      SESSION_COOKIE: appolo_session
+      # The app must connect as a role that cannot bypass row-level security.
+      DATABASE_URL: postgresql://appolo_app:appolo_dev_password@127.0.0.1:55432/appolo
+      # Owner/superuser connection for migrations, seeds and RLS fixtures.
+      MIGRATE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55432/appolo
+      SEED_EMAIL: owner@appolo.test
+      SEED_PASSWORD: appolo-demo-1234
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The grant migration only touches appolo_app when the role already
+      # exists, so create it before running migrations.
+      - name: Create non-superuser app role
+        run: |
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          begin
+            if not exists (select 1 from pg_roles where rolname = 'appolo_app') then
+              create role appolo_app login password 'appolo_dev_password' nosuperuser nobypassrls;
+            else
+              alter role appolo_app nosuperuser nobypassrls;
+            end if;
+          end $$;
+          SQL
+
+      - name: Assert the app role cannot bypass RLS
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
+            "select current_user, rolsuper, rolbypassrls from pg_roles where rolname = current_user" \
+            | tee /tmp/app-role.txt
+          # Reject a superuser or BYPASSRLS connection: either would silently
+          # make every tenant resolve to whatever rows the query returns.
+          grep -qx 'appolo_app|f|f' /tmp/app-role.txt
+
+      - name: Migrate
+        run: pnpm db:migrate
+
+      - name: Seed
+        run: pnpm db:seed
+
+      - name: RLS isolation test
+        run: pnpm db:rls-test
+
+      # The visual, e2e and a11y checks drive chromium-headless-shell.
+      - name: Install Playwright browser and system dependencies
+        run: pnpm exec playwright install --with-deps chromium --only-shell
+
+      - name: Production build
+        run: pnpm --filter @appolo/web build
+
+      - name: Start the production server
+        run: |
+          nohup pnpm --filter @appolo/web start > /tmp/web.log 2>&1 &
+          echo $! > /tmp/web.pid
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/api/health > /dev/null; then
+              echo "App ready after ${attempt}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "App did not become ready; server log follows:"
+          cat /tmp/web.log
+          exit 1
+
+      - name: Verify (preflight, media-art, typecheck, e2e, visual)
+        run: pnpm verify
+
+      - name: Accessibility audit
+        run: pnpm a11y
+
+      - name: Stop the server
+        if: always()
+        run: |
+          if [ -f /tmp/web.pid ]; then
+            pid=$(cat /tmp/web.pid)
+            pkill -P "$pid" 2>/dev/null || true
+            kill "$pid" 2>/dev/null || true
+          fi
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-diagnostics
+          path: |
+            /tmp/web.log
+            /tmp/app-role.txt
+            scripts/visual-output
+          if-no-files-found: ignore
+          retention-days: 7

@@ -24,6 +24,16 @@ why the change was made, not every commit.
   applies them without the network pacing delay. A reseed dropped from tens of
   minutes of rate-limited art lookups to under a minute.
 
+## Continuous integration
+
+- Added `.github/workflows/verify.yml`, which runs on every push: Postgres 16
+  service, a non-superuser `appolo_app` role created before migrations (with a
+  hard assertion that it is neither superuser nor `BYPASSRLS`), migrate, seed,
+  `db:rls-test`, Playwright `chromium-headless-shell` with system dependencies,
+  a full production build, the production server, `pnpm verify` (preflight,
+  media-art, typecheck, e2e, visual) and `pnpm a11y`. Failure diagnostics
+  (server log, role assertion, visual diffs) upload as an artifact.
+
 ## Production build fix
 
 - A plain `next build` failed prerendering `/404` and `/500` with
