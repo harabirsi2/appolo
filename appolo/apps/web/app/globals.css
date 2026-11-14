@@ -12,7 +12,9 @@
   --color-border-strong: #3a3a41;
   --color-ink: #f6f6f7;
   --color-muted: #a1a1aa;
-  --color-muted-2: #6f6f78;
+  /* #6f6f78 was 4.2:1 on black — below the 4.5:1 minimum for 11px text.
+     #86868f clears 5:1 even on the #141416 card surface. */
+  --color-muted-2: #86868f;
   --color-brand: #4ade80;
   --color-brand-strong: #22c55e;
   --color-brand-soft: #86efac;

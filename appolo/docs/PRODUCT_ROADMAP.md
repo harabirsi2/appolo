@@ -38,7 +38,7 @@ Open:
 ## Phase 2 — Media and review foundation (Mostly Done)
 
 Existing: shared catalog of 1,181 titles across six kinds — 357 movies, 173 TV, 204 albums,
-80 podcasts, 196 books and 170 games (+anime as a TV/movie genre) — providers, search,
+80 podcasts, 196 books and 170 games — providers, search,
 detail pages, credits/people, reviews with attachments, spoilers, reactions, comments,
 pods, watchlist, history.
 

@@ -81,7 +81,7 @@ Scale in use (px values from Tailwind arbitrary sizes):
 | Component | File | Notes |
 |---|---|---|
 | Button/Input/Select/Textarea | `packages/ui/src/components.tsx` | Variants primary/secondary/ghost/danger; sizes sm/md/lg (32/40/44px) |
-| MediaArt | `apps/web/components/media-art.tsx` | Deterministic hue fallback, kind icon, ANIME label, Elo WR badge on hover |
+| MediaArt | `apps/web/components/media-art.tsx` | Real cover image when the item has one, otherwise a deterministic hue tile with the kind icon and initials |
 | KindIcon | `apps/web/components/kind-icon.tsx` | Seven line SVGs: movie, tv, music, podcast, book, game, anime sparkle |
 | CompareCard | `apps/web/app/app/rate/[itemId]/finish-rating.tsx` | Head-to-head cards with VS marker |
 | Podium / podium editor | `apps/web/components/podiums.tsx`, `podium-order-editor.tsx` | Gold/silver/bronze display, drag ordering |

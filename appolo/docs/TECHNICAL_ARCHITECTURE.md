@@ -183,7 +183,7 @@ relying on `db:generate` again.
 ```bash
 pnpm install --frozen-lockfile
 pnpm typecheck
-pnpm test                 # packages/core unit tests (30)
+pnpm test                 # packages/core unit tests (56)
 pnpm --filter @appolo/web build
 # with a PostgreSQL instance:
 pnpm db:migrate && pnpm db:seed && pnpm db:rls-test

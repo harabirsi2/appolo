@@ -150,6 +150,50 @@ export function probabilityABeatsB(
 }
 
 /**
+ * Analytic gradient of the penalised log-likelihood at a given θ, keyed by item.
+ *
+ * This is the reference derivative, written straight from the model definition
+ * rather than reusing the optimiser's score vectors. Tests use it to assert the
+ * fitter stops at a stationary point: if `accumulate` and this function ever
+ * disagree, the difference shows up as a non-zero gradient at the "solution".
+ */
+export function logLikelihoodGradient(
+  events: readonly ComparisonEvent[],
+  thetaById: ReadonlyMap<string, number>,
+  options: { regularization?: number; tieParameter?: number } = {},
+): Map<string, number> {
+  const regularization = Math.max(0.0001, options.regularization ?? DEFAULT_REGULARIZATION);
+  const tieParameter = Math.max(0.001, options.tieParameter ?? DEFAULT_TIE_PARAMETER);
+  const gradient = new Map<string, number>();
+
+  for (const event of events) {
+    const weight = weightFor(event);
+    if (weight === 0) continue;
+    const thetaA = thetaById.get(event.aId) ?? 0;
+    const thetaB = thetaById.get(event.bId) ?? 0;
+    const { pa, pb, pt } = davidsonProbabilities(thetaA, thetaB, tieParameter);
+
+    // ∂logZ/∂θa = pa + pt/2 and ∂logZ/∂θb = pb + pt/2.
+    const za = pa + 0.5 * pt;
+    const zb = pb + 0.5 * pt;
+    const [da, db] =
+      event.outcome === "a"
+        ? [1 - za, -zb]
+        : event.outcome === "b"
+          ? [-za, 1 - zb]
+          : [0.5 - za, 0.5 - zb];
+
+    gradient.set(event.aId, (gradient.get(event.aId) ?? 0) + weight * da);
+    gradient.set(event.bId, (gradient.get(event.bId) ?? 0) + weight * db);
+  }
+
+  for (const [id, theta] of thetaById) {
+    gradient.set(id, (gradient.get(id) ?? 0) - regularization * theta);
+  }
+  return gradient;
+}
+
+/**
  * Shannon entropy of a single comparison probability, in nats. Highest (1) at
  * p = 0.5 and zero at a certain outcome.
  */
@@ -241,8 +285,12 @@ function accumulate(
     const pt = Math.exp(logNu + (thetaA + thetaB) / 2 - logZ);
 
     // Score vectors ∂logP/∂(θa, θb) for every possible outcome.
-    const scoreA: [number, number] = [1 - pa - 0.5 * pt, -pa - 0.5 * pt];
-    const scoreB: [number, number] = [-pb - 0.5 * pt, 1 - pb - 0.5 * pt];
+    // With logZ = log(e^θa + e^θb + ν·e^((θa+θb)/2)), the denominator
+    // derivative is ∂logZ/∂θa = pa + 0.5·pt and ∂logZ/∂θb = pb + 0.5·pt.
+    // A loss (or a tie) therefore moves the *other* item by the other item's
+    // probability: the cross term in scoreA is ∂logP(A)/∂θb = -(pb + 0.5·pt).
+    const scoreA: [number, number] = [1 - pa - 0.5 * pt, -pb - 0.5 * pt];
+    const scoreB: [number, number] = [-pa - 0.5 * pt, 1 - pb - 0.5 * pt];
     const scoreTie: [number, number] = [0.5 - pa - 0.5 * pt, 0.5 - pb - 0.5 * pt];
     const observed =
       event.outcome === "a" ? scoreA : event.outcome === "b" ? scoreB : scoreTie;

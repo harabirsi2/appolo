@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
 import { MEDIA_KINDS, genreProfile, scoreForElo, tasteMatch, MatchConfidence, MediaKind } from "@appolo/core";
 import { type CatalogItem } from "./catalog-item";
 import { rankedRatings, watchlistFor, type RankedItem } from "./rankings";
+import { hasAnyGenre } from "./genre-filter";
 import { podsForProfile, type PodCard } from "./pods";
 import { listInterests } from "./interests";
 import { z } from "zod";
@@ -248,10 +249,7 @@ export async function suggestedProfiles(orgId: string, limit = 8): Promise<Profi
       .where(
         and(
           notInArray(profiles.orgId, excluded),
-          sql`${catalogItems.genres} && array[${sql.join(
-            genres.map((genre) => sql`${genre}`),
-            sql`, `,
-          )}]::text[]`,
+          hasAnyGenre(catalogItems.genres, genres),
         ),
       )
       .groupBy(profiles.id)

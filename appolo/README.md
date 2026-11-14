@@ -223,8 +223,9 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
   (1 / 2 / S) in the matchup game.
 - **Kind icons:** every medium (movie, TV, music, podcast, book, game) has its
   own line icon, used in filter chips, category tiles, item badges, and generated
-  covers. Titles tagged with the Anime genre get a distinct sparkle glyph and an
-  ANIME cover label instead of the TV icon.
+  covers. A title tagged with the `anime` genre gets a distinct sparkle glyph
+  instead of the TV icon (`isAnime`); the demo catalog ships no anime-tagged
+  rows, and the Browse genre chips only list genres the catalog actually has.
 
 ## Commands
 
@@ -233,18 +234,22 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
 | `pnpm dev` | web + worker together |
 | `pnpm dev:web` | Next.js only |
 | `pnpm typecheck` | TypeScript across all packages |
+| `pnpm test` | core ranking, taste and community unit tests |
 | `pnpm build` | production build |
 | `pnpm db:up` / `db:down` | local Postgres cluster on :55432 |
 | `pnpm db:migrate` | apply migrations (`drizzle/` then `sql/`) |
-| `pnpm db:seed` | demo org, user, contacts, reviews |
+| `pnpm db:seed` | demo org, user, contacts, reviews; downloads and caches covers |
 | `pnpm db:rls-test` | cross-tenant isolation test |
 | `pnpm db:reset` | drop and recreate the schema (dev only) |
+| `pnpm covers:fetch` | download the reviewed covers listed in `scripts/covers-manifest.json` |
 | `pnpm e2e` | portable HTTP e2e suite (server must be running) |
 | `pnpm preflight` | health + database check (server must be running) |
 | `pnpm visual` | Playwright visual checks with pixel baselines (server must be running) |
-| `pnpm verify` | preflight → typecheck → e2e → visual (server must be running) |
+| `pnpm a11y` | axe accessibility check on 8 screens (server must be running) |
+| `pnpm media-art` | guard that every MediaArt call passes the catalog cover |
+| `pnpm verify` | preflight → role guard → media-art → typecheck → test → e2e → visual (server must be running) |
 | `pnpm smoke` | HTTP end-to-end test (server must be running) |
-| `pnpm run ci` | install → typecheck → migrate → seed → RLS test → build |
+| `pnpm run ci` | install → typecheck → unit tests → media-art → migrate → seed → RLS test → build |
 
 > Install the browser once with `pnpm exec playwright install chromium` before using
 > `pnpm visual` or `pnpm verify`.

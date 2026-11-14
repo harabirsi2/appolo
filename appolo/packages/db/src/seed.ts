@@ -779,21 +779,22 @@ function cachedCoverPath(row: CoverSeed): string | null {
 }
 
 async function enrichCoverImages(rows: Array<{ id: string; kind: string; title: string; subtitle: string; year: number | null; imageUrl: string | null }>): Promise<void> {
-  const missing = rows.filter((row) => !row.imageUrl);
-
-  // Committed covers first, in bulk: no provider calls and no pacing needed.
-  const remote: typeof missing = [];
-  for (const row of missing) {
+  // Committed covers win even over an existing remote URL: they are stable,
+  // committed to the repo, and avoid hotlinking a provider's CDN.
+  const remote: typeof rows = [];
+  for (const row of rows) {
     const cached = cachedCoverPath(row);
     if (cached) {
-      await db.update(catalogItems).set({ imageUrl: cached }).where(eq(catalogItems.id, row.id));
-    } else {
+      if (row.imageUrl !== cached) {
+        await db.update(catalogItems).set({ imageUrl: cached }).where(eq(catalogItems.id, row.id));
+      }
+    } else if (!row.imageUrl) {
       remote.push(row);
     }
   }
 
-  // Only titles without a committed cover need the network, paced to stay
-  // inside provider rate limits.
+  // Only titles with neither a committed nor a remote cover need the network,
+  // paced to stay inside provider rate limits.
   const concurrency = 2;
   for (let i = 0; i < remote.length; i += concurrency) {
     const batch = remote.slice(i, i + concurrency);
@@ -827,7 +828,9 @@ async function seedMedia(orgId: string): Promise<void> {
           externalRef: `demo:${item.kind}:${slugify(item.title)}`,
           description: DESCRIPTIONS[item.title] ?? null,
           links: spotify ? { spotify } : {},
-          genres: item.genres ?? [],
+          // Base rows carry curated genre words as `tags`; without this they
+          // land with no genres and every genre filter misses them.
+          genres: item.genres ?? item.tags ?? [],
           trailerUrl: item.trailerUrl ?? (item.kind === "movie" || item.kind === "tv" ? `https://www.youtube.com/results?search_query=${encodeURIComponent(item.title + " trailer")}` : null),
           imageUrl: null,
           tags: item.tags,

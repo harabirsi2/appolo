@@ -3,6 +3,36 @@
 Notable, user-visible or architectural changes. Dates are ISO. Entries describe
 why the change was made, not every commit.
 
+## Audit fixes: ranking fit, genre filters, covers, contrast
+
+- **Ranking gradient.** The Davidson score vectors used each item's own
+  probability in the cross term, so the analytic gradient was wrong by up to
+  0.61 and the fitter reported convergence after two Newton steps at a
+  non-stationary point (true `max|g|` of 1.2–7.3 on the quality harness). The
+  cross terms now reference the other item's probability; the fit reaches the
+  same optimum as an independent solver and its gradient is zero. A finite-
+  difference test and a stationarity regression test now guard this.
+- **Genre filters.** `catalog_items.genres` mixes casings ("Action" from the
+  base seed, "action" from expansion rows), so every `@>` containment filter
+  silently hid part of the catalog. Filtering is now case-insensitive on both
+  sides (`lib/services/genre-filter.ts`, `genreKey`), Browse canonicalises the
+  `genre` query, interest options group by `lower(g)`, and base rows seed their
+  genres from their curated tags. The TV chip list no longer offers "Anime",
+  which no TV row carries.
+- **Wrong compare cover.** The head-to-head "which is better?" card passed the
+  user's uploaded `photoUrl` as the cover, so it showed the wrong picture (or
+  generated art). It now passes the catalog `imageUrl`, and `scripts/media-art.mjs`
+  rejects any `imageUrl={…photoUrl…}` anywhere in the app.
+- **Contrast and baselines.** `--color-muted-2` was 4.2:1 on black and the
+  desktop-nav footer was dimmed to 2.84:1; both now clear 4.5:1, avatar/cover
+  links have accessible names, and the visual baselines were regenerated.
+- **Missing covers.** Seven titles had no cover from the automatic providers.
+  `scripts/fetch-covers.mjs` downloads a reviewed public source for each into
+  `apps/web/public/covers/`, normalises and validates it, and records provenance
+  in `scripts/covers-manifest.json`. Committed covers now take precedence over a
+  remote URL, so the seed no longer hotlinks. The database has no missing and no
+  remote cover URLs.
+
 ## Ranking interval calibration
 
 - Fit standard errors include a capped Pearson overdispersion factor, and an

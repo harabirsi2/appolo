@@ -308,7 +308,7 @@ export default async function HomePage({
           <ul className="space-y-1.5">
             {suggestions.map((person) => (
               <li key={person.orgId} className="card-surface flex items-center gap-3 rounded-2xl p-3">
-                <Link href={`/${person.username}`} className="shrink-0">
+                <Link href={`/${person.username}`} aria-label={`View ${person.displayName}'s profile`} className="shrink-0">
                   <Avatar name={person.displayName} hue={person.avatarHue} size={40} />
                 </Link>
                 <div className="min-w-0 flex-1">

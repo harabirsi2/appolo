@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fitBradleyTerry, type ComparisonEvent } from "./ranking-model.ts";
+import { fitBradleyTerry, logLikelihoodGradient, type ComparisonEvent } from "./ranking-model.ts";
 import {
   evaluateSyntheticPreferences,
   createRng,
@@ -347,6 +347,28 @@ test("fits a large catalog inside the runtime budget", () => {
     spearmanCorrelation(fit, synthetic.strengths) >= MIN_SPEARMAN,
     "the large fit should still recover the ordering",
   );
+});
+
+/**
+ * A fit that reports convergence must be a stationary point of the objective it
+ * optimises. With the cross terms referencing the wrong item, the fitter stopped
+ * after two Newton steps at a point whose true gradient was large (max|g| ≈ 1.2
+ * at seed 42 and ≈ 7.3 at seed 7), while still reporting `converged: true`.
+ */
+test("the fitted solution is a stationary point of the penalised likelihood", () => {
+  for (const seed of [7, 42]) {
+    const synthetic = generateSyntheticPreferences({ seed, items: 8, users: 12, comparisons: 800 });
+    const fit = fitBradleyTerry(synthetic.events);
+    assert.ok(fit.converged, `fit did not converge for seed ${seed}`);
+
+    const theta = new Map(fit.items.map((item) => [item.id, item.theta]));
+    const gradient = logLikelihoodGradient(synthetic.events, theta);
+    const maxAbs = Math.max(...[...gradient.values()].map(Math.abs));
+    assert.ok(
+      maxAbs < 1e-4,
+      `seed ${seed}: fitted solution is not stationary, max|grad| = ${maxAbs.toFixed(4)}`,
+    );
+  }
 });
 
 function median(values: readonly number[]): number {

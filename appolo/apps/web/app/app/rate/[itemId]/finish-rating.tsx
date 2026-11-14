@@ -414,7 +414,7 @@ export function FinishRating({
               title={item.title}
               year={item.year}
               kind={item.kind}
-              imageUrl={item.photoUrl}
+              imageUrl={item.imageUrl}
               hint="1"
               disabled={busy}
               onPick={() => vote("win")}

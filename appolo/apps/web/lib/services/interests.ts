@@ -1,6 +1,7 @@
-import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { MEDIA_KINDS, type MediaKind } from "@appolo/core";
 import { getDbHandle, withOrg, schema } from "@/lib/db";
+import { hasAnyGenre } from "./genre-filter";
 
 const { catalogItems, itemRatings, profileInterests } = schema;
 
@@ -25,12 +26,14 @@ const isKind = (value: string): value is MediaKind => MEDIA_KINDS.includes(value
 /** Genres that actually exist in the catalog, grouped by media kind. */
 export async function interestOptions(): Promise<InterestOption[]> {
   const { client } = getDbHandle();
+  // Group on the case-insensitive key so "Action" and "action" are one chip.
+  // `initcap` gives a stable display label regardless of which casing won.
   const rows = await client<{ kind: string; genre: string }[]>`
-    select kind::text as kind, g as genre
+    select kind::text as kind, initcap(min(g)) as genre
     from public.catalog_items, unnest(genres) as g
     where g <> ''
-    group by kind, g
-    order by kind, count(*) desc, g
+    group by kind, lower(g)
+    order by kind, count(*) desc, lower(g)
   `;
   const byKind = new Map<MediaKind, string[]>();
   for (const row of rows) {
@@ -98,15 +101,7 @@ export async function starterItem(orgId: string, picks: InterestPick[]): Promise
       ? await tx
           .select({ id: catalogItems.id, title: catalogItems.title, kind: catalogItems.kind })
           .from(catalogItems)
-          .where(
-            and(
-              ...base,
-              sql`${catalogItems.genres} && array[${sql.join(
-                genres.map((genre) => sql`${genre}`),
-                sql`, `,
-              )}]::text[]`,
-            ),
-          )
+          .where(and(...base, hasAnyGenre(catalogItems.genres, genres)))
           .limit(1)
       : [];
 

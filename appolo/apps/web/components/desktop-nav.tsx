@@ -72,7 +72,7 @@ export function DesktopNav() {
           <Icon name="settings" className="h-4 w-4" />
           Settings
         </Link>
-        <p className="px-3 pt-2 text-[9px] uppercase tracking-[0.18em] text-muted-2/70">
+        <p className="px-3 pt-2 text-[9px] uppercase tracking-[0.18em] text-muted-2">
           Appolo · 2026
         </p>
       </div>

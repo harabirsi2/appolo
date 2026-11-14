@@ -1,10 +1,15 @@
 import { inArray, sql } from "drizzle-orm";
-import { MEDIA_KINDS, scoreForElo, type MediaKind } from "@appolo/core";
+import { MEDIA_KINDS, genreKey, scoreForElo, type MediaKind } from "@appolo/core";
 import { getDb, schema } from "@/lib/db";
 import { rankedRatings, type CatalogItem } from "./rankings";
 import { ratingStreak, type Streak } from "./streaks";
 
 const { itemRatings } = schema;
+
+/** Capitalise each word so a stored "sci-fi" reads as "Sci-Fi" in the UI. */
+function displayGenre(value: string): string {
+  return value.trim().replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
 
 export interface TasteKind {
   kind: MediaKind;
@@ -67,14 +72,19 @@ export async function tasteDna(orgId: string): Promise<TasteDna> {
     .filter((entry) => entry.count > 0)
     .sort((a, b) => b.count - a.count);
 
-  const genreCounts = new Map<string, number>();
+  // Merge casings so "Action" and "action" are one entry, and show a readable
+  // label rather than whichever casing happened to be stored.
+  const genreCounts = new Map<string, { genre: string; count: number }>();
   for (const rating of ratings) {
     for (const genre of rating.genres) {
-      genreCounts.set(genre, (genreCounts.get(genre) ?? 0) + 1);
+      const key = genreKey(genre);
+      if (!key) continue;
+      const entry = genreCounts.get(key);
+      if (entry) entry.count += 1;
+      else genreCounts.set(key, { genre: displayGenre(genre), count: 1 });
     }
   }
-  const genres = [...genreCounts.entries()]
-    .map(([genre, count]) => ({ genre, count }))
+  const genres = [...genreCounts.values()]
     .sort((a, b) => b.count - a.count)
     .slice(0, 8);
 

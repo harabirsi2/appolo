@@ -155,7 +155,7 @@ Strengths:
   `packages/ui`, HTTP/RSC in `apps/web`.
 - Strict TypeScript everywhere; Zod schemas are shared from `packages/core`
   into route handlers and services; no `any`/`@ts-ignore` in application code.
-- 37 unit tests plus a 13-check end-to-end script that exercises auth, RLS
+- 56 unit tests plus a 27-check end-to-end script that exercises auth, RLS
   tenant isolation, ratings, ties, undo, follows, feed ranking and taste match.
 - Migrations are append-only SQL files with an applied-migrations table.
 

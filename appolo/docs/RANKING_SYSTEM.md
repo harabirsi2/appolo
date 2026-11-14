@@ -159,9 +159,12 @@ confidence instead of deleting anyone's opinion.
 - personal scores stay in 0–10 and rank correctly;
 - Davidson probabilities sum to 1;
 - entropy peaks at an even matchup;
-- selection prefers an uncertain, unshown opponent and avoids an obvious one.
+- selection prefers an uncertain, unshown opponent and avoids an obvious one;
+- a reported convergence is a real stationary point: the reference analytic
+  gradient matches finite differences, and the fitted solution's gradient norm
+  is effectively zero.
 
-Run with `pnpm test` (uses `tsx --test`, so Node 20+ works). Including community, coordination and taste tests, the core suite is 44 tests.
+Run with `pnpm test` (uses `tsx --test`, so Node 20+ works). Including community, coordination and taste tests, the core suite is 56 tests.
 
 ## 7. Known limitations
 
@@ -182,4 +185,6 @@ Run with `pnpm test` (uses `tsx --test`, so Node 20+ works). Including community
 - Community scores use fixed Bayesian-style shrinkage and coordinated-vote down-weighting;
   per-item robust aggregation beyond that is not implemented.
 - Undo exists and is covered by e2e; it restores Elo/counters and drops the matchup row.
-- The "All" rankings view still orders by Elo; only a specific media kind uses θ.
+- The "All" rankings view combines each media kind's fitted model (θ), with Elo
+  only as a tie-breaker inside that order; a specific media kind uses its own
+  model. A saved manual order overrides both.

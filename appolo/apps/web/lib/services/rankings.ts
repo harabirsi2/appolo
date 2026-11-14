@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { START_ELO, clamp, selectOpponent, withPositions, pairKey, selectInformativeOpponent, MatchResult, MediaKind } from "@appolo/core";
 import { getCatalogItem, mapCatalogItem, toScore, type CatalogItem } from "./catalog-item";
 import { getRankingModel, outcomeForResult, scheduleRankingRefresh } from "./ranking-math";
+import { hasGenre } from "./genre-filter";
 import { DomainError } from "./errors";
 import { scheduleCatalogEnrichment } from "./catalog-providers";
 import { nextEloAdaptive } from "@appolo/core/ranking";
@@ -49,8 +50,7 @@ export async function listCatalog(options: {
   }
   const filters = [];
   if (options.kind) filters.push(eq(catalogItems.kind, options.kind as MediaKind));
-  // Containment (not `= any(...)`) so the GIN index on genres can serve it.
-  if (options.genre) filters.push(sql`${catalogItems.genres} @> array[${options.genre}]::text[]`);
+  if (options.genre) filters.push(hasGenre(catalogItems.genres, options.genre));
   if (options.q) {
     const like = `%${options.q}%`;
     filters.push(sql`(${catalogItems.title} ilike ${like} or ${catalogItems.subtitle} ilike ${like})`);

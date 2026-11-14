@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { GENRES, MEDIA_KIND_LABELS, MEDIA_KINDS, scoreBand, type MediaKind } from "@appolo/core";
+import { GENRES, MEDIA_KIND_LABELS, MEDIA_KINDS, genreKey, scoreBand, type MediaKind } from "@appolo/core";
 import { requireSession } from "@/lib/session";
 import { catalogLeaderboard, rankedRatings, weeklyMovers, type LeaderboardSort } from "@/lib/services/rankings";
 import { followingOrgIds, tasteTwins } from "@/lib/services/social";
@@ -26,7 +26,12 @@ export default async function BrowsePage({
   const session = await requireSession();
   const { kind, genre, sort } = await searchParams;
   const activeKind = MEDIA_KINDS.includes(kind as MediaKind) ? (kind as MediaKind) : undefined;
-  const activeGenre = activeKind && genre && GENRES[activeKind]?.includes(genre) ? genre : undefined;
+  // Accept any casing (`drama`, `Drama`, `DRAMA`) and canonicalise to the chip
+  // label. The catalog itself mixes casings, so the query compares on `genreKey`.
+  const activeGenre =
+    activeKind && genre
+      ? GENRES[activeKind]?.find((candidate) => genreKey(candidate) === genreKey(genre))
+      : undefined;
   const activeSort: LeaderboardSort = SORTS.some((entry) => entry.key === sort)
     ? (sort as LeaderboardSort)
     : "top";

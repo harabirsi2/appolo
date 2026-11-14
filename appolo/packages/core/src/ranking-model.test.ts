@@ -4,6 +4,7 @@ import {
   comparisonEntropy,
   davidsonProbabilities,
   fitBradleyTerry,
+  logLikelihoodGradient,
   pairKey,
   probabilityABeatsB,
   scoreInformativeOpponents,
@@ -150,5 +151,64 @@ test("large fits keep finite, centred uncertainty beyond the dense solver limit"
     assert.ok(Number.isFinite(item.standardError), `${item.id} standard error is not finite`);
     assert.ok(item.standardError >= 0);
     assert.ok(item.lower <= item.theta && item.theta <= item.upper);
+  }
+});
+
+/**
+ * The analytic gradient must be the actual derivative of the penalised
+ * log-likelihood. Central differences are computed here from the model
+ * definition alone (via the exported probabilities), so a score vector that
+ * references the wrong item — the bug this guards — shows up as a mismatch.
+ */
+test("analytic gradient matches finite differences of the penalised likelihood", () => {
+  const events: ComparisonEvent[] = [
+    { aId: "a", bId: "b", outcome: "a" },
+    { aId: "a", bId: "c", outcome: "tie" },
+    { aId: "b", bId: "c", outcome: "b" },
+    { aId: "a", bId: "b", outcome: "tie", weight: 0.4 },
+    { aId: "b", bId: "c", outcome: "undecided" },
+  ];
+  const regularization = 0.6;
+  const tieParameter = 0.55;
+  const theta = new Map([
+    ["a", 0.7],
+    ["b", -0.2],
+    ["c", 0.15],
+  ]);
+
+  const weightOf = (event: ComparisonEvent): number => {
+    if (event.outcome === "skip") return 0;
+    if (event.weight !== undefined) return event.weight;
+    return event.outcome === "undecided" ? 0.5 : 1;
+  };
+  const objective = (at: ReadonlyMap<string, number>): number => {
+    let total = 0;
+    for (const event of events) {
+      const weight = weightOf(event);
+      if (weight === 0) continue;
+      const { pa, pb, pt } = davidsonProbabilities(
+        at.get(event.aId)!,
+        at.get(event.bId)!,
+        tieParameter,
+      );
+      const probability = event.outcome === "a" ? pa : event.outcome === "b" ? pb : pt;
+      total += weight * Math.log(probability);
+    }
+    for (const value of at.values()) total -= (regularization / 2) * value * value;
+    return total;
+  };
+
+  const gradient = logLikelihoodGradient(events, theta, { regularization, tieParameter });
+  const step = 1e-6;
+  for (const id of theta.keys()) {
+    const up = new Map(theta);
+    const down = new Map(theta);
+    up.set(id, theta.get(id)! + step);
+    down.set(id, theta.get(id)! - step);
+    const numeric = (objective(up) - objective(down)) / (2 * step);
+    assert.ok(
+      Math.abs(gradient.get(id)! - numeric) < 1e-5,
+      `${id}: analytic gradient ${gradient.get(id)!.toFixed(6)} vs numeric ${numeric.toFixed(6)}`,
+    );
   }
 });

@@ -59,6 +59,19 @@ function openingTags(source, file) {
 const problems = [];
 for (const file of await tsxFiles(ROOT)) {
   const source = await readFile(file, "utf8");
+
+  // `photoUrl` is a user upload for one rating, not the catalog cover. Using
+  // it as `imageUrl` renders the wrong picture (or generic art when unset).
+  // Scan the whole file, not just MediaArt tags: wrapper components such as
+  // CompareCard forward their `imageUrl` prop straight to MediaArt.
+  const coverFromPhoto = /\bimageUrl\s*=\s*\{[^}]*\bphotoUrl\b[^}]*\}/g;
+  for (const match of source.matchAll(coverFromPhoto)) {
+    const line = source.slice(0, match.index).split("\n").length;
+    problems.push(
+      `${path.relative(process.cwd(), file)}:${line} — imageUrl must be the catalog cover, not photoUrl`,
+    );
+  }
+
   if (!source.includes("<MediaArt")) continue;
   for (const { tag, line } of openingTags(source, file)) {
     if (!/(^|\s)imageUrl\s*=/m.test(tag)) {

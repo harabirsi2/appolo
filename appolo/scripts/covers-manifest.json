@@ -1,0 +1,118 @@
+{
+  "description": "Provenance for covers added by scripts/fetch-covers.mjs. Sources are public image APIs, not another app.",
+  "generatedBy": "scripts/fetch-covers.mjs",
+  "covers": [
+    {
+      "kind": "movie",
+      "title": "Three Women",
+      "file": "movie-three-women.jpg",
+      "provider": "Wikipedia (en)",
+      "page": "3 Women",
+      "url": "https://upload.wikimedia.org/wikipedia/en/9/96/3_Women_%281977%29.png",
+      "attribution": "Poster for 3 Women (1977). English Wikipedia, fair use for identification.",
+      "bytes": 16736,
+      "source": {
+        "format": "jpeg",
+        "width": 250,
+        "height": 375,
+        "padded": false
+      }
+    },
+    {
+      "kind": "tv",
+      "title": "Money Heist",
+      "file": "tv-money-heist.jpg",
+      "provider": "TVmaze",
+      "page": "La Casa de Papel",
+      "url": "https://static.tvmaze.com/uploads/images/original_untouched/376/940830.jpg",
+      "attribution": "La Casa de Papel (Money Heist) poster. TVmaze, used for identification.",
+      "bytes": 45501,
+      "source": {
+        "format": "jpeg",
+        "width": 1080,
+        "height": 1350,
+        "padded": false
+      }
+    },
+    {
+      "kind": "book",
+      "title": "The Hour of the Star",
+      "file": "book-the-hour-of-the-star.jpg",
+      "provider": "Wikipedia (en)",
+      "page": "The Hour of the Star",
+      "url": "https://upload.wikimedia.org/wikipedia/en/8/87/The_hour_of_the_star.jpg",
+      "attribution": "Cover of The Hour of the Star by Clarice Lispector. English Wikipedia, fair use.",
+      "bytes": 22068,
+      "source": {
+        "format": "jpeg",
+        "width": 251,
+        "height": 395,
+        "padded": false
+      }
+    },
+    {
+      "kind": "game",
+      "title": "Dwarf Fortress",
+      "file": "game-dwarf-fortress.jpg",
+      "provider": "Wikimedia Commons",
+      "page": "Dwarf Fortress",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/c/c9/Dwarf_Fortress.svg",
+      "attribution": "Dwarf Fortress wordmark. Wikimedia Commons.",
+      "bytes": 10868,
+      "source": {
+        "format": "jpeg",
+        "width": 4267,
+        "height": 640,
+        "padded": true
+      }
+    },
+    {
+      "kind": "game",
+      "title": "Minecraft",
+      "file": "game-minecraft.jpg",
+      "provider": "Wikimedia Commons",
+      "page": "Minecraft",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/1/14/Minecraft_Logo.png",
+      "attribution": "Minecraft logo. Wikimedia Commons.",
+      "bytes": 13753,
+      "source": {
+        "format": "jpeg",
+        "width": 857,
+        "height": 150,
+        "padded": true
+      }
+    },
+    {
+      "kind": "game",
+      "title": "RimWorld",
+      "file": "game-rimworld.jpg",
+      "provider": "Wikipedia (en)",
+      "page": "RimWorld",
+      "url": "https://upload.wikimedia.org/wikipedia/en/a/a4/Rimworld_logo.png",
+      "attribution": "RimWorld logo. English Wikipedia, fair use for identification.",
+      "bytes": 10617,
+      "source": {
+        "format": "jpeg",
+        "width": 400,
+        "height": 61,
+        "padded": true
+      }
+    },
+    {
+      "kind": "game",
+      "title": "Undertale",
+      "file": "game-undertale.jpg",
+      "provider": "Wikimedia Commons",
+      "page": "Undertale",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/c/cd/Undertale_vector_logo_on_black_borders.svg",
+      "attribution": "Undertale wordmark. Wikimedia Commons.",
+      "bytes": 9530,
+      "source": {
+        "format": "jpeg",
+        "width": 3008,
+        "height": 416,
+        "padded": true
+      }
+    }
+  ]
+}

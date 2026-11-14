@@ -36,12 +36,25 @@ export const MEDIA_KIND_SINGULAR: Record<MediaKind, string> = {
 /** Curated genres shown on the Add/Browse page, grouped by media kind. */
 export const GENRES: Record<MediaKind, string[]> = {
   movie: ["Action", "Comedy", "Drama", "Horror", "Sci-Fi", "Thriller", "Romance", "Animation", "Documentary"],
-  tv: ["Drama", "Comedy", "Sci-Fi", "Reality", "Crime", "Animation", "Anime", "Documentary"],
+  // No "Anime" chip: the catalog's animated TV titles are Western, and no row
+  // carries an `anime` genre. `isAnime` still labels genuinely tagged titles.
+  tv: ["Drama", "Comedy", "Sci-Fi", "Reality", "Crime", "Animation", "Documentary"],
   music: ["Pop", "Hip-Hop", "R&B", "Rock", "Electronic", "Indie", "Jazz", "Country"],
   podcast: ["True Crime", "News", "Comedy", "Culture", "Science", "History", "Technology"],
   book: ["Fiction", "Fantasy", "Sci-Fi", "Nonfiction", "Mystery", "Romance", "Biography", "Poetry"],
   game: ["Action", "Adventure", "RPG", "Shooter", "Strategy", "Indie", "Sports", "Horror"],
 };
+
+/**
+ * Case-insensitive comparison key for a genre label.
+ *
+ * The catalog mixes casings ("Action" from the base seed, "action" from the
+ * expansion rows), so every filter must compare on this key rather than on the
+ * raw string.
+ */
+export function genreKey(value: string): string {
+  return value.trim().toLowerCase();
+}
 
 /** Elo every item begins at before its first matchup. */
 export const START_ELO = 1500;

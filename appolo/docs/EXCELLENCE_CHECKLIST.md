@@ -7,7 +7,7 @@ Legend: **Done** · **Partial** · **Open**
 
 Last verification: `pnpm verify` → preflight OK, typecheck clean, e2e **27/27**,
 visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
-**44/44**; axe **0 violations** on 8 screens. Image measurement: Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
+**56/56**; axe **0 violations** on 8 screens. Image measurement: Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 
 ---
 
@@ -132,7 +132,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 
 | Check | Status | Evidence |
 |---|---|---|
-| Unit tests (ranking, taste, community) | Done | 42 tests, `pnpm test` |
+| Unit tests (ranking, taste, community) | Done | 56 tests, `pnpm test` |
 | End-to-end workflows over HTTP | Done | `scripts/e2e.mjs`, 27 checks, cleans up its accounts |
 | Visual regression | Done | `scripts/visual.mjs`, 8 screens |
 | Readiness / health check | Done | `scripts/preflight.mjs` (queries the DB) |

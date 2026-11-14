@@ -29,7 +29,7 @@ export function ReviewScreen({
 
       <article className="mt-4 rounded-2xl border border-white/[0.06] bg-white/[0.04] p-4">
         <div className="flex items-center gap-2.5">
-          <Link href={`/${review.username}`} className="shrink-0">
+          <Link href={`/${review.username}`} aria-label={`View ${review.displayName}'s profile`} className="shrink-0">
             <Avatar name={review.displayName} hue={review.avatarHue} size={40} />
           </Link>
           <div className="min-w-0 flex-1">
@@ -42,7 +42,7 @@ export function ReviewScreen({
         </div>
 
         <div className="mt-4 flex items-center gap-3 rounded-xl border border-white/[0.06] bg-black/25 p-3">
-          <Link href={`/app/item/${review.itemId}`} className="shrink-0">
+          <Link href={`/app/item/${review.itemId}`} aria-label={`View ${review.itemTitle}`} className="shrink-0">
             <MediaArt kind={review.kind} title={review.itemTitle} imageUrl={review.imageUrl} sizes="64px" className="h-16 w-16 rounded-lg" />
           </Link>
           <div className="min-w-0 flex-1">

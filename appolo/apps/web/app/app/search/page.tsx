@@ -129,7 +129,7 @@ export default async function SearchPage({
                     key={person.orgId}
                     className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-3"
                   >
-                    <Link href={`/${person.username}`} className="shrink-0">
+                    <Link href={`/${person.username}`} aria-label={`View ${person.displayName}'s profile`} className="shrink-0">
                       <Avatar name={person.displayName} hue={person.avatarHue} size={40} />
                     </Link>
                     <div className="min-w-0 flex-1">

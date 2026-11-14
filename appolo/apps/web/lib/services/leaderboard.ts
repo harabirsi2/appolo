@@ -4,6 +4,7 @@ import { unstable_cache } from "next/cache";
 import { COMMUNITY_TAGS } from "@/lib/cache";
 import { getCatalogItem, mapCatalogItem, toScore, type CatalogItem } from "./catalog-item";
 import { getDb, withOrg, schema } from "@/lib/db";
+import { hasGenre } from "./genre-filter";
 const { catalogItems, itemRatings, itemMatchups, catalogCredits } = schema;
 
 export interface PopularItem extends CatalogItem {
@@ -128,8 +129,7 @@ export async function catalogLeaderboard(options: LeaderboardOptions = {}): Prom
   const sort = options.sort ?? "top";
   const filters = [];
   if (options.kind) filters.push(eq(catalogItems.kind, options.kind));
-  // Containment (not `= any(...)`) so the GIN index on genres can serve it.
-  if (options.genre) filters.push(sql`${catalogItems.genres} @> array[${options.genre}]::text[]`);
+  if (options.genre) filters.push(hasGenre(catalogItems.genres, options.genre));
 
   const ratings = sql<number>`count(${itemRatings.id})::int`;
   const avgElo = sql<number>`coalesce(avg(${itemRatings.elo}), ${START_ELO})::float`;

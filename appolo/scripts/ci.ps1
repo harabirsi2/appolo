@@ -14,6 +14,8 @@ function Step($name, $block) {
 
 Step "install"        { pnpm install }
 Step "typecheck"      { pnpm typecheck }
+Step "unit tests"     { pnpm test }
+Step "media-art"      { pnpm media-art }
 Step "migrate"        { pnpm db:migrate }
 Step "seed"           { pnpm db:seed }
 Step "rls isolation"  { pnpm db:rls-test }
