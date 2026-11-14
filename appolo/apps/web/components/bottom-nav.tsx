@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "@/components/podiums";
+import { QuickActionSheet } from "@/components/quick-action-sheet";
 
 const TABS = [
   { href: "/app", label: "Home", icon: "home" as const },
@@ -22,13 +23,7 @@ export function BottomNav() {
           <Tab tab={TABS[1]!} active={isActive(pathname, TABS[1]!.href)} />
 
           <div className="flex justify-center">
-            <Link
-              href="/app/rate"
-              aria-label="Rate something"
-              className="-mt-7 grid h-14 w-14 place-items-center rounded-full bg-gradient-to-b from-brand-soft to-brand text-black shadow-[0_10px_30px_-6px_rgba(74,222,128,0.55)] ring-4 ring-black transition-transform active:scale-95"
-            >
-              <Icon name="plus" className="h-7 w-7" />
-            </Link>
+            <QuickActionSheet />
           </div>
 
           <Tab tab={TABS[2]!} active={isActive(pathname, TABS[2]!.href)} />
