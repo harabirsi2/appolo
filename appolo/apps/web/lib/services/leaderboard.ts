@@ -113,6 +113,7 @@ interface LeaderboardOptions {
   genre?: string;
   sort?: LeaderboardSort;
   limit?: number;
+  offset?: number;
 }
 
 /**
@@ -140,7 +141,7 @@ export async function catalogLeaderboard(options: LeaderboardOptions = {}): Prom
     .leftJoin(itemRatings, eq(itemRatings.itemId, catalogItems.id))
     .where(filters.length ? and(...filters) : undefined)
     .groupBy(catalogItems.id)
-    .having(sort === "new" ? undefined : sql`count(${itemRatings.id}) > 0`)
+    .having(sort === "rated" ? sql`count(${itemRatings.id}) > 0` : undefined)
     .orderBy(
       sort === "rated"
         ? desc(sql`count(${itemRatings.id})`)
@@ -151,7 +152,8 @@ export async function catalogLeaderboard(options: LeaderboardOptions = {}): Prom
       // arbitrary order, which makes the page (and visual baselines) jitter.
       catalogItems.id,
     )
-    .limit(Math.min(options.limit ?? 24, 60));
+    .limit(Math.min(options.limit ?? 24, 60))
+    .offset(Math.max(0, options.offset ?? 0));
 
   // Down-weight reviewer pairs that vote in lockstep. Detection needs the
   // per-profile votes, not just the aggregate, so it runs over the same items.
@@ -185,15 +187,38 @@ export async function catalogLeaderboard(options: LeaderboardOptions = {}): Prom
     };
   });
 }
+/**
+ * Total number of catalog items matching the given filters, using the same
+ * eligibility rule as `catalogLeaderboard` for the chosen sort.
+ */
+export async function catalogCount(options: {
+  kind?: MediaKind;
+  genre?: string;
+  sort?: LeaderboardSort;
+} = {}): Promise<number> {
+  const db = getDb();
+  const sort = options.sort ?? "top";
+  const filters = [];
+  if (options.kind) filters.push(eq(catalogItems.kind, options.kind));
+  if (options.genre) filters.push(hasGenre(catalogItems.genres, options.genre));
+  const groups = await db
+    .select({ id: catalogItems.id })
+    .from(catalogItems)
+    .leftJoin(itemRatings, eq(itemRatings.itemId, catalogItems.id))
+    .where(filters.length ? and(...filters) : undefined)
+    .groupBy(catalogItems.id)
+    .having(sort === "rated" ? sql`count(${itemRatings.id}) > 0` : undefined);
+  return groups.length;
+}
+/**
+ * Catalog titles that sit next to an item: same media kind, ranked by shared
+ * genres first and community score second. Used for the "more like this" rail.
+ */
 export interface SimilarItem extends CommunityItem {
   /** How many genres the two titles share. */
   overlap: number;
 }
 
-/**
- * Catalog titles that sit next to an item: same media kind, ranked by shared
- * genres first and community score second. Used for the "more like this" rail.
- */
 export async function similarItems(itemId: string, limit = 8): Promise<SimilarItem[]> {
   const item = await getCatalogItem(itemId);
   if (!item) return [];
@@ -265,3 +290,12 @@ export async function weeklyMovers(orgId: string, limit = 5): Promise<MoverItem[
     }));
   });
 }
+
+export async function catalogKindCounts(): Promise<Record<string, number>> {
+  const db = getDb();
+  const rows = await db.select({ kind: catalogItems.kind, n: sql<number>`count(*)::int` }).from(catalogItems).groupBy(catalogItems.kind);
+  const out: Record<string, number> = {};
+  for (const row of rows) out[row.kind] = row.n;
+  return out;
+}
+

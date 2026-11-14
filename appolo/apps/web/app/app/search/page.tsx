@@ -24,16 +24,18 @@ export const metadata = { title: "Search" };
 export default async function SearchPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; kind?: string; people?: string; genre?: string }>;
+  searchParams: Promise<{ q?: string; kind?: string; people?: string; genre?: string; offset?: string }>;
 }) {
   const session = await requireSession();
-  const { q, kind, people: peopleParam, genre } = await searchParams;
+  const { q, kind, people: peopleParam, genre, offset: offsetParam } = await searchParams;
   const query = q?.trim() ?? "";
   const category = isSearchCategory(kind) ? kind : undefined;
   const activeKind: MediaKind | undefined = category ? mediaKindForCategory(category) : undefined;
   const showPeople = peopleParam === "1";
   const browsing = query.length > 0 || Boolean(category) || Boolean(genre);
   const searching = browsing || showPeople;
+  const offset = Math.max(0, Number(offsetParam) || 0);
+  const PAGE_SIZE = 24;
 
   const profile =
     (await getProfileByOrgId(session.org.id)) ??
@@ -46,7 +48,7 @@ export default async function SearchPage({
   const [ratings, items, people, suggestions, following, recentSearches] = await Promise.all([
     rankedRatings(session.org.id),
     browsing
-      ? searchCatalog({ category, q: query || undefined, genre: genre || undefined, limit: 60 }).then(
+      ? searchCatalog({ category, q: query || undefined, genre: genre || undefined, limit: PAGE_SIZE, offset }).then(
           (result) => result.items,
         )
       : Promise.resolve([]),
@@ -209,6 +211,21 @@ export default async function SearchPage({
                 ))}
               </ul>
             )}
+            {items.length >= PAGE_SIZE ? (
+              <div className="mt-4 text-center">
+                <Link
+                  href={`/app/search?${new URLSearchParams({
+                    ...(query ? { q: query } : {}),
+                    ...(kind ? { kind } : {}),
+                    ...(genre ? { genre } : {}),
+                    offset: String(offset + PAGE_SIZE),
+                  }).toString()}`}
+                  className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.05] px-4 py-2 text-[12px] font-medium text-ink transition-colors hover:bg-white/10"
+                >
+                  Load more
+                </Link>
+              </div>
+            ) : null}
           </section>
         </div>
       ) : (

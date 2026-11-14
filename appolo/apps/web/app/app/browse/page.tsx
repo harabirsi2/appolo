@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { GENRES, MEDIA_KIND_LABELS, MEDIA_KINDS, genreKey, scoreBand, type MediaKind } from "@appolo/core";
 import { requireSession } from "@/lib/session";
-import { catalogLeaderboard, rankedRatings, weeklyMovers, type LeaderboardSort } from "@/lib/services/rankings";
+import { catalogLeaderboard, catalogCount, catalogKindCounts, rankedRatings, weeklyMovers, type LeaderboardSort } from "@/lib/services/rankings";
 import { followingOrgIds, tasteTwins } from "@/lib/services/social";
 import { MediaArt } from "@/components/media-art";
 import { Avatar } from "@/components/podiums";
@@ -21,13 +21,11 @@ const SORTS: Array<{ key: LeaderboardSort; label: string }> = [
 export default async function BrowsePage({
   searchParams,
 }: {
-  searchParams: Promise<{ kind?: string; genre?: string; sort?: string }>;
+  searchParams: Promise<{ kind?: string; genre?: string; sort?: string; offset?: string }>;
 }) {
   const session = await requireSession();
-  const { kind, genre, sort } = await searchParams;
+  const { kind, genre, sort, offset: offsetParam } = await searchParams;
   const activeKind = MEDIA_KINDS.includes(kind as MediaKind) ? (kind as MediaKind) : undefined;
-  // Accept any casing (`drama`, `Drama`, `DRAMA`) and canonicalise to the chip
-  // label. The catalog itself mixes casings, so the query compares on `genreKey`.
   const activeGenre =
     activeKind && genre
       ? GENRES[activeKind]?.find((candidate) => genreKey(candidate) === genreKey(genre))
@@ -35,9 +33,13 @@ export default async function BrowsePage({
   const activeSort: LeaderboardSort = SORTS.some((entry) => entry.key === sort)
     ? (sort as LeaderboardSort)
     : "top";
+  const offset = Math.max(0, Number(offsetParam) || 0);
+  const PAGE_SIZE = 24;
 
-  const [items, mine, movers, twins, following] = await Promise.all([
-    catalogLeaderboard({ kind: activeKind, genre: activeGenre, sort: activeSort, limit: 30 }),
+  const [items, total, kindCounts, mine, movers, twins, following] = await Promise.all([
+    catalogLeaderboard({ kind: activeKind, genre: activeGenre, sort: activeSort, limit: PAGE_SIZE, offset }),
+    catalogCount({ kind: activeKind, genre: activeGenre, sort: activeSort }),
+    catalogKindCounts(),
     rankedRatings(session.org.id),
     weeklyMovers(session.org.id, 5),
     tasteTwins(session.org.id, 5),
@@ -47,14 +49,16 @@ export default async function BrowsePage({
   const myScores = new Map(mine.map((item) => [item.id, item.score]));
   const followingSet = new Set(following);
 
-  function browseHref(next: { kind?: MediaKind; genre?: string; sort?: LeaderboardSort }) {
+  function browseHref(next: { kind?: MediaKind; genre?: string; sort?: LeaderboardSort; offset?: number }) {
     const params = new URLSearchParams();
     const nextKind = next.kind === undefined ? activeKind : next.kind;
     const nextGenre = next.genre === undefined ? activeGenre : next.genre;
     const nextSort = next.sort ?? activeSort;
+    const nextOffset = next.offset ?? 0;
     if (nextKind) params.set("kind", nextKind);
     if (nextGenre) params.set("genre", nextGenre);
     if (nextSort !== "top") params.set("sort", nextSort);
+    if (nextOffset > 0) params.set("offset", String(nextOffset));
     const query = params.toString();
     return query ? `/app/browse?${query}` : "/app/browse";
   }
@@ -77,7 +81,7 @@ export default async function BrowsePage({
               : "border-white/10 bg-white/5 text-muted hover:text-ink"
           }`}
         >
-          All
+          All · {Object.values(kindCounts).reduce((a, b) => a + b, 0)}
         </Link>
         {MEDIA_KINDS.map((entry) => (
           <Link
@@ -90,7 +94,7 @@ export default async function BrowsePage({
             }`}
           >
             <KindIcon kind={entry} className="h-3.5 w-3.5" />
-            {MEDIA_KIND_LABELS[entry]}
+            {MEDIA_KIND_LABELS[entry]} · {kindCounts[entry] ?? 0}
           </Link>
         ))}
       </div>
@@ -173,7 +177,23 @@ export default async function BrowsePage({
         <p className="mt-5 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 text-[13px] text-muted">
           Nothing here yet. Try another category, or search for a title to add it to the catalog.
         </p>
-      ) : null}
+      ) : (
+        <>
+          <p className="mt-4 text-center text-[11px] text-muted-2">
+            Showing {Math.min(offset + items.length, total)} of {total} items
+          </p>
+          {offset + items.length < total ? (
+            <div className="mt-3 text-center">
+              <Link
+                href={browseHref({ offset: offset + PAGE_SIZE })}
+                className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.05] px-4 py-2 text-[12px] font-medium text-ink transition-colors hover:bg-white/10"
+              >
+                Load more
+              </Link>
+            </div>
+          ) : null}
+        </>
+      )}
 
       {movers.length > 0 ? (
         <section className="mt-9">

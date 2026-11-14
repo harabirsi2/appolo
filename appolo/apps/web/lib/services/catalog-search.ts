@@ -69,6 +69,7 @@ export interface CatalogSearchOptions {
   q?: string;
   genre?: string;
   limit?: number;
+  offset?: number;
   /** Ask providers even when the local rows look sufficient. */
   live?: boolean;
 }
@@ -107,6 +108,7 @@ async function localSearch(
   category: SearchCategory | null | undefined,
   query: string,
   limit: number,
+  offset: number,
   genre?: string,
 ): Promise<CatalogItem[]> {
   const db = getDb();
@@ -116,7 +118,8 @@ async function localSearch(
     .from(catalogItems)
     .where(filters.length ? and(...filters) : undefined)
     .orderBy(catalogItems.title)
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
   return rows.map(mapCatalogItem);
 }
 
@@ -177,14 +180,16 @@ async function providerSearch(
 export async function searchCatalog(options: CatalogSearchOptions = {}): Promise<CatalogSearchResult> {
   const query = options.q?.trim() ?? "";
   const limit = clampLimit(options.limit);
+  const offset = Math.max(0, options.offset ?? 0);
   const category = options.category ?? null;
   const genre = options.genre?.trim() || undefined;
 
-  const local = await localSearch(category, query, limit, genre);
+  const local = await localSearch(category, query, limit, offset, genre);
 
   const canAskProviders =
     liveSearchEnabled() &&
     !genre &&
+    offset === 0 &&
     query.length >= MIN_QUERY_LENGTH &&
     (options.live || local.length < LOCAL_MATCHES_ENOUGH);
 
