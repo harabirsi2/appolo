@@ -14,7 +14,9 @@ permissions:
 jobs:
   verify:
     name: Full verify suite
-    runs-on: ubuntu-latest
+    # Pinned: Playwright 1.50.1 has no chromium-headless-shell build for the
+    # ubuntu-26.04 image that `ubuntu-latest` now resolves to.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
@@ -93,6 +95,9 @@ jobs:
 
       - name: RLS isolation test
         run: pnpm db:rls-test
+
+      - name: Webhook idempotency test
+        run: pnpm db:idempotency-test
 
       # The visual, e2e and a11y checks drive chromium-headless-shell.
       - name: Install Playwright browser and system dependencies
