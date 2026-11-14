@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { rankedRatings } from "@/lib/services/rankings";
+import { nextMatchup, rankedRatings } from "@/lib/services/rankings";
 import type { ProfileSummary } from "@/lib/services/social-graph";
 import { Icon } from "@/components/podiums";
+import { MediaArt } from "@/components/media-art";
 import type { MediaKind } from "@appolo/core/ranking";
 import { MEDIA_KIND_LABELS } from "@appolo/core/ranking";
 
@@ -18,6 +19,17 @@ export async function RightRail({ profile }: { profile: ProfileSummary | null })
   for (const rating of ratings) counts.set(rating.kind, (counts.get(rating.kind) ?? 0) + 1);
   const kindEntries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
   const maxKind = Math.max(1, ...kindEntries.map(([, count]) => count));
+
+  // Mini duel: pick the user's top-ranked item and fetch an opponent.
+  let duel: { item: { id: string; title: string; year: number | null; imageUrl: string | null; kind: MediaKind }; opponent: { id: string; title: string; year: number | null; imageUrl: string | null; kind: MediaKind } } | null = null;
+  if (profile && ratings.length > 0) {
+    try {
+      const matchup = await nextMatchup(profile.orgId, ratings[0]!.id);
+      duel = { item: matchup.item, opponent: matchup.opponent };
+    } catch {
+      duel = null;
+    }
+  }
 
   return (
     <aside className="sticky top-0 hidden h-screen w-[300px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-white/[0.06] px-5 py-8 xl:flex">
@@ -57,6 +69,38 @@ export async function RightRail({ profile }: { profile: ProfileSummary | null })
               <p className="text-[12px] text-muted-2">Rate a few titles to see your taste.</p>
             ) : null}
           </div>
+        </section>
+      ) : null}
+
+      {duel ? (
+        <section className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-2">Mini duel</p>
+            <Link href={`/app/rate/${duel.item.id}`} className="text-[11px] text-brand hover:underline">
+              Play →
+            </Link>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {[duel.item, duel.opponent].map((side) => (
+              <Link
+                key={side.id}
+                href={`/app/rate/${duel!.item.id}`}
+                className="group overflow-hidden rounded-xl border border-white/[0.06] bg-white/[0.03] transition-colors hover:border-white/15"
+              >
+                <MediaArt kind={side.kind} title={side.title} imageUrl={side.imageUrl} sizes="140px" className="aspect-square w-full" />
+                <p className="truncate px-2 py-1.5 text-[11px] font-medium text-ink">{side.title}</p>
+              </Link>
+            ))}
+          </div>
+          <p className="mt-2 text-center text-[10px] text-muted-2">Which is better?</p>
+        </section>
+      ) : profile && ratings.length === 0 ? (
+        <section className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-2">Mini duel</p>
+          <p className="mt-2 text-[12px] text-muted-2">Rate a few titles to unlock duels.</p>
+          <Link href="/app/search" className="mt-2 inline-block text-[11px] text-brand hover:underline">
+            Browse catalog →
+          </Link>
         </section>
       ) : null}
 
