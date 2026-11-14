@@ -169,6 +169,11 @@ Run with `pnpm test` (uses `tsx --test`, so Node 20+ works). Including community
   no-tie data drives it to the boundary and worsens interval coverage
   (0.721 vs 0.959), so it stays fixed; the interval corrections handle that
   overconfidence instead.
+- A flip-noise likelihood was implemented and evaluated: it estimates the a↔b
+  flip rate at about 0.18 on the probit harness, but coverage fell to 0.846 and
+  RMSE rose from 0.296 to roughly 0.44. The noise parameter trades off against
+  the fixed tie term and adds variance faster than it removes bias, so the
+  one-sided calibration inflation stays.
 - Taste matching keeps genre similarity to a 20% prior when shared titles exist;
   with no shared titles it is the only signal and is labelled as such.
 - The fit is per media kind only; sub-category (genre) models and per-collection
