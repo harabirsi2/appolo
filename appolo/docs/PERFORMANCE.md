@@ -172,12 +172,16 @@ Prioritised gaps:
    once. Verified: a vote returned in 94 ms and a snapshot with one comparison
    appeared within 3 s without calling that route.
 2. **No linter.** `CLAUDE.md` claims CI runs lint, but there is no ESLint
-   config, dependency or script. Type checking does not catch unused imports,
-   hook violations or floating promises. Add one flat config and wire it into CI.
-3. **Large service modules.** `social.ts` (1,711 lines), `reviews.ts` (1,503),
-   `rankings.ts` (1,115) and `actions.ts` (1,089) mix validation, queries and
-   presentation shaping. Splitting by use case would make AI-assisted edits
-   safer; keep the public service signatures stable.
+   config, dependency or script. `noUnusedLocals` / `noUnusedParameters` are on,
+   so dead imports fail typecheck, but hook violations and floating promises
+   are still unchecked. Add one flat config and wire it into CI.
+3. **Remaining large service modules.** `reviews.ts` (1,516 lines) and
+   `actions.ts` (1,089) still mix validation, queries and presentation
+   shaping. `rankings.ts` and `social.ts` were split by use case — ranking
+   model math in `ranking-math.ts`, discovery in `leaderboard.ts`, pods in
+   `pods.ts`, profiles/follows/notifications in `social-graph.ts` — with the
+   original modules re-exporting everything, so call sites did not change.
+   Splitting `reviews.ts` the same way is the next low-risk win.
 4. **Catalog search will not scale on ILIKE.** `listCatalog` uses
    `%term% ILIKE` plus `genre = any(genres)` without a trigram/GIN index. At 56
    rows the planner correctly seq-scans (61,750 seq scans during load are cheap),

@@ -768,11 +768,35 @@ async function cacheCover(row: CoverSeed, remoteUrl: string): Promise<string | n
   return null;
 }
 
+/** A committed cover for this title, if one was already downloaded. */
+function cachedCoverPath(row: CoverSeed): string | null {
+  const base = `${row.kind}-${slugify(row.title)}`;
+  for (const ext of ["jpg", "png"]) {
+    const filename = `${base}.${ext}`;
+    if (existsSync(path.join(COVERS_DIR, filename))) return `/covers/${filename}`;
+  }
+  return null;
+}
+
 async function enrichCoverImages(rows: Array<{ id: string; kind: string; title: string; subtitle: string; year: number | null; imageUrl: string | null }>): Promise<void> {
   const missing = rows.filter((row) => !row.imageUrl);
+
+  // Committed covers first, in bulk: no provider calls and no pacing needed.
+  const remote: typeof missing = [];
+  for (const row of missing) {
+    const cached = cachedCoverPath(row);
+    if (cached) {
+      await db.update(catalogItems).set({ imageUrl: cached }).where(eq(catalogItems.id, row.id));
+    } else {
+      remote.push(row);
+    }
+  }
+
+  // Only titles without a committed cover need the network, paced to stay
+  // inside provider rate limits.
   const concurrency = 2;
-  for (let i = 0; i < missing.length; i += concurrency) {
-    const batch = missing.slice(i, i + concurrency);
+  for (let i = 0; i < remote.length; i += concurrency) {
+    const batch = remote.slice(i, i + concurrency);
     await Promise.all(
       batch.map(async (row) => {
         const remoteUrl = await fetchCoverUrl(row);

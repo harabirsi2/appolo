@@ -1,60 +1,12 @@
-import { unstable_cache } from "next/cache";
-import { COMMUNITY_TAGS } from "@/lib/cache";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
-import {
-  START_ELO,
-  clamp,
-  createCoalescingRunner,
-  scoreForElo,
-  selectOpponent,
-  withPositions,
-  fitBradleyTerry,
-  pairKey,
-  selectInformativeOpponent,
-  shrinkCommunityScore,
-  detectCoordinatedVoting,
-  type CommunityConfidence,
-  type ComparisonEvent,
-  type CoalescingRunner,
-  type ComparisonOutcome,
-  type FittedItem,
-  type MatchResult,
-  type MediaKind,
-} from "@appolo/core";
-import { getDb, withOrg, schema, type Tx } from "@/lib/db";
+import { START_ELO, clamp, selectOpponent, withPositions, pairKey, selectInformativeOpponent, MatchResult, MediaKind } from "@appolo/core";
+import { getCatalogItem, mapCatalogItem, toScore, type CatalogItem } from "./catalog-item";
+import { getRankingModel, outcomeForResult, scheduleRankingRefresh } from "./ranking-math";
 import { DomainError } from "./errors";
 import { scheduleCatalogEnrichment } from "./catalog-providers";
 import { nextEloAdaptive } from "@appolo/core/ranking";
-
-const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, catalogCredits, rankingModels, rankingOrder } = schema;
-
-/**
- * Model rebuilds are coalesced per org and kind so a burst of votes pays for
- * one fit, not one per vote, and the vote response never waits for it. The
- * runner is stashed on `globalThis` because dev HMR re-evaluates this module
- * and would otherwise stack duplicate timers.
- */
-type RankingRefreshGlobal = typeof globalThis & { __appoloRankingRefresh?: CoalescingRunner };
-const modelRefresh = ((globalThis as RankingRefreshGlobal).__appoloRankingRefresh ??= createCoalescingRunner({
-  delayMs: 750,
-  onError: (error, key) => console.error(`ranking model refresh failed (${key})`, error),
-}));
-
-const refreshKey = (orgId: string, kind: MediaKind): string => `${orgId}:${kind}`;
-
-export interface CatalogItem {
-  id: string;
-  kind: MediaKind;
-  title: string;
-  subtitle: string;
-  year: number | null;
-  imageUrl: string | null;
-  description: string | null;
-  links: Record<string, string>;
-  genres: string[];
-  trailerUrl: string | null;
-  tags: string[];
-}
+import { getDb, withOrg, schema, type Tx } from "@/lib/db";
+const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, rankingOrder } = schema;
 
 export interface RankedItem extends CatalogItem {
   ratingId: string;
@@ -73,217 +25,16 @@ export interface RankedItem extends CatalogItem {
   favoriteTracks: string[];
   position: number;
 }
-
 export interface MatchupView {
   item: RankedItem;
   opponent: RankedItem;
 }
-
 export interface TasteStats {
   rated: number;
   matchups: number;
   averageScore: number;
   topKind: MediaKind | null;
 }
-
-function toScore(elo: number): number {
-  return scoreForElo(elo);
-}
-
-/* ------------------------------------------------------------------ */
-/* Bradley–Terry model                                                 */
-/* ------------------------------------------------------------------ */
-
-export interface RankingModelView {
-  kind: MediaKind;
-  items: FittedItem[];
-  byId: Map<string, FittedItem>;
-  tieParameter: number;
-  logLikelihood: number;
-  converged: boolean;
-  iterations: number;
-  comparisons: number;
-  updatedAt: Date | null;
-}
-
-/** Map a legacy/recorded matchup result onto the model's outcome vocabulary. */
-export function outcomeForResult(result: string, stored?: string | null): ComparisonOutcome {
-  if (stored === "a" || stored === "b" || stored === "tie" || stored === "undecided" || stored === "skip") {
-    return stored;
-  }
-  switch (result) {
-    case "win":
-      return "a";
-    case "loss":
-      return "b";
-    case "tie":
-      return "tie";
-    case "undecided":
-      return "undecided";
-    default:
-      return "skip";
-  }
-}
-
-function modelFromRow(row: typeof rankingModels.$inferSelect): RankingModelView {
-  const state = (row.state ?? {}) as {
-    items?: FittedItem[];
-    tieParameter?: number;
-    logLikelihood?: number;
-    converged?: boolean;
-    iterations?: number;
-  };
-  const items = Array.isArray(state.items) ? state.items : [];
-  return {
-    kind: row.kind,
-    items,
-    byId: new Map(items.map((item) => [item.id, item])),
-    tieParameter: state.tieParameter ?? 0.55,
-    logLikelihood: state.logLikelihood ?? 0,
-    converged: state.converged ?? false,
-    iterations: state.iterations ?? 0,
-    comparisons: row.comparisons,
-    updatedAt: row.updatedAt,
-  };
-}
-
-/**
- * Rebuild one category's model from its full comparison history. `item_matchups`
- * is the source of truth: this function never writes to it, only to the cached
- * snapshot in `ranking_models`. Skipped/undecided votes are excluded by the
- * fitter, so they can never corrupt a ranking.
- */
-export async function refreshRankingModel(
-  orgId: string,
-  kind: MediaKind,
-): Promise<RankingModelView> {
-  return withOrg(orgId, async (tx) => {
-    const rows = await tx
-      .select({
-        itemId: itemMatchups.itemId,
-        opponentId: itemMatchups.opponentId,
-        result: itemMatchups.result,
-        outcome: itemMatchups.outcome,
-      })
-      .from(itemMatchups)
-      .innerJoin(catalogItems, eq(catalogItems.id, itemMatchups.itemId))
-      .where(and(eq(itemMatchups.orgId, orgId), eq(catalogItems.kind, kind)));
-
-    const events: ComparisonEvent[] = rows.map((row) => ({
-      aId: row.itemId,
-      bId: row.opponentId,
-      outcome: outcomeForResult(row.result, row.outcome),
-    }));
-
-    const fit = fitBradleyTerry(events);
-    const state = {
-      items: fit.items,
-      tieParameter: fit.tieParameter,
-      logLikelihood: fit.logLikelihood,
-      converged: fit.converged,
-      iterations: fit.iterations,
-    };
-
-    const updated = (
-      await tx
-        .insert(rankingModels)
-        .values({ orgId, kind, state, comparisons: events.length })
-        .onConflictDoUpdate({
-          target: [rankingModels.orgId, rankingModels.kind],
-          set: { state, comparisons: events.length, updatedAt: new Date() },
-        })
-        .returning()
-    )[0]!;
-
-    return modelFromRow(updated);
-  });
-}
-
-/**
- * Request a model rebuild without waiting for it. The 750 ms window collapses
- * rapid voting into a single fit, and callers never pay the fit latency.
- */
-export function scheduleRankingRefresh(orgId: string, kind: MediaKind): void {
-  modelRefresh.schedule(refreshKey(orgId, kind), async () => {
-    await refreshRankingModel(orgId, kind);
-  });
-}
-
-/** Drop a coalesced rebuild, e.g. when an explicit rebuild supersedes it. */
-export function cancelRankingRefresh(orgId: string, kind: MediaKind): void {
-  modelRefresh.cancel(refreshKey(orgId, kind));
-}
-
-/** How many comparisons the durable log holds for this kind. */
-async function loggedComparisons(orgId: string, kind: MediaKind): Promise<number> {
-  const [row] = await withOrg(orgId, (tx) =>
-    tx
-      .select({ count: sql<number>`count(*)::int` })
-      .from(itemMatchups)
-      .innerJoin(catalogItems, eq(catalogItems.id, itemMatchups.itemId))
-      .where(and(eq(itemMatchups.orgId, orgId), eq(catalogItems.kind, kind))),
-  );
-  return row?.count ?? 0;
-}
-
-/**
- * Read the stored model, rebuilding when it is missing or behind the durable
- * comparison log. Pending coalesced work is flushed first so visiting the
- * rankings page right after a vote still shows that vote. The comparison check
- * also heals a snapshot lost to a restart, when no timer survives.
- */
-export async function getRankingModel(
-  orgId: string,
-  kind: MediaKind,
-): Promise<RankingModelView> {
-  const key = refreshKey(orgId, kind);
-  if (modelRefresh.isPending(key)) await modelRefresh.flush(key);
-
-  const rows = await withOrg(orgId, (tx) =>
-    tx
-      .select()
-      .from(rankingModels)
-      .where(and(eq(rankingModels.orgId, orgId), eq(rankingModels.kind, kind)))
-      .limit(1),
-  );
-  const stored = rows[0];
-  if (!stored) return refreshRankingModel(orgId, kind);
-  if ((await loggedComparisons(orgId, kind)) !== stored.comparisons) {
-    return refreshRankingModel(orgId, kind);
-  }
-  return modelFromRow(stored);
-}
-
-export interface CrossKindFits {
-  byId: Map<string, FittedItem>;
-  comparisons: number;
-  kindCount: number;
-}
-
-/**
- * Combine per-kind fitted models for the "All" rankings view. `personalScore`
- * is a 0–10 expected-wins score against that kind's own field, so it is
- * comparable across categories in a way raw theta is not.
- */
-export async function rankingFitsForKinds(orgId: string, kinds: MediaKind[]): Promise<CrossKindFits> {
-  const unique = [...new Set(kinds)];
-  const models = await Promise.all(unique.map((kind) => getRankingModel(orgId, kind).catch(() => null)));
-  const byId = new Map<string, FittedItem>();
-  let comparisons = 0;
-  let kindCount = 0;
-  for (const model of models) {
-    if (!model || model.items.length === 0) continue;
-    kindCount += 1;
-    comparisons += model.comparisons;
-    for (const item of model.items) byId.set(item.id, item);
-  }
-  return { byId, comparisons, kindCount };
-}
-
-/* ------------------------------------------------------------------ */
-/* catalog (shared, not tenant-scoped)                                 */
-/* ------------------------------------------------------------------ */
-
 export async function listCatalog(options: {
   kind?: string;
   q?: string;
@@ -314,38 +65,6 @@ export async function listCatalog(options: {
 
   return rows.map(mapCatalogItem);
 }
-
-export async function getCatalogItem(itemId: string): Promise<CatalogItem | null> {
-  // Guard non-UUID path segments so Postgres does not raise a 22P02 error.
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(itemId)) {
-    return null;
-  }
-  const db = getDb();
-  const rows = await db.select().from(catalogItems).where(eq(catalogItems.id, itemId)).limit(1);
-  return rows[0] ? mapCatalogItem(rows[0]) : null;
-}
-
-export function mapCatalogItem(row: typeof catalogItems.$inferSelect): CatalogItem {
-  return {
-    id: row.id,
-    kind: row.kind,
-    title: row.title,
-    subtitle: row.subtitle,
-    year: row.year ?? null,
-    imageUrl: row.imageUrl ?? null,
-    description: row.description ?? null,
-    links: (row.links ?? {}) as Record<string, string>,
-    genres: row.genres ?? [],
-    trailerUrl: row.trailerUrl ?? null,
-    tags: row.tags ?? [],
-  };
-}
-
-/* ------------------------------------------------------------------ */
-/* rankings (org-scoped)                                               */
-/* ------------------------------------------------------------------ */
-
-/** Every item this org has ranked, ordered by Elo with positions + scores. */
 export async function rankedRatings(orgId: string, options: { kind?: string; limit?: number } = {}): Promise<RankedItem[]> {
   return withOrg(orgId, async (tx) => {
     const rows = await tx
@@ -404,11 +123,9 @@ export async function rankedRatings(orgId: string, options: { kind?: string; lim
     return options.limit ? ranked.slice(0, options.limit) : ranked;
   });
 }
-
 export async function topFive(orgId: string): Promise<RankedItem[]> {
   return rankedRatings(orgId, { limit: 5 });
 }
-
 export async function getRating(orgId: string, itemId: string): Promise<RankedItem | null> {
   return withOrg(orgId, async (tx) => {
     const rows = await tx
@@ -439,7 +156,6 @@ export async function getRating(orgId: string, itemId: string): Promise<RankedIt
     };
   });
 }
-
 export async function tasteStats(orgId: string): Promise<TasteStats> {
   return withOrg(orgId, async (tx) => {
     const [totals] = await tx
@@ -636,7 +352,6 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
     };
   });
 }
-
 export interface VoteResult {
   item: RankedItem;
   opponent: RankedItem;
@@ -750,7 +465,6 @@ export async function submitVote(
 
   return output;
 }
-
 export interface UndoResult {
   undone: boolean;
   itemId: string;
@@ -890,7 +604,6 @@ export async function ratedItemIds(orgId: string): Promise<string[]> {
     return rows.map((r) => r.itemId);
   });
 }
-
 export async function catalogByIds(ids: string[]): Promise<CatalogItem[]> {
   if (ids.length === 0) return [];
   const db = getDb();
@@ -956,7 +669,6 @@ export async function hasManualOrder(orgId: string, kind: MediaKind): Promise<bo
     return rows.length > 0;
   });
 }
-
 export interface ReorderResult {
   order: string[];
   /** Titles whose position actually changed and produced an audit event. */
@@ -1055,7 +767,6 @@ export async function toggleWatchlist(orgId: string, itemId: string): Promise<{ 
     return { watching: true };
   });
 }
-
 export async function isWatchlisted(orgId: string, itemId: string): Promise<boolean> {
   return withOrg(orgId, async (tx) => {
     const rows = await tx
@@ -1066,7 +777,6 @@ export async function isWatchlisted(orgId: string, itemId: string): Promise<bool
     return Boolean(rows[0]);
   });
 }
-
 export async function watchlistFor(orgId: string): Promise<Array<CatalogItem & { addedAt: Date }>> {
   return withOrg(orgId, async (tx) => {
     const rows = await tx
@@ -1078,7 +788,6 @@ export async function watchlistFor(orgId: string): Promise<Array<CatalogItem & {
     return rows.map((row) => ({ ...mapCatalogItem(row.item), addedAt: row.addedAt }));
   });
 }
-
 export interface HistoryEntry {
   id: string;
   kind: string;
@@ -1086,7 +795,6 @@ export interface HistoryEntry {
   createdAt: Date;
   item: CatalogItem;
 }
-
 export async function ratingHistory(orgId: string, limit = 60): Promise<HistoryEntry[]> {
   return withOrg(orgId, async (tx) => {
     const rows = await tx
@@ -1106,280 +814,8 @@ export async function ratingHistory(orgId: string, limit = 60): Promise<HistoryE
   });
 }
 
-export interface PopularItem extends CatalogItem {
-  average: number;
-  ratings: number;
-}
-
-/** Community's most-rated items over the last seven days. */
-async function popularThisWeekUncached(limit: number): Promise<PopularItem[]> {
-  const db = getDb();
-  const rows = await db
-    .select({
-      item: catalogItems,
-      ratings: sql<number>`count(*)::int`,
-      avgElo: sql<number>`coalesce(avg(${itemRatings.elo}), ${START_ELO})::float`,
-    })
-    .from(itemRatings)
-    .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
-    .where(sql`${itemRatings.updatedAt} > now() - interval '7 days'`)
-    .groupBy(catalogItems.id)
-    // Tie-break deterministically so the rail does not reshuffle between runs.
-    .orderBy(sql`count(*) desc`, catalogItems.id)
-    .limit(limit);
-  return rows.map((row) => ({
-    ...mapCatalogItem(row.item),
-    average: toScore(row.avgElo),
-    ratings: row.ratings,
-  }));
-}
-
-/**
- * Every signed-in home page reads the same global "popular this week" list, so
- * it is cached for 60 seconds instead of re-aggregating all ratings per request.
- */
-const popularThisWeekCached = unstable_cache(
-  popularThisWeekUncached,
-  ["popular-this-week"],
-  { revalidate: 60, tags: [COMMUNITY_TAGS.popular] },
-);
-
-export async function popularThisWeek(limit = 8): Promise<PopularItem[]> {
-  return popularThisWeekCached(limit);
-}
-
-export interface Credit {
-  id: string;
-  personName: string;
-  personSlug: string;
-  role: string;
-  character: string | null;
-}
-
-export async function creditsForItem(itemId: string): Promise<Credit[]> {
-  const db = getDb();
-  const rows = await db
-    .select()
-    .from(catalogCredits)
-    .where(eq(catalogCredits.itemId, itemId))
-    .orderBy(catalogCredits.position);
-  return rows.map((row) => ({
-    id: row.id,
-    personName: row.personName,
-    personSlug: row.personSlug,
-    role: row.role,
-    character: row.character ?? null,
-  }));
-}
-
-export interface PersonPage {
-  name: string;
-  slug: string;
-  roles: string[];
-  works: CatalogItem[];
-}
-
-export async function personBySlug(slug: string): Promise<PersonPage | null> {
-  const db = getDb();
-  const rows = await db
-    .select({ credit: catalogCredits, item: catalogItems })
-    .from(catalogCredits)
-    .innerJoin(catalogItems, eq(catalogItems.id, catalogCredits.itemId))
-    .where(eq(catalogCredits.personSlug, slug))
-    .orderBy(desc(catalogItems.year));
-  if (rows.length === 0) return null;
-  return {
-    name: rows[0]!.credit.personName,
-    slug,
-    roles: [...new Set(rows.map((row) => row.credit.role))],
-    works: rows.map((row) => mapCatalogItem(row.item)),
-  };
-}
-
-/* ------------------------------------------------------------------ */
-/* discovery: community leaderboard + weekly movers                    */
-/* ------------------------------------------------------------------ */
-
-export type LeaderboardSort = "top" | "rated" | "new";
-
-export interface CommunityItem extends CatalogItem {
-  /** Conservative community score after Bayesian-style shrinkage. */
-  average: number | null;
-  /** Unsrunk average, kept for transparency and internal ordering. */
-  rawAverage: number | null;
-  /** How much evidence supports the score. */
-  confidence: CommunityConfidence;
-  ratings: number;
-  /** Votes flagged as coordinated and therefore down-weighted. */
-  suspicious: number;
-  coordination: "none" | "suspected";
-}
-
-interface LeaderboardOptions {
-  kind?: MediaKind;
-  genre?: string;
-  sort?: LeaderboardSort;
-  limit?: number;
-}
-
-/**
- * The shared catalog ordered by community opinion rather than by one taste
- * profile. `top` ranks by average score, `rated` by how many people weighed
- * in, and `new` by the newest additions to the catalog.
- *
- * Global and identical for every viewer, so the public wrapper caches it.
- */
-async function catalogLeaderboardUncached(options: LeaderboardOptions = {}): Promise<CommunityItem[]> {
-  const db = getDb();
-  const sort = options.sort ?? "top";
-  const filters = [];
-  if (options.kind) filters.push(eq(catalogItems.kind, options.kind));
-  // Containment (not `= any(...)`) so the GIN index on genres can serve it.
-  if (options.genre) filters.push(sql`${catalogItems.genres} @> array[${options.genre}]::text[]`);
-
-  const ratings = sql<number>`count(${itemRatings.id})::int`;
-  const avgElo = sql<number>`coalesce(avg(${itemRatings.elo}), ${START_ELO})::float`;
-
-  const rows = await db
-    .select({ item: catalogItems, ratings, avgElo })
-    .from(catalogItems)
-    .leftJoin(itemRatings, eq(itemRatings.itemId, catalogItems.id))
-    .where(filters.length ? and(...filters) : undefined)
-    .groupBy(catalogItems.id)
-    .having(sort === "new" ? undefined : sql`count(${itemRatings.id}) > 0`)
-    .orderBy(
-      sort === "rated"
-        ? desc(sql`count(${itemRatings.id})`)
-        : sort === "new"
-          ? desc(catalogItems.createdAt)
-          : desc(sql`coalesce(avg(${itemRatings.elo}), 0)`),
-      // Stable tie-break: equal counts or averages otherwise come back in an
-      // arbitrary order, which makes the page (and visual baselines) jitter.
-      catalogItems.id,
-    )
-    .limit(Math.min(options.limit ?? 24, 60));
-
-  // Down-weight reviewer pairs that vote in lockstep. Detection needs the
-  // per-profile votes, not just the aggregate, so it runs over the same items.
-  const itemIds = rows.map((row) => row.item.id);
-  const votes =
-    itemIds.length > 0
-      ? await db
-          .select({ orgId: itemRatings.orgId, itemId: itemRatings.itemId, elo: itemRatings.elo })
-          .from(itemRatings)
-          .where(inArray(itemRatings.itemId, itemIds))
-      : [];
-  const coordination = detectCoordinatedVoting(
-    votes.map((vote) => ({ reviewerId: vote.orgId, itemId: vote.itemId, score: toScore(vote.elo) })),
-  );
-
-  return rows.map((row) => {
-    const suspicious = coordination.suspiciousVotesByItem.get(row.item.id) ?? 0;
-    const estimate = shrinkCommunityScore({
-      mean: toScore(row.avgElo),
-      count: row.ratings,
-      suspicious,
-    });
-    return {
-      ...mapCatalogItem(row.item),
-      ratings: row.ratings,
-      average: estimate.score,
-      rawAverage: estimate.raw,
-      confidence: estimate.confidence,
-      suspicious: estimate.suspicious,
-      coordination: estimate.coordination,
-    };
-  });
-}
-
-const catalogLeaderboardCached = unstable_cache(
-  catalogLeaderboardUncached,
-  ["catalog-leaderboard"],
-  { revalidate: 30, tags: [COMMUNITY_TAGS.leaderboard] },
-);
-
-export async function catalogLeaderboard(options: LeaderboardOptions = {}): Promise<CommunityItem[]> {
-  return catalogLeaderboardCached(options);
-}
-
-export interface SimilarItem extends CommunityItem {
-  /** How many genres the two titles share. */
-  overlap: number;
-}
-
-/**
- * Catalog titles that sit next to an item: same media kind, ranked by shared
- * genres first and community score second. Used for the "more like this" rail.
- */
-export async function similarItems(itemId: string, limit = 8): Promise<SimilarItem[]> {
-  const item = await getCatalogItem(itemId);
-  if (!item) return [];
-  const db = getDb();
-
-  const rows = await db
-    .select({
-      item: catalogItems,
-      ratings: sql<number>`count(${itemRatings.id})::int`,
-      avgElo: sql<number>`coalesce(avg(${itemRatings.elo}), ${START_ELO})::float`,
-    })
-    .from(catalogItems)
-    .leftJoin(itemRatings, eq(itemRatings.itemId, catalogItems.id))
-    .where(and(eq(catalogItems.kind, item.kind), sql`${catalogItems.id} <> ${itemId}`))
-    .groupBy(catalogItems.id)
-    .limit(120);
-
-  const wanted = new Set(item.genres.map((genre) => genre.toLowerCase()));
-  return rows
-    .map((row) => {
-      const overlap = row.item.genres.filter((genre) => wanted.has(genre.toLowerCase())).length;
-      const estimate = shrinkCommunityScore({
-        mean: toScore(row.avgElo),
-        count: row.ratings,
-      });
-      return {
-        ...mapCatalogItem(row.item),
-        ratings: row.ratings,
-        average: estimate.score,
-        rawAverage: estimate.raw,
-        confidence: estimate.confidence,
-        suspicious: estimate.suspicious,
-        coordination: estimate.coordination,
-        overlap,
-      };
-    })
-    .sort((a, b) => b.overlap - a.overlap || (b.average ?? 0) - (a.average ?? 0) || b.ratings - a.ratings)
-    .slice(0, limit);
-}
-
-export interface MoverItem extends CatalogItem {
-  /** Elo gained (or lost) across this profile's decided matchups this week. */
-  delta: number;
-  votes: number;
-}
-
-/** The profile's biggest gainers over the last seven days of matchups. */
-export async function weeklyMovers(orgId: string, limit = 5): Promise<MoverItem[]> {
-  return withOrg(orgId, async (tx) => {
-    const delta = sql<number>`coalesce(sum(${itemMatchups.itemEloAfter} - ${itemMatchups.itemEloBefore}), 0)::int`;
-    const rows = await tx
-      .select({ item: catalogItems, delta, votes: sql<number>`count(*)::int` })
-      .from(itemMatchups)
-      .innerJoin(catalogItems, eq(catalogItems.id, itemMatchups.itemId))
-      .where(
-        and(
-          eq(itemMatchups.orgId, orgId),
-          sql`${itemMatchups.result} <> 'skip'`,
-          sql`${itemMatchups.createdAt} > now() - interval '7 days'`,
-        ),
-      )
-      .groupBy(catalogItems.id)
-      .orderBy(desc(delta))
-      .limit(limit);
-
-    return rows.map((row) => ({
-      ...mapCatalogItem(row.item),
-      delta: row.delta,
-      votes: row.votes,
-    }));
-  });
-}
+/* Re-exported so existing imports from "./rankings" keep working. */
+export type { CatalogItem } from "./catalog-item";
+export { getCatalogItem, mapCatalogItem } from "./catalog-item";
+export * from "./ranking-math";
+export * from "./leaderboard";

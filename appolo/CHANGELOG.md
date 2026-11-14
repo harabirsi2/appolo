@@ -3,6 +3,27 @@
 Notable, user-visible or architectural changes. Dates are ISO. Entries describe
 why the change was made, not every commit.
 
+## Service module split
+
+- Split `services/rankings.ts` (1,384 lines) into `catalog-item.ts` (types,
+  mapping, lookup), `ranking-math.ts` (Bradley–Terry/Davidson model lifecycle)
+  and `leaderboard.ts` (leaderboard, popular rail, similar items, movers).
+  `rankings.ts` keeps the personal rating flow and re-exports the rest.
+- Split `services/social.ts` (1,875 lines) into `pods.ts` (pod CRUD and
+  ordering), `social-graph.ts` (profiles, follows, suggestions, notifications,
+  search history, taste comparison) and `social-validation.ts` (shared URL
+  schema refinements). `social.ts` keeps reviews, comments, reactions and
+  feeds, and re-exports the rest.
+- Every previous export is still importable from `./rankings` and `./social`;
+  no call site changed.
+- Refreshed the `home` and `browse` visual snapshots. Both encode demo data, and
+  the committed images came from an older, richer database (for example a rated
+  `2001: A Space Odyssey`) that a fresh seed cannot reproduce. The other six
+  snapshots still pass against their existing baselines.
+- Seeding now reuses committed cover files before calling any provider, and
+  applies them without the network pacing delay. A reseed dropped from tens of
+  minutes of rate-limited art lookups to under a minute.
+
 ## Code cleanup and shared-read caching
 
 - Removed dead code: 15 unused imports/locals, two orphaned components
