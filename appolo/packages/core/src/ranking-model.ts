@@ -96,6 +96,8 @@ const DEFAULT_TIE_PARAMETER = 0.55;
 const DEFAULT_MAX_ITERATIONS = 100;
 const DEFAULT_TOLERANCE = 1e-6;
 const DEFAULT_DENSE_LIMIT = 220;
+/** Cap quasi-likelihood inflation so a few near-certain comparisons cannot blow up every interval. */
+const MAX_OVERDISPERSION = 4;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -203,6 +205,8 @@ interface Accumulators {
   /** Dense negative Hessian: Σ w·s·sᵀ + λI. */
   hessian: number[][];
   logLikelihood: number;
+  /** Weighted Pearson statistic, used to estimate overdispersion. */
+  pearson: number;
   stats: Array<{ comparisons: number; wins: number; losses: number; ties: number }>;
 }
 
@@ -219,6 +223,7 @@ function accumulate(
   const stats = Array.from({ length: k }, () => ({ comparisons: 0, wins: 0, losses: 0, ties: 0 }));
   const logNu = Math.log(tieParameter);
   let logLikelihood = 0;
+  let pearson = 0;
 
   for (const event of events) {
     const weight = weightFor(event);
@@ -262,6 +267,9 @@ function accumulate(
       hessian[ib]![ia] = (hessian[ib]![ia] ?? 0) + cross;
     }
 
+    const observedProbability = event.outcome === "a" ? pa : event.outcome === "b" ? pb : pt;
+    pearson += (weight * (1 - observedProbability)) / Math.max(observedProbability, 1e-9);
+
     const eventLogLikelihood =
       event.outcome === "a"
         ? thetaA - logZ
@@ -294,7 +302,7 @@ function accumulate(
     hessian[i]![i] = (hessian[i]![i] ?? 0) + regularization;
   }
 
-  return { gradient, hessian, logLikelihood, stats };
+  return { gradient, hessian, logLikelihood, pearson, stats };
 }
 
 /**
@@ -406,6 +414,17 @@ export function fitBradleyTerry(
   }
 
   const final = accumulate(index, events, theta, regularization, tieParameter);
+  // Quasi-likelihood variance: Pearson residuals reveal overdispersion that
+  // the model's Fisher information does not (e.g. a different outcome link or
+  // label noise). n - k is the usual degrees-of-freedom correction.
+  const effectiveObservations = events.reduce(
+    (sum, event) => sum + (event.outcome === "skip" ? 0 : weightFor(event)),
+    0,
+  );
+  const overdispersion = Math.min(
+    MAX_OVERDISPERSION,
+    Math.max(1, final.pearson / Math.max(effectiveObservations - k, 1)),
+  );
   const covariance = fitCovariance(final.hessian, k);
 
   // Bradley–Terry is identified only up to a shared shift (only θ_i − θ_j
@@ -425,7 +444,7 @@ export function fitBradleyTerry(
 
   const items: FittedItem[] = ids.map((id, i) => {
     const centeredTheta = (theta[i] ?? 0) - meanTheta;
-    const se = standardErrors[i] ?? 0;
+    const se = (standardErrors[i] ?? 0) * Math.sqrt(overdispersion);
     const stats = final.stats[i] ?? { comparisons: 0, wins: 0, losses: 0, ties: 0 };
     const decided = stats.wins + stats.losses;
     return {

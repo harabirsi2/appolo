@@ -3,6 +3,13 @@
 Notable, user-visible or architectural changes. Dates are ISO. Entries describe
 why the change was made, not every commit.
 
+## Ranking interval calibration
+
+- Fit standard errors now include a capped Pearson overdispersion factor, so
+  intervals widen when outcomes are noisier than the Davidson model assumes.
+  Under the probit misspecification scenario coverage rose from 0.825 to 0.925
+  against nominal 0.95, and the harness now gates pooled coverage at 0.90.
+
 ## Service module split
 
 - Split `services/rankings.ts` (1,384 lines) into `catalog-item.ts` (types,
@@ -42,9 +49,9 @@ why the change was made, not every commit.
   recovery (Spearman ≥ 0.85), held-out predictive accuracy (≥ 0.65), 95%
   interval coverage (mean ≥ 0.85 over four seeds, each seed ≥ 0.70),
   recovery under a different outcome process (probit link, no ties, 20% label
-  noise; Spearman ≥ 0.85) plus a non-gating diagnostic of interval coverage
-  under that process (0.825 pooled, so the nominal 95% intervals need a wider
-  variance estimate), invariance to event order and a/b side
+  noise; Spearman ≥ 0.85) plus gated interval coverage under that process
+  (≥ 0.90 pooled; observed 0.925 after the overdispersion correction),
+  invariance to event order and a/b side
   assignment, cold-start shrinkage, and a 5 s runtime budget for 300 items.
   The seven checks run in `pnpm test` and `pnpm verify`.
 

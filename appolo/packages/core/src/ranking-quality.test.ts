@@ -16,8 +16,8 @@ import {
 /**
  * Thresholds are deliberately below the observed values on this machine
  * (Spearman 0.90–0.96, held-out accuracy 0.68–0.73, interval coverage mean
- * 0.875 over four seeds at 24 items / ~1,300 comparisons, per-seed minimum
- * 0.79). They are chosen to fail on a real regression — a broken prior, a
+ * 0.958 over four seeds at 24 items / ~1,300 comparisons, per-seed minimum
+ * 0.875). They are chosen to fail on a real regression — a broken prior, a
  * mis-centred fit, ignored ties — not on run-to-run noise, since every stage is
  * seeded and deterministic.
  */
@@ -30,6 +30,8 @@ const COVERAGE_SEEDS = [1, 7, 42, 99];
  * assume, so the check is about surviving misspecification, not mirroring the
  * optimiser. */
 const MIN_MISSPECIFIED_SPEARMAN = 0.85;
+/** Nominal coverage is 0.95; the corrected intervals are allowed sampling slack. */
+const MIN_MISSPECIFIED_COVERAGE = 0.90;
 const MIN_MEAN_INTERVAL_COVERAGE = 0.85;
 /** A single seed this far below nominal is a calibration bug, not luck. */
 const MIN_PER_SEED_INTERVAL_COVERAGE = 0.7;
@@ -121,12 +123,11 @@ test("recovers the ordering when outcomes follow a different process", () => {
 });
 
 /**
- * Diagnostic, deliberately not a gate: the fitted standard errors assume the
- * Davidson model that generated neither these outcomes nor their noise, so
- * this reports how far the nominal 95% intervals fall short. Promote it to an
- * assertion once the variance estimate is widened.
+ * The standard errors carry a Pearson overdispersion correction, so a process
+ * with heavier noise than the fitter assumes produces wider intervals instead
+ * of false certainty. Gate the pooled rate; individual seeds are noisier.
  */
-test("reports interval coverage under the probit outcome process", (t) => {
+test("keeps 95% intervals close to nominal coverage under the probit process", (t) => {
   let covered = 0;
   let total = 0;
   const perSeed: string[] = [];
@@ -145,10 +146,15 @@ test("reports interval coverage under the probit outcome process", (t) => {
   }
   const ordered = [...zScores].sort((a, b) => a - b);
   const q95 = ordered[Math.ceil(0.95 * ordered.length) - 1]!;
+  const pooled = covered / total;
   t.diagnostic(
-    `probit-process 95% interval coverage ${(covered / total).toFixed(3)} ` +
+    `probit-process 95% interval coverage ${pooled.toFixed(3)} ` +
       `(${covered}/${total}); ${perSeed.join(", ")}; ` +
       `95th percentile |error|/SE ${q95.toFixed(2)} vs the 1.96 assumed by the intervals`,
+  );
+  assert.ok(
+    pooled >= MIN_MISSPECIFIED_COVERAGE,
+    `misspecified coverage ${pooled.toFixed(3)} below ${MIN_MISSPECIFIED_COVERAGE}`,
   );
 });
 
