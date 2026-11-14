@@ -24,6 +24,17 @@ why the change was made, not every commit.
   applies them without the network pacing delay. A reseed dropped from tens of
   minutes of rate-limited art lookups to under a minute.
 
+## Production build fix
+
+- A plain `next build` failed prerendering `/404` and `/500` with
+  `<Html> should not be imported outside of pages/_document`. Next 15.5 was not
+  at fault: the monorepo root `.env` exported `NODE_ENV=development`, and
+  `next.config.ts` loaded it into the build, so a production prerender used the
+  development error page. The loader now ignores `NODE_ENV` from env files
+  (Next sets it per command), and the variable is gone from `.env.example`.
+  `next build`, `next start` and `next dev` all succeed without overrides;
+  `pnpm verify` is green against a full production build.
+
 ## Code cleanup and shared-read caching
 
 - Removed dead code: 15 unused imports/locals, two orphaned components

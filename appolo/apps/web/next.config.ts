@@ -1,11 +1,34 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { config as loadEnv } from "dotenv";
+import { parse as parseEnv } from "dotenv";
 import type { NextConfig } from "next";
 
-// Next only reads env files from the app directory. Load the monorepo root
-// .env (and an app-local override) so the server has DATABASE_URL and friends.
-loadEnv({ path: path.resolve(process.cwd(), "..", "..", ".env") });
-loadEnv({ path: path.resolve(process.cwd(), ".env"), override: true });
+/**
+ * Next only reads env files from the app directory. Load the monorepo root
+ * .env (and an app-local override) so the server has DATABASE_URL and friends.
+ *
+ * `NODE_ENV` is deliberately skipped: Next derives it from the command it is
+ * running (`build`/`start` → production, `dev` → development). Letting a .env
+ * file set it produced production builds compiled in development mode, whose
+ * `/404` and `/500` error pages cannot prerender and fail with
+ * "<Html> should not be imported outside of pages/_document".
+ */
+function loadEnvFile(file: string, override: boolean): void {
+  let contents: string;
+  try {
+    contents = readFileSync(file, "utf8");
+  } catch {
+    return;
+  }
+  for (const [key, value] of Object.entries(parseEnv(contents))) {
+    if (key === "NODE_ENV") continue;
+    if (!override && process.env[key] !== undefined) continue;
+    process.env[key] = value;
+  }
+}
+
+loadEnvFile(path.resolve(process.cwd(), "..", "..", ".env"), false);
+loadEnvFile(path.resolve(process.cwd(), ".env"), true);
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@appolo/config", "@appolo/core", "@appolo/db", "@appolo/ui"],

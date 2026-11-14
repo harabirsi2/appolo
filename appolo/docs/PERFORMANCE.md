@@ -227,12 +227,19 @@ Prioritised gaps:
     speculatively. Revisit it when the leaderboard query becomes visible in
     profiling, with a measurement that shows the gain.
 
-    Methodology: `next build --experimental-build-mode compile` plus
-    `next start` (the default `next build` currently fails in Next 15.5.29
-    while prerendering `/404`/`/500`; see the Next.js issue tracker), TTFB via
+    Methodology: full `next build` plus `next start`, TTFB via
     `curl -w '%{time_starttransfer}'`, samples alternated across rebuilds
     (on, off, on, off) to control drift. The only shared read still cached is
     the home "popular this week" rail (60 s).
+
+    A full `next build` initially failed while prerendering `/404` and `/500`
+    with `<Html> should not be imported outside of pages/_document`, which an
+    earlier revision of this document blamed on Next 15.5.29. The actual cause
+    was the repo's root `.env` exporting `NODE_ENV=development`, which
+    `next.config.ts` loaded into the build, so Next compiled a development
+    error page into a production prerender. The config now ignores `NODE_ENV`
+    from env files and lets the command pick the mode; `next build`,
+    `next start` and `next dev` all succeed without any caller-side override.
 11. **Catalog read cache — tried, measured, removed.** The search/discovery
     query (`listCatalog`, used by `/app/search` and `/app/rate`) was wrapped in
     the same `unstable_cache` pattern: 60 s TTL, a `catalog-reads` tag, and
