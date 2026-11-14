@@ -30,8 +30,8 @@ const COVERAGE_SEEDS = [1, 7, 42, 99];
  * assume, so the check is about surviving misspecification, not mirroring the
  * optimiser. */
 const MIN_MISSPECIFIED_SPEARMAN = 0.85;
-/** Nominal coverage is 0.95; the corrected intervals are allowed sampling slack. */
-const MIN_MISSPECIFIED_COVERAGE = 0.90;
+/** Nominal coverage is 0.95, and the corrected intervals reach it over 20 seeds. */
+const MIN_MISSPECIFIED_COVERAGE = 0.95;
 const MIN_MEAN_INTERVAL_COVERAGE = 0.85;
 /** A single seed this far below nominal is a calibration bug, not luck. */
 const MIN_PER_SEED_INTERVAL_COVERAGE = 0.7;
@@ -59,7 +59,7 @@ function normalCdf(z: number): number {
 
 const PROBIT_SCALE = 1.2;
 const LABEL_FLIP_RATE = 0.2;
-const MISSPECIFIED_SEEDS = [1, 7, 42, 99];
+const MISSPECIFIED_SEEDS = Array.from({ length: 20 }, (_, i) => i + 1);
 const MISSPECIFIED_ITEMS = 40;
 const MISSPECIFIED_COMPARISONS = 2_400;
 

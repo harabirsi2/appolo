@@ -98,6 +98,9 @@ const DEFAULT_TOLERANCE = 1e-6;
 const DEFAULT_DENSE_LIMIT = 220;
 /** Cap quasi-likelihood inflation so a few near-certain comparisons cannot blow up every interval. */
 const MAX_OVERDISPERSION = 4;
+/** Calibration slope is bounded so a tiny or degenerate sample cannot explode the intervals. */
+const MIN_CALIBRATION_SLOPE = 0.5;
+const MAX_CALIBRATION_SLOPE = 2;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -306,6 +309,45 @@ function accumulate(
 }
 
 /**
+ * One-parameter logistic calibration of decided outcomes on fitted θ gaps.
+ * A slope below 1 means the model is overconfident: observed choices are
+ * flatter than its probabilities. A slope above 1 means underconfidence, which
+ * is left alone rather than sharpened. Ties are excluded because the slope
+ * describes the decided a-vs-b choice.
+ */
+function calibrationSlope(
+  index: Map<string, number>,
+  events: readonly ComparisonEvent[],
+  theta: number[],
+): number {
+  let slope = 1;
+  for (let iteration = 0; iteration < 20; iteration += 1) {
+    let gradient = 0;
+    let curvature = 0;
+    for (const event of events) {
+      if (event.outcome !== "a" && event.outcome !== "b") continue;
+      const ia = index.get(event.aId);
+      const ib = index.get(event.bId);
+      if (ia === undefined || ib === undefined) continue;
+      const gap = (theta[ia] ?? 0) - (theta[ib] ?? 0);
+      if (gap === 0) continue;
+      const probability = 1 / (1 + Math.exp(-slope * gap));
+      const outcome = event.outcome === "a" ? 1 : 0;
+      gradient += (outcome - probability) * gap;
+      curvature += probability * (1 - probability) * gap * gap;
+    }
+    if (Math.abs(gradient) < 1e-9) break;
+    const next = clamp(slope + gradient / Math.max(curvature, 1e-9), MIN_CALIBRATION_SLOPE, MAX_CALIBRATION_SLOPE);
+    if (Math.abs(next - slope) < 1e-9) {
+      slope = next;
+      break;
+    }
+    slope = next;
+  }
+  return slope;
+}
+
+/**
  * Fit a Bradley–Terry + Davidson model to comparison events.
  *
  * Skipped comparisons are ignored entirely. Ties and "undecided" outcomes
@@ -425,6 +467,8 @@ export function fitBradleyTerry(
     MAX_OVERDISPERSION,
     Math.max(1, final.pearson / Math.max(effectiveObservations - k, 1)),
   );
+  const slope = calibrationSlope(index, events, theta);
+  const calibrationInflation = slope < 1 ? 1 / slope : 1;
   const covariance = fitCovariance(final.hessian, k);
 
   // Bradley–Terry is identified only up to a shared shift (only θ_i − θ_j
@@ -444,7 +488,7 @@ export function fitBradleyTerry(
 
   const items: FittedItem[] = ids.map((id, i) => {
     const centeredTheta = (theta[i] ?? 0) - meanTheta;
-    const se = (standardErrors[i] ?? 0) * Math.sqrt(overdispersion);
+    const se = (standardErrors[i] ?? 0) * Math.sqrt(overdispersion) * calibrationInflation;
     const stats = final.stats[i] ?? { comparisons: 0, wins: 0, losses: 0, ties: 0 };
     const decided = stats.wins + stats.losses;
     return {

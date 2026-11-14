@@ -123,9 +123,9 @@ nested transaction is required.
 - `/app/rankings?kind=…` now orders by fitted θ whenever a model exists and prints
   `model score · ±95% interval · comparisons · confidence` per row. The un-filtered
   "All" view continues to use the Elo ladder because it spans categories.
-- Standard errors carry a capped Pearson overdispersion factor, so intervals
-  widen when outcomes are noisier than the Davidson model assumes instead of
-  claiming false certainty.
+- Standard errors carry a capped Pearson overdispersion factor and a one-sided
+  calibration-slope inflation: when decided outcomes are flatter than the
+  fitted probabilities, intervals widen instead of claiming false certainty.
 - Community scores are shrunk toward a neutral prior (see `community.ts`) before
   they are shown publicly, with a confidence label.
 

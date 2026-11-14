@@ -5,10 +5,12 @@ why the change was made, not every commit.
 
 ## Ranking interval calibration
 
-- Fit standard errors now include a capped Pearson overdispersion factor, so
-  intervals widen when outcomes are noisier than the Davidson model assumes.
-  Under the probit misspecification scenario coverage rose from 0.825 to 0.925
-  against nominal 0.95, and the harness now gates pooled coverage at 0.90.
+- Fit standard errors now include a capped Pearson overdispersion factor and a
+  one-sided calibration-slope inflation: when decided outcomes are flatter than
+  the fitted probabilities, the interval widens instead of claiming precision.
+  Under the probit misspecification scenario coverage rose from 0.825 to 0.959
+  over 20 seeds against nominal 0.95, and the harness now gates pooled coverage
+  at 0.95.
 
 ## Service module split
 
@@ -50,8 +52,8 @@ why the change was made, not every commit.
   interval coverage (mean ≥ 0.85 over four seeds, each seed ≥ 0.70),
   recovery under a different outcome process (probit link, no ties, 20% label
   noise; Spearman ≥ 0.85) plus gated interval coverage under that process
-  (≥ 0.90 pooled; observed 0.925 after the overdispersion correction),
-  invariance to event order and a/b side
+  (≥ 0.95 pooled over 20 seeds; observed 0.959 after the overdispersion and
+  calibration corrections), invariance to event order and a/b side
   assignment, cold-start shrinkage, and a 5 s runtime budget for 300 items.
   The seven checks run in `pnpm test` and `pnpm verify`.
 
