@@ -50,14 +50,13 @@ export function FinishRating({
   kindLabel,
   suggestedTags,
   pods,
-  manualMode,
 }: {
   initialItem: RatingSide;
   initialOpponent: OpponentSide;
   kindLabel: string;
   suggestedTags: string[];
   pods: Array<{ id: string; title: string }>;
-  manualMode: boolean;
+  manualMode?: boolean;
 }) {
   const router = useRouter();
   const [item, setItem] = useState(initialItem);
@@ -503,9 +502,8 @@ export function FinishRating({
           ) : null}
         </div>
 
-        {manualMode ? (
-          <div className="mt-4 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-3">
-            <p className="text-[12px] font-semibold text-ink">Manual mode</p>
+        <div className="mt-4 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-3">
+            <p className="text-[12px] font-semibold text-ink">Manual score</p>
             <div className="mt-2 flex items-center gap-2">
               <input
                 type="range"
@@ -527,7 +525,6 @@ export function FinishRating({
               </button>
             </div>
           </div>
-        ) : null}
 
         <div className="mt-5">
           <p className="text-center text-[13px] font-semibold text-ink">Which is better?</p>
