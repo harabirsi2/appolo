@@ -199,13 +199,32 @@ Prioritised gaps:
    home-page request in that window. Measured `/app` TTFB before and after:
    213–251 ms vs 207–252 ms — inside noise at this data size. The saving is one
    aggregation per request, which matters as ratings grow, not a visible
-   latency win today.
-10. **Leaderboard cache.** `catalogLeaderboard` is cached for 30 s and
-    tag-invalidated when a vote, manual score or undo lands. Measured on the
-    dev server, six warm requests to `/app/browse`: median **267 ms → 199 ms**
-    and **13.8 → 13.0** committed transactions per request. The remaining
-    queries are per-viewer (session, profile, watchlist) so they cannot be
-    shared. Search remains uncached.
+   latency win today. These figures are dev-server numbers, where framework
+   overhead dominates; a production server answers `/app` in ~10 ms, so treat
+   the absolute values as dev-only.
+10. **Leaderboard cache — no measurable latency gain.** `catalogLeaderboard`
+    is cached for 30 s and tag-invalidated when a vote, manual score or undo
+    lands. A production A/B was run on the same route and session, 60 warm
+    requests per arm, with 300 rated titles:
+
+    | arm | median | p10 | p90 | DB transactions/request |
+    | --- | --- | --- | --- | --- |
+    | cache on | 9.4 ms | 8.7 ms | 11.0 ms | 5.6 |
+    | cache bypassed | 9.4 ms | 8.8 ms | 11.2 ms | 5.1 |
+
+    The arms are indistinguishable, and the transaction difference is noise.
+    The cache removes one leaderboard aggregation and one vote scan per
+    request, but at this catalog size those cost effectively nothing next to
+    the per-viewer session/profile/watchlist queries. An earlier claim of
+    **267 ms → 199 ms** came from dev-server measurements, where request
+    handling and compilation overhead dominate; it is retracted. Revisit the
+    cache when the leaderboard query becomes visible in profiling, not before.
+
+    Methodology: `next build --experimental-build-mode compile` plus
+    `next start` (the default `next build` currently fails in Next 15.5.29
+    while prerendering `/404`/`/500`; see the Next.js issue tracker), TTFB via
+    `curl -w '%{time_starttransfer}'`, samples alternated across rebuilds
+    (on, off, on, off) to control drift. Search remains uncached.
 
 ## 7. Reproduction
 

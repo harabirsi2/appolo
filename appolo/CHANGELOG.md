@@ -11,8 +11,11 @@ why the change was made, not every commit.
 - Replaced two hand-rolled catalog mappers in `social.ts` with the canonical
   `mapCatalogItem`, so a new item field is mapped in one place.
 - Cached the community leaderboard for 30 s and invalidated both community
-  tags on rating changes. Measured Browse: **267 ms → 199 ms** median server
-  response and 13.8 → 13.0 DB transactions per request.
+  tags on rating changes. A production A/B over 60 warm requests per arm found
+  **no measurable latency change**: 9.4 ms median with the cache and 9.4 ms
+  bypassed (300 rated titles). It saves one aggregation and one vote scan per
+  request, but those are not where Browse spends its time. The earlier
+  dev-server figure of 267 → 199 ms is retracted.
 - Enabled `noUnusedLocals` / `noUnusedParameters` in `tsconfig.base.json` so
   dead imports fail typecheck from now on.
 - Added `Doom (1993)` as its own catalog entry; the 1993 and 2016 games no
