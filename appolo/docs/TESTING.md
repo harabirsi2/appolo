@@ -43,8 +43,10 @@ explicit thresholds:
 - recovered ordering: Spearman correlation with the latent strengths **≥ 0.85**
   on two seeds (observed 0.90–0.96);
 - predictive accuracy on held-out comparisons **≥ 0.65** (observed 0.68–0.73);
-- 95% interval coverage of the true strengths **≥ 0.75** (observed 0.79–0.96),
-  with a median interval width under 2 to catch uselessly wide intervals;
+- 95% interval coverage of the true strengths: **mean ≥ 0.85 across four
+  seeds** (observed mean 0.875) with a per-seed sanity floor of **≥ 0.70**
+  (observed minimum 0.79), and a median interval width under 2 to catch
+  uselessly wide intervals;
 - identical estimates (within 1e-6) after reversing, shuffling or flipping the
   sides of every comparison;
 - cold-start behaviour: an item with two comparisons has a standard error more

@@ -13,14 +13,20 @@ import {
 
 /**
  * Thresholds are deliberately below the observed values on this machine
- * (Spearman 0.90–0.96, held-out accuracy 0.68–0.73, interval coverage
- * 0.79–0.96 at 24 items / ~1,300 comparisons). They are chosen to fail on a
- * real regression — a broken prior, a mis-centred fit, ignored ties — not on
- * run-to-run noise, since every stage is seeded and deterministic.
+ * (Spearman 0.90–0.96, held-out accuracy 0.68–0.73, interval coverage mean
+ * 0.875 over four seeds at 24 items / ~1,300 comparisons, per-seed minimum
+ * 0.79). They are chosen to fail on a real regression — a broken prior, a
+ * mis-centred fit, ignored ties — not on run-to-run noise, since every stage is
+ * seeded and deterministic.
  */
 const MIN_SPEARMAN = 0.85;
 const MIN_HELD_OUT_ACCURACY = 0.65;
-const MIN_INTERVAL_COVERAGE = 0.75;
+/** Coverage at 95% should approach 0.95; judging four seeds together averages
+ *  out the binomial noise a single 24-item sample carries. */
+const COVERAGE_SEEDS = [1, 7, 42, 99];
+const MIN_MEAN_INTERVAL_COVERAGE = 0.85;
+/** A single seed this far below nominal is a calibration bug, not luck. */
+const MIN_PER_SEED_INTERVAL_COVERAGE = 0.7;
 const RUNTIME_BUDGET_MS = 5_000;
 
 test("generator produces ties, sparse users and full coverage", () => {
@@ -57,18 +63,35 @@ test("predicts held-out comparisons better than chance", () => {
   );
 });
 
-test("confidence intervals cover the true strengths", () => {
-  const synthetic = generateSyntheticPreferences({ seed: 42, items: 24, users: 32, comparisons: 1_600 });
-  const fit = fitBradleyTerry(synthetic.events);
-  const coverage = intervalCoverage(fit, synthetic.strengths);
-  assert.equal(coverage.total, synthetic.strengths.size);
+test("confidence intervals cover the true strengths across seeds", () => {
+  const rates: { seed: number; rate: number; covered: number; total: number }[] = [];
+  let lastFit: ReturnType<typeof fitBradleyTerry> | undefined;
+
+  for (const seed of COVERAGE_SEEDS) {
+    const synthetic = generateSyntheticPreferences({ seed, items: 24, users: 32, comparisons: 1_600 });
+    const fit = fitBradleyTerry(synthetic.events);
+    assert.ok(fit.converged, `fit did not converge for seed ${seed}`);
+    const coverage = intervalCoverage(fit, synthetic.strengths);
+    assert.equal(coverage.total, synthetic.strengths.size);
+    assert.ok(
+      coverage.rate >= MIN_PER_SEED_INTERVAL_COVERAGE,
+      `seed ${seed}: interval coverage ${coverage.rate.toFixed(2)} (${coverage.covered}/${coverage.total}) ` +
+        `below the per-seed floor ${MIN_PER_SEED_INTERVAL_COVERAGE}`,
+    );
+    rates.push({ seed, ...coverage });
+    lastFit = fit;
+  }
+
+  const mean = rates.reduce((sum, entry) => sum + entry.rate, 0) / rates.length;
   assert.ok(
-    coverage.rate >= MIN_INTERVAL_COVERAGE,
-    `interval coverage ${coverage.rate.toFixed(2)} (${coverage.covered}/${coverage.total}) below ${MIN_INTERVAL_COVERAGE}`,
+    mean >= MIN_MEAN_INTERVAL_COVERAGE,
+    `mean interval coverage ${mean.toFixed(3)} across seeds ${COVERAGE_SEEDS.join(", ")} ` +
+      `(${rates.map((entry) => entry.rate.toFixed(2)).join(", ")}) below ${MIN_MEAN_INTERVAL_COVERAGE}`,
   );
+
   // A 95% interval that covers everything would be uselessly wide; the model
   // should still be informative for a well-sampled population.
-  const width = medianIntervalWidth(fit.items);
+  const width = medianIntervalWidth(lastFit!.items);
   assert.ok(width < 2, `median 95% interval width ${width.toFixed(2)} is too wide to be useful`);
 });
 

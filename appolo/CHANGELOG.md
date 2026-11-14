@@ -40,7 +40,8 @@ why the change was made, not every commit.
   users with different activity levels and noise, samples pairwise outcomes
   (wins, losses, ties) from latent strengths, then scores a fit on ordering
   recovery (Spearman ≥ 0.85), held-out predictive accuracy (≥ 0.65), 95%
-  interval coverage (≥ 0.75), invariance to event order and a/b side
+  interval coverage (mean ≥ 0.85 over four seeds, each seed ≥ 0.70),
+  invariance to event order and a/b side
   assignment, cold-start shrinkage, and a 5 s runtime budget for 300 items.
   The seven checks run in `pnpm test` and `pnpm verify`.
 
