@@ -49,8 +49,9 @@ explicit thresholds:
   pooled over 20 seeds** (observed 0.950 against nominal 0.95, up from 0.825
   before correction): standard errors carry a capped Pearson overdispersion
   factor, and an overconfident fit extends each interval outward by the
-  estimated attenuation. Over repeated events at fixed strengths the weakest
-  decile covers 0.935 and the rest 0.955;
+  estimated attenuation. A per-item diagnostic over repeated events at fixed
+  strengths prints the lowest items and gates the weakest decile at **≥ 0.90**
+  with a gap to the rest of **≤ 0.05** (observed 0.935 vs 0.955, gap 0.020);
 - predictive accuracy on held-out comparisons **≥ 0.65** (observed 0.68–0.73);
 - 95% interval coverage of the true strengths: **mean ≥ 0.85 across four
   seeds** (observed mean 0.958) with a per-seed sanity floor of **≥ 0.70**

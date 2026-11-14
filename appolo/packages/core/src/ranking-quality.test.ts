@@ -9,6 +9,7 @@ import {
   heldOutAccuracy,
   intervalCoverage,
   medianIntervalWidth,
+  perItemIntervalCoverage,
   sampleComparisons,
   spearmanCorrelation,
 } from "./ranking-quality.ts";
@@ -62,6 +63,14 @@ const LABEL_FLIP_RATE = 0.2;
 const MISSPECIFIED_SEEDS = Array.from({ length: 20 }, (_, i) => i + 1);
 const MISSPECIFIED_ITEMS = 40;
 const MISSPECIFIED_COMPARISONS = 2_400;
+/** Fixed population and repeated event samples expose item-level coverage. */
+const PER_ITEM_REPLICATIONS = 20;
+const PER_ITEM_EVENT_SEED = 500;
+const BOTTOM_DECILE_SIZE = 10;
+/** The corrected bottom decile reaches 0.935; allow ordinary sampling noise. */
+const MIN_BOTTOM_DECILE_COVERAGE = 0.9;
+/** A bottom decile far below the rest is the regression this guards against. */
+const MAX_BOTTOM_DECILE_GAP = 0.05;
 
 /**
  * A different process than `fitBradleyTerry` assumes: a probit link, no ties,
@@ -158,6 +167,61 @@ test("keeps 95% intervals close to nominal coverage under the probit process", (
   assert.ok(
     pooled >= MIN_MISSPECIFIED_COVERAGE,
     `misspecified coverage ${pooled.toFixed(3)} below ${MIN_MISSPECIFIED_COVERAGE}`,
+  );
+});
+
+test("makes the bottom-of-scale coverage gap visible per item", (t) => {
+  const strengths = createSyntheticStrengths(42, MISSPECIFIED_ITEMS);
+  const fits = [];
+  for (let run = 0; run < PER_ITEM_REPLICATIONS; run += 1) {
+    const fit = fitBradleyTerry(
+      sampleMisspecifiedPreferences(strengths, MISSPECIFIED_COMPARISONS, PER_ITEM_EVENT_SEED + run),
+    );
+    assert.ok(fit.converged, `per-item fit did not converge for replication ${run}`);
+    fits.push(fit);
+  }
+
+  const perItem = perItemIntervalCoverage(fits, strengths);
+  assert.equal(perItem.size, strengths.size);
+  for (const entry of perItem.values()) {
+    assert.equal(entry.total, PER_ITEM_REPLICATIONS, `${entry.id} has an incomplete replication count`);
+  }
+
+  const bottomIds = new Set(
+    [...strengths.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, BOTTOM_DECILE_SIZE)
+      .map(([id]) => id),
+  );
+  const bottom = [...perItem.values()].filter((entry) => bottomIds.has(entry.id));
+  const rest = [...perItem.values()].filter((entry) => !bottomIds.has(entry.id));
+  const sum = (entries: typeof bottom) =>
+    entries.reduce(
+      (acc, entry) => ({ covered: acc.covered + entry.covered, total: acc.total + entry.total }),
+      { covered: 0, total: 0 },
+    );
+  const bottomSum = sum(bottom);
+  const restSum = sum(rest);
+  const bottomRate = bottomSum.covered / bottomSum.total;
+  const restRate = restSum.covered / restSum.total;
+  const gap = restRate - bottomRate;
+  const lowest = [...perItem.values()]
+    .sort((a, b) => a.rate - b.rate || a.id.localeCompare(b.id))
+    .slice(0, 6)
+    .map((entry) => `${entry.id} ${entry.covered}/${entry.total}`);
+
+  t.diagnostic(
+    `per-item 95% coverage: bottom decile ${bottomRate.toFixed(3)} ` +
+      `(${bottomSum.covered}/${bottomSum.total}), rest ${restRate.toFixed(3)} ` +
+      `(${restSum.covered}/${restSum.total}), gap ${gap.toFixed(3)}; lowest ${lowest.join(", ")}`,
+  );
+  assert.ok(
+    bottomRate >= MIN_BOTTOM_DECILE_COVERAGE,
+    `bottom-decile coverage ${bottomRate.toFixed(3)} below ${MIN_BOTTOM_DECILE_COVERAGE}`,
+  );
+  assert.ok(
+    gap <= MAX_BOTTOM_DECILE_GAP,
+    `bottom-decile gap ${gap.toFixed(3)} above ${MAX_BOTTOM_DECILE_GAP}`,
   );
 });
 

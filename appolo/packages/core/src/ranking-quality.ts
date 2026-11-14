@@ -241,6 +241,38 @@ export function intervalCoverage(
   return { covered, total, rate: total === 0 ? 0 : covered / total };
 }
 
+export interface ItemIntervalCoverage {
+  id: string;
+  covered: number;
+  total: number;
+  rate: number;
+}
+
+/**
+ * Aggregate 95% interval coverage for each item over repeated fits of the same
+ * population. Per-item rates make a bottom-of-scale gap visible where a pooled
+ * rate would average it away.
+ */
+export function perItemIntervalCoverage(
+  fits: readonly RankingFit[],
+  strengths: ReadonlyMap<string, number>,
+  minimumComparisons = 1,
+): Map<string, ItemIntervalCoverage> {
+  const coverage = new Map<string, ItemIntervalCoverage>();
+  for (const fit of fits) {
+    for (const item of fit.items) {
+      const truth = strengths.get(item.id);
+      if (truth === undefined || item.comparisons < minimumComparisons) continue;
+      const entry = coverage.get(item.id) ?? { id: item.id, covered: 0, total: 0, rate: 0 };
+      entry.total += 1;
+      if (truth >= item.lower && truth <= item.upper) entry.covered += 1;
+      entry.rate = entry.covered / entry.total;
+      coverage.set(item.id, entry);
+    }
+  }
+  return coverage;
+}
+
 /** Median interval width across items meeting a comparison threshold. */
 export function medianIntervalWidth(items: readonly FittedItem[], minimumComparisons = 0): number {
   const widths = items

@@ -9,7 +9,9 @@ why the change was made, not every commit.
   overconfident fit extends each interval outward by its estimated attenuation
   `(1/slope − 1)·|θ|` instead of claiming precision. Under the probit scenario
   coverage rose from 0.825 to 0.950 over 20 seeds, the weakest decile improved
-  from 0.910 to 0.935, and the harness gates pooled coverage at 0.95.
+  from 0.910 to 0.935, and the harness gates pooled coverage at 0.95. A
+  per-item diagnostic now prints the bottom-of-scale coverage and gates the
+  weakest decile at 0.90 with a gap to the rest of at most 0.05.
 
 ## Service module split
 
