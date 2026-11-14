@@ -319,7 +319,7 @@ export function CategoryTile({
               )}
               style={{ zIndex: index === 1 ? 2 : 1 }}
             >
-              <MediaArt kind={kind} title={title} sizes="160px" className="aspect-square w-full rounded-md border-0" />
+              <MediaArt kind={kind} title={title} imageUrl={null} sizes="160px" className="aspect-square w-full rounded-md border-0" />
             </span>
           );
         })}

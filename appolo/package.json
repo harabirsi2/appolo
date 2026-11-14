@@ -24,7 +24,8 @@
     "e2e": "node scripts/e2e.mjs",
     "preflight": "node scripts/preflight.mjs",
     "visual": "node scripts/visual.mjs",
-    "verify": "pnpm preflight && pnpm typecheck && pnpm e2e && pnpm visual",
+    "media-art": "node scripts/media-art.mjs",
+    "verify": "pnpm preflight && pnpm media-art && pnpm typecheck && pnpm e2e && pnpm visual",
     "ci": "powershell -ExecutionPolicy Bypass -File scripts/ci.ps1",
     "a11y": "node scripts/a11y.mjs"
   },
