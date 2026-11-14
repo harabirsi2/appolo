@@ -5,7 +5,6 @@ import {
   evaluateSyntheticPreferences,
   generateSyntheticPreferences,
   heldOutAccuracy,
-  intervalCoverage,
   medianIntervalWidth,
   sampleComparisons,
   spearmanCorrelation,
@@ -68,10 +67,13 @@ test("confidence intervals cover the true strengths across seeds", () => {
   let lastFit: ReturnType<typeof fitBradleyTerry> | undefined;
 
   for (const seed of COVERAGE_SEEDS) {
-    const synthetic = generateSyntheticPreferences({ seed, items: 24, users: 32, comparisons: 1_600 });
-    const fit = fitBradleyTerry(synthetic.events);
+    const { synthetic, fit, coverage } = evaluateSyntheticPreferences({
+      seed,
+      items: 24,
+      users: 32,
+      comparisons: 1_600,
+    });
     assert.ok(fit.converged, `fit did not converge for seed ${seed}`);
-    const coverage = intervalCoverage(fit, synthetic.strengths);
     assert.equal(coverage.total, synthetic.strengths.size);
     assert.ok(
       coverage.rate >= MIN_PER_SEED_INTERVAL_COVERAGE,
