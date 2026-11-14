@@ -16,10 +16,10 @@ export async function generateMetadata({ params }: Params) {
 
 export default async function PodByIdPage({ params }: Params) {
   const { id } = await params;
-  const pod = await podById(id);
+  const session = await getSession();
+  const pod = await podById(id, session?.org.id ?? null);
   if (!pod) notFound();
 
-  const session = await getSession();
   const profile = session ? await getProfileByUsername(session.org.slug) : null;
 
   return (

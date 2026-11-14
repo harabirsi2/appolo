@@ -65,6 +65,8 @@ export default async function RateItemPage({ params }: Params) {
         photoUrl: rating?.photoUrl ?? null,
         favoriteCharacter: rating?.favoriteCharacter ?? null,
         favoriteTracks: rating?.favoriteTracks ?? [],
+        subScores: rating?.subScores ?? {},
+        highlights: rating?.highlights ?? [],
       }}
       initialOpponent={{
         id: matchup.opponent.id,

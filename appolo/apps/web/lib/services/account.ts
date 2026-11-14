@@ -3,6 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { scoreForElo, verifyPassword } from "@appolo/core";
 import { getDb, withOrg, schema } from "@/lib/db";
 import { DomainError } from "./errors";
+import { normalizeHighlights, normalizeSubScores } from "./rankings";
 
 const { catalogItems, itemRatings, itemMatchups, rankingOrder, profiles, orgs, users } = schema;
 
@@ -37,6 +38,8 @@ export interface MediaExport {
     videoUrl: string | null;
     favoriteCharacter: string | null;
     favoriteTracks: string[];
+    subScores: Record<string, number>;
+    highlights: string[];
     createdAt: Date;
     updatedAt: Date;
   }>;
@@ -50,6 +53,8 @@ export interface MediaExport {
     videoUrl: string | null;
     favoriteCharacter: string | null;
     favoriteTracks: string[];
+    subScores: Record<string, number>;
+    highlights: string[];
     updatedAt: Date;
   }>;
   matchups: Array<{
@@ -120,6 +125,8 @@ export async function exportMediaData(orgId: string): Promise<MediaExport> {
       videoUrl: rating.videoUrl ?? null,
       favoriteCharacter: rating.favoriteCharacter ?? null,
       favoriteTracks: rating.favoriteTracks ?? [],
+      subScores: normalizeSubScores(rating.subScores),
+      highlights: normalizeHighlights(rating.highlights),
       createdAt: rating.createdAt,
       updatedAt: rating.updatedAt,
     }));
@@ -150,6 +157,8 @@ export async function exportMediaData(orgId: string): Promise<MediaExport> {
           videoUrl: rating.videoUrl,
           favoriteCharacter: rating.favoriteCharacter,
           favoriteTracks: rating.favoriteTracks,
+          subScores: rating.subScores,
+          highlights: rating.highlights,
           updatedAt: rating.updatedAt,
         })),
       matchups: matchupRows.map(({ matchup, itemTitle, opponentTitle }) => ({

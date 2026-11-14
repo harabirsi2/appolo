@@ -1,10 +1,28 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { mapCatalogItem, type CatalogItem } from "./catalog-item";
+import { mapCatalogItem, toScore, type CatalogItem } from "./catalog-item";
 import { rankedRatings } from "./rankings";
 import { z } from "zod";
 import { DomainError } from "./errors";
 import { getDb, withOrg, schema } from "@/lib/db";
-const { profiles, follows, pods, podItems, catalogItems } = schema;
+const { profiles, follows, pods, podItems, podMembers, catalogItems, itemRatings } = schema;
+
+/** Membership role on a collaborative pod. */
+export type PodRole = "owner" | "editor" | "viewer";
+export const POD_ROLES: readonly PodRole[] = ["owner", "editor", "viewer"];
+
+export interface PodMemberView {
+  orgId: string;
+  username: string;
+  displayName: string;
+  avatarHue: number;
+  role: PodRole;
+}
+
+/** Average of the members' own scores for one title, plus how many scored it. */
+export interface PodConsensus {
+  average: number;
+  count: number;
+}
 
 export interface PodCard {
   id: string;
@@ -14,13 +32,25 @@ export interface PodCard {
   description: string | null;
   ownerUsername: string;
   ownerDisplayName: string;
+  /** Collaborative pods take members and publish a group consensus score. */
+  isCollaborative: boolean;
+  memberCount: number;
   count: number;
   items: CatalogItem[];
 }
 export interface PodDetail extends PodCard {
   entries: Array<
-    CatalogItem & { note: string | null; score: number | null; addedByUsername: string | null }
+    CatalogItem & {
+      note: string | null;
+      score: number | null;
+      addedByUsername: string | null;
+      /** Group score across members, only on collaborative pods. */
+      consensus: PodConsensus | null;
+    }
   >;
+  members: PodMemberView[];
+  /** The acting org's role, or null when they are not a member. */
+  viewerRole: PodRole | null;
 }
 function slugify(value: string): string {
   return value
@@ -46,6 +76,14 @@ async function podCardsForRows(rows: Array<typeof pods.$inferSelect>, owner: {
           .orderBy(podItems.position),
       )
     : [];
+  const memberCounts = await withOrg(ownerOrgId, (tx) =>
+    tx
+      .select({ podId: podMembers.podId, n: sql<number>`count(*)::int` })
+      .from(podMembers)
+      .where(inArray(podMembers.podId, ids))
+      .groupBy(podMembers.podId),
+  );
+  const countByPod = new Map(memberCounts.map((row) => [row.podId, row.n]));
 
   return rows.map((pod) => {
     const items = entries
@@ -59,6 +97,8 @@ async function podCardsForRows(rows: Array<typeof pods.$inferSelect>, owner: {
       description: pod.description ?? null,
       ownerUsername: owner.username,
       ownerDisplayName: owner.displayName,
+      isCollaborative: pod.isCollaborative,
+      memberCount: countByPod.get(pod.id) ?? (pod.isCollaborative ? 1 : 0),
       count: items.length,
       items: items.slice(0, 4).map(mapCatalogItem),
     };
@@ -70,7 +110,11 @@ export async function podsForProfile(orgId: string, username: string, displayNam
   );
   return podCardsForRows(rows, { username, displayName });
 }
-export async function podByOwnerAndSlug(username: string, slug: string): Promise<PodDetail | null> {
+export async function podByOwnerAndSlug(
+  username: string,
+  slug: string,
+  viewerOrgId?: string | null,
+): Promise<PodDetail | null> {
   const db = getDb();
   const profileRows = await db
     .select()
@@ -87,9 +131,9 @@ export async function podByOwnerAndSlug(username: string, slug: string): Promise
     .limit(1);
   const pod = rows[0];
   if (!pod) return null;
-  return podDetail(pod, profile);
+  return podDetail(pod, profile, viewerOrgId ?? null);
 }
-export async function podById(podId: string): Promise<PodDetail | null> {
+export async function podById(podId: string, viewerOrgId?: string | null): Promise<PodDetail | null> {
   const db = getDb();
   const rows = await db
     .select({ pod: pods, profile: profiles })
@@ -99,11 +143,74 @@ export async function podById(podId: string): Promise<PodDetail | null> {
     .limit(1);
   const row = rows[0];
   if (!row) return null;
-  return podDetail(row.pod, row.profile);
+  return podDetail(row.pod, row.profile, viewerOrgId ?? null);
 }
+
+/**
+ * Members of a pod, owner first.
+ *
+ * Pods are only ever detailed while public, so this reads with no tenant scope:
+ * the `pod_members` public-read policy returns every member row for a public
+ * pod, and the `profiles` public-read policy makes the joins visible. A tenant
+ * scope would filter the join down to the viewer's own profile row.
+ */
+export async function podMembersFor(podId: string, _ownerOrgId?: string): Promise<PodMemberView[]> {
+  const rows = await getDb()
+    .select({ member: podMembers, profile: profiles })
+    .from(podMembers)
+    .innerJoin(profiles, eq(profiles.orgId, podMembers.orgId))
+    .where(eq(podMembers.podId, podId));
+  const rank: Record<PodRole, number> = { owner: 0, editor: 1, viewer: 2 };
+  return rows
+    .map(({ member, profile }) => ({
+      orgId: member.orgId,
+      username: profile.username,
+      displayName: profile.displayName,
+      avatarHue: profile.avatarHue,
+      role: (POD_ROLES.includes(member.role as PodRole) ? member.role : "viewer") as PodRole,
+    }))
+    .sort((a, b) => rank[a.role] - rank[b.role] || a.username.localeCompare(b.username));
+}
+
+/**
+ * Each member's 0–10 score for the pod's titles, keyed by item id.
+ *
+ * Ratings live behind row-level security, so the read has to run once per
+ * member under their own tenant scope. Members who have not rated a title are
+ * simply absent from that item's list.
+ */
+async function memberScoresByItem(
+  memberOrgIds: readonly string[],
+  itemIds: readonly string[],
+): Promise<Map<string, number[]>> {
+  const out = new Map<string, number[]>();
+  if (memberOrgIds.length === 0 || itemIds.length === 0) return out;
+  const perMember = await Promise.all(
+    memberOrgIds.map((memberOrgId) =>
+      withOrg(memberOrgId, (tx) =>
+        tx
+          .select({ itemId: itemRatings.itemId, elo: itemRatings.elo, manualScore: itemRatings.manualScore })
+          .from(itemRatings)
+          .where(and(eq(itemRatings.orgId, memberOrgId), inArray(itemRatings.itemId, [...itemIds]))),
+      ).catch(() => []),
+    ),
+  );
+  for (const rows of perMember) {
+    for (const row of rows) {
+      const score = row.manualScore === null ? toScore(row.elo) : Number(row.manualScore);
+      if (!Number.isFinite(score)) continue;
+      const list = out.get(row.itemId) ?? [];
+      list.push(score);
+      out.set(row.itemId, list);
+    }
+  }
+  return out;
+}
+
 async function podDetail(
   pod: typeof pods.$inferSelect,
   profile: typeof profiles.$inferSelect,
+  viewerOrgId: string | null,
 ): Promise<PodDetail> {
   const rows = await withOrg(pod.orgId, (tx) =>
     tx
@@ -135,11 +242,28 @@ async function podDetail(
   const ratings = await rankedRatings(pod.orgId);
   const scoreById = new Map(ratings.map((rating) => [rating.id, rating.score]));
 
+  const members = pod.isCollaborative ? await podMembersFor(pod.id, pod.orgId) : [];
+  const itemIds = rows.map((row) => row.item.id);
+  const consensusByItem = pod.isCollaborative
+    ? await memberScoresByItem(
+        members.map((member) => member.orgId),
+        itemIds,
+      )
+    : new Map<string, number[]>();
+
+  const consensusFor = (itemId: string): PodConsensus | null => {
+    const scores = consensusByItem.get(itemId);
+    if (!scores || scores.length < 2) return null;
+    const average = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+    return { average: Math.round(average * 10) / 10, count: scores.length };
+  };
+
   const entries = rows.map(({ item, note, addedByOrgId }) => ({
     ...mapCatalogItem(item),
     note: note ?? null,
     score: scoreById.get(item.id) ?? null,
     addedByUsername: addedByOrgId ? (contributorByOrg.get(addedByOrgId) ?? null) : null,
+    consensus: consensusFor(item.id),
   }));
 
   return {
@@ -150,15 +274,21 @@ async function podDetail(
     description: pod.description ?? null,
     ownerUsername: profile.username,
     ownerDisplayName: profile.displayName,
+    isCollaborative: pod.isCollaborative,
+    memberCount: members.length || (pod.isCollaborative ? 1 : 0),
     count: entries.length,
     items: entries.slice(0, 4),
     entries,
+    members,
+    viewerRole: viewerOrgId ? members.find((member) => member.orgId === viewerOrgId)?.role ?? null : null,
   };
 }
 export const podInputSchema = z.object({
   title: z.string().trim().min(1).max(80),
   description: z.string().trim().max(300).optional().nullable(),
   itemIds: z.array(z.string().uuid()).max(50).optional(),
+  /** Collaborative pods take members and publish a group consensus score. */
+  isCollaborative: z.boolean().optional(),
 });
 export type PodInput = z.infer<typeof podInputSchema>;
 export async function createPod(orgId: string, input: PodInput): Promise<PodCard> {
@@ -183,9 +313,18 @@ export async function createPod(orgId: string, input: PodInput): Promise<PodCard
         title: input.title.trim(),
         slug,
         description: input.description?.trim() || null,
+        isCollaborative: input.isCollaborative ?? false,
       })
       .returning();
     if (!pod) throw new DomainError("POD_FAILED", "Could not create that pod.", 500);
+
+    // The creator is always the pod owner, whether or not it is collaborative.
+    if (pod.isCollaborative) {
+      await tx
+        .insert(podMembers)
+        .values({ podId: pod.id, orgId, role: "owner" })
+        .onConflictDoNothing();
+    }
 
     if (input.itemIds && input.itemIds.length > 0) {
       const valid = await tx
@@ -215,9 +354,22 @@ export async function addItemToPod(orgId: string, podId: string, itemId: string)
   const pod = await withOrg(orgId, async (tx) => {
     const rows = await tx.select().from(pods).where(eq(pods.id, podId)).limit(1);
     if (!rows[0]) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
-    // Own pods accept edits always; someone else's pod only while it is public.
-    if (rows[0].orgId !== orgId && rows[0].visibility !== "public") {
-      throw new DomainError("POD_NOT_PUBLIC", "That pod is not open to contributions.", 403);
+    // Own pods accept edits always. On a collaborative pod only the owner and
+    // editors can add titles; other public pods stay open to contributions.
+    if (rows[0].orgId !== orgId) {
+      if (rows[0].isCollaborative) {
+        const roleRows = await tx
+          .select({ role: podMembers.role })
+          .from(podMembers)
+          .where(and(eq(podMembers.podId, podId), eq(podMembers.orgId, orgId)))
+          .limit(1);
+        const role = roleRows[0]?.role;
+        if (role !== "owner" && role !== "editor") {
+          throw new DomainError("POD_FORBIDDEN", "Only pod editors can add titles here.", 403);
+        }
+      } else if (rows[0].visibility !== "public") {
+        throw new DomainError("POD_NOT_PUBLIC", "That pod is not open to contributions.", 403);
+      }
     }
     const [countRow] = await tx
       .select({ next: sql<number>`coalesce(max(${podItems.position}), -1)::int + 1` })
@@ -230,7 +382,7 @@ export async function addItemToPod(orgId: string, podId: string, itemId: string)
     return rows[0];
   });
 
-  const detail = await podById(pod.id);
+  const detail = await podById(pod.id, orgId);
   if (!detail) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
   return detail;
 }
@@ -244,12 +396,16 @@ export interface AvailablePod {
   ownerUsername: string;
   /** True when the acting org owns the pod. */
   owned: boolean;
+  /** True when the acting org is a member (owner/editor/viewer). */
+  member: boolean;
+  /** Collaborative pods surface their group consensus on items. */
+  isCollaborative: boolean;
   contains: boolean;
 }
 
 /**
- * Own pods plus public pods from people this profile follows. Public pods are
- * open to contributions, which is what makes this list worth showing.
+ * Pods this profile can add a title to: their own pods, public pods from people
+ * they follow, and any public collaborative pod they have joined.
  */
 export async function availablePodsFor(orgId: string, itemId: string): Promise<AvailablePod[]> {
   const db = getDb();
@@ -280,15 +436,31 @@ export async function availablePodsFor(orgId: string, itemId: string): Promise<A
           .innerJoin(profiles, eq(profiles.orgId, pods.orgId))
           .where(and(inArray(pods.orgId, followed.map((row) => row.orgId)), eq(pods.visibility, "public")))
       : [];
-  const followedIds = followedPods.map((row) => row.pod.id);
-  const followedItems =
-    followedIds.length > 0
+  const memberPods = await db
+    .select({ pod: pods, owner: profiles })
+    .from(podMembers)
+    .innerJoin(pods, eq(pods.id, podMembers.podId))
+    .innerJoin(profiles, eq(profiles.orgId, pods.orgId))
+    .where(and(eq(podMembers.orgId, orgId), eq(pods.visibility, "public")));
+
+  // A pod can appear as both followed and joined; keep one row per pod id.
+  const seen = new Set(owned.podRows.map((pod) => pod.id));
+  const candidates: Array<{ pod: typeof pods.$inferSelect; owner: typeof profiles.$inferSelect | null }> = [];
+  for (const { pod, owner } of [...followedPods, ...memberPods]) {
+    if (seen.has(pod.id)) continue;
+    seen.add(pod.id);
+    candidates.push({ pod, owner });
+  }
+
+  const candidateIds = candidates.map(({ pod }) => pod.id);
+  const candidateItems =
+    candidateIds.length > 0
       ? await db
           .select({ podId: podItems.podId })
           .from(podItems)
-          .where(and(inArray(podItems.podId, followedIds), eq(podItems.itemId, itemId)))
+          .where(and(inArray(podItems.podId, candidateIds), eq(podItems.itemId, itemId)))
       : [];
-  const followedContains = new Set(followedItems.map((row) => row.podId));
+  const candidateContains = new Set(candidateItems.map((row) => row.podId));
 
   return [
     ...owned.podRows.map((pod) => ({
@@ -296,16 +468,141 @@ export async function availablePodsFor(orgId: string, itemId: string): Promise<A
       title: pod.title,
       ownerUsername: "you",
       owned: true,
+      member: true,
+      isCollaborative: pod.isCollaborative,
       contains: owned.contains.has(pod.id),
     })),
-    ...followedPods.map(({ pod, owner }) => ({
+    ...candidates.map(({ pod, owner }) => ({
       id: pod.id,
       title: pod.title,
-      ownerUsername: owner.username,
+      ownerUsername: owner?.username ?? "someone",
       owned: false,
-      contains: followedContains.has(pod.id),
+      member: memberPods.some((row) => row.pod.id === pod.id),
+      isCollaborative: pod.isCollaborative,
+      contains: candidateContains.has(pod.id),
     })),
   ];
+}
+
+/* ------------------------------------------------------------------ */
+/* collaborative pods: members and roles                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Add a member to a collaborative pod. The owner may add anyone; the acting
+ * org may always join by username themselves. `role` is clamped to editor or
+ * viewer — owner is assigned at creation and never granted here.
+ */
+export async function addPodMember(
+  actorOrgId: string,
+  podId: string,
+  username: string,
+  role: Exclude<PodRole, "owner"> = "viewer",
+): Promise<PodDetail> {
+  const db = getDb();
+  const [target] = await db
+    .select()
+    .from(profiles)
+    .where(sql`lower(${profiles.username}) = ${username.trim().toLowerCase()}`)
+    .limit(1);
+  if (!target) throw new DomainError("PROFILE_NOT_FOUND", "No profile matches that username.", 404);
+
+  await withOrg(actorOrgId, async (tx) => {
+    const rows = await tx.select().from(pods).where(eq(pods.id, podId)).limit(1);
+    const pod = rows[0];
+    if (!pod) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
+    if (!pod.isCollaborative) {
+      throw new DomainError("POD_NOT_COLLABORATIVE", "Turn on collaboration before adding members.", 400);
+    }
+    if (pod.orgId !== actorOrgId && target.orgId !== actorOrgId) {
+      throw new DomainError("POD_FORBIDDEN", "Only the pod owner can add other members.", 403);
+    }
+    const nextRole = target.orgId === pod.orgId ? "owner" : role === "editor" ? "editor" : "viewer";
+    await tx
+      .insert(podMembers)
+      .values({ podId, orgId: target.orgId, role: nextRole })
+      .onConflictDoUpdate({
+        target: [podMembers.podId, podMembers.orgId],
+        set: { role: nextRole },
+      });
+  });
+
+  const detail = await podById(podId, actorOrgId);
+  if (!detail) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
+  return detail;
+}
+
+/** Join a collaborative pod as yourself, at viewer level. */
+export async function joinPod(orgId: string, podId: string): Promise<PodDetail> {
+  return addPodMember(orgId, podId, await usernameFor(orgId), "viewer");
+}
+
+/**
+ * Change a member's role. Owners only; the owner's own row cannot be demoted.
+ */
+export async function setMemberRole(
+  actorOrgId: string,
+  podId: string,
+  memberOrgId: string,
+  role: Exclude<PodRole, "owner">,
+): Promise<PodDetail> {
+  await withOrg(actorOrgId, async (tx) => {
+    const rows = await tx.select().from(pods).where(eq(pods.id, podId)).limit(1);
+    const pod = rows[0];
+    if (!pod || pod.orgId !== actorOrgId) {
+      throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
+    }
+    if (memberOrgId === pod.orgId) {
+      throw new DomainError("POD_OWNER_IMMUTABLE", "The pod owner keeps the owner role.", 400);
+    }
+    const nextRole = role === "editor" ? "editor" : "viewer";
+    const updated = await tx
+      .update(podMembers)
+      .set({ role: nextRole })
+      .where(and(eq(podMembers.podId, podId), eq(podMembers.orgId, memberOrgId)))
+      .returning({ id: podMembers.id });
+    if (updated.length === 0) {
+      throw new DomainError("MEMBER_NOT_FOUND", "That person is not a member of this pod.", 404);
+    }
+  });
+  const detail = await podById(podId, actorOrgId);
+  if (!detail) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
+  return detail;
+}
+
+/** Remove a member. Owners can remove anyone but themselves; members can leave. */
+export async function removePodMember(
+  actorOrgId: string,
+  podId: string,
+  memberOrgId: string,
+): Promise<PodDetail> {
+  await withOrg(actorOrgId, async (tx) => {
+    const rows = await tx.select().from(pods).where(eq(pods.id, podId)).limit(1);
+    const pod = rows[0];
+    if (!pod) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
+    if (memberOrgId === pod.orgId) {
+      throw new DomainError("POD_OWNER_IMMUTABLE", "The owner cannot leave their own pod.", 400);
+    }
+    if (pod.orgId !== actorOrgId && memberOrgId !== actorOrgId) {
+      throw new DomainError("POD_FORBIDDEN", "Only the owner can remove other members.", 403);
+    }
+    await tx
+      .delete(podMembers)
+      .where(and(eq(podMembers.podId, podId), eq(podMembers.orgId, memberOrgId)));
+  });
+  const detail = await podById(podId, actorOrgId);
+  if (!detail) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
+  return detail;
+}
+
+async function usernameFor(orgId: string): Promise<string> {
+  const [profile] = await getDb()
+    .select({ username: profiles.username })
+    .from(profiles)
+    .where(eq(profiles.orgId, orgId))
+    .limit(1);
+  if (!profile) throw new DomainError("PROFILE_MISSING", "Create a profile before joining a pod.", 400);
+  return profile.username;
 }
 
 /* ------------------------------------------------------------------ */
@@ -314,6 +611,7 @@ export async function availablePodsFor(orgId: string, itemId: string): Promise<A
 export const podUpdateSchema = z.object({
   title: z.string().trim().min(1).max(80).optional(),
   description: z.string().trim().max(300).optional().nullable(),
+  isCollaborative: z.boolean().optional(),
 });
 export type PodUpdate = z.infer<typeof podUpdateSchema>;
 export async function updatePod(orgId: string, podId: string, input: PodUpdate): Promise<PodDetail> {
@@ -323,15 +621,27 @@ export async function updatePod(orgId: string, podId: string, input: PodUpdate):
     // Without the explicit owner check the UPDATE matches no rows (RLS) and the
     // endpoint would still report success.
     if (!rows[0] || rows[0].orgId !== orgId) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
+    const nextCollaborative = input.isCollaborative ?? rows[0].isCollaborative;
     await tx
       .update(pods)
       .set({
         title: input.title?.trim() || rows[0].title,
         description: input.description === undefined ? rows[0].description : input.description?.trim() || null,
+        isCollaborative: nextCollaborative,
       })
       .where(eq(pods.id, podId));
+    // Turning collaboration on makes the owner the first member; turning it
+    // off clears the roster so a re-enable starts clean.
+    if (nextCollaborative) {
+      await tx
+        .insert(podMembers)
+        .values({ podId, orgId, role: "owner" })
+        .onConflictDoUpdate({ target: [podMembers.podId, podMembers.orgId], set: { role: "owner" } });
+    } else if (input.isCollaborative === false) {
+      await tx.delete(podMembers).where(eq(podMembers.podId, podId));
+    }
   });
-  const detail = await podById(podId);
+  const detail = await podById(podId, orgId);
   if (!detail) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
   return detail;
 }

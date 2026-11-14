@@ -11,7 +11,7 @@ type Params = { params: Promise<{ id: string }> };
 export default async function PodEditPage({ params }: Params) {
   const session = await requireSession();
   const { id } = await params;
-  const pod = await podById(id);
+  const pod = await podById(id, session.org.id);
   if (!pod || pod.orgId !== session.org.id) notFound();
 
   return (

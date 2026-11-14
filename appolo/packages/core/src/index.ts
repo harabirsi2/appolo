@@ -17,3 +17,4 @@ export * from "./community";
 export * from "./coordination";
 export * from "./feed-rank";
 export * from "./coalesce";
+export * from "./metadata";

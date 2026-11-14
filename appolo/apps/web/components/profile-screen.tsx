@@ -111,7 +111,11 @@ export function ProfileScreen({
               <Button size="sm">Open app</Button>
             </Link>
           )}
-          <ShareButton title={`${profile.displayName} on Appolo`} path={profileHref} />
+          <ShareButton
+            title={`${profile.displayName} on Appolo`}
+            path={profileHref}
+            imagePath={`/api/og/podium/${profile.username}`}
+          />
           {footer}
         </div>
       </header>
@@ -291,6 +295,7 @@ export function ProfileScreen({
                 <ShareButton
                   title={`${profile.displayName}'s top five on Appolo`}
                   path={`${profileHref}?tab=topfive`}
+                  imagePath={`/api/og/podium/${profile.username}?format=story`}
                 />
               </div>
               <p className="mt-1 text-[11px] leading-relaxed text-muted-2">

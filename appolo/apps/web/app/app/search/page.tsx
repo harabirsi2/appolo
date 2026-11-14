@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { MEDIA_KIND_LABELS, MEDIA_KINDS, GENRES, type MediaKind } from "@appolo/core/ranking";
+import { SEARCH_CATEGORIES, categoryLabel, isSearchCategory, mediaKindForCategory } from "@appolo/core";
 import { requireSession } from "@/lib/session";
-import { listCatalog, rankedRatings } from "@/lib/services/rankings";
+import { rankedRatings } from "@/lib/services/rankings";
+import { searchCatalog } from "@/lib/services/catalog-search";
 import {
   ensureProfile,
   followingOrgIds,
@@ -27,9 +29,10 @@ export default async function SearchPage({
   const session = await requireSession();
   const { q, kind, people: peopleParam, genre } = await searchParams;
   const query = q?.trim() ?? "";
-  const activeKind = MEDIA_KINDS.includes(kind as MediaKind) ? (kind as MediaKind) : undefined;
+  const category = isSearchCategory(kind) ? kind : undefined;
+  const activeKind: MediaKind | undefined = category ? mediaKindForCategory(category) : undefined;
   const showPeople = peopleParam === "1";
-  const browsing = query.length > 0 || Boolean(activeKind) || Boolean(genre);
+  const browsing = query.length > 0 || Boolean(category) || Boolean(genre);
   const searching = browsing || showPeople;
 
   const profile =
@@ -42,7 +45,11 @@ export default async function SearchPage({
 
   const [ratings, items, people, suggestions, following, recentSearches] = await Promise.all([
     rankedRatings(session.org.id),
-    browsing ? listCatalog({ kind: activeKind, q: query || undefined, genre: genre || undefined, limit: 60 }) : Promise.resolve([]),
+    browsing
+      ? searchCatalog({ category, q: query || undefined, genre: genre || undefined, limit: 60 }).then(
+          (result) => result.items,
+        )
+      : Promise.resolve([]),
     query ? searchProfiles(query, 6) : showPeople ? suggestedProfiles(session.org.id, 12) : Promise.resolve([]),
     suggestedProfiles(session.org.id, 3),
     followingOrgIds(session.org.id),
@@ -67,31 +74,33 @@ export default async function SearchPage({
         />
       </form>
 
-      {activeKind ? (
-        <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Link
+          href="/app/search"
+          className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+            !category
+              ? "border-brand/40 bg-brand/15 text-brand"
+              : "border-white/10 bg-white/5 text-muted hover:text-ink"
+          }`}
+        >
+          All
+        </Link>
+        {SEARCH_CATEGORIES.map((c) => (
           <Link
-            href="/app/search"
-            className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-muted hover:text-ink"
+            key={c}
+            href={`/app/search?kind=${c}`}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ${
+              category === c
+                ? "border-brand/40 bg-brand/15 text-brand"
+                : "border-white/10 bg-white/5 text-muted hover:text-ink"
+            }`}
           >
-            All
+            <KindIcon kind={c} className="h-3.5 w-3.5" />
+            {categoryLabel(c)}
           </Link>
-          {MEDIA_KINDS.map((k) => (
-            <Link
-              key={k}
-              href={`/app/search?kind=${k}`}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors ${
-                activeKind === k
-                  ? "border-brand/40 bg-brand/15 text-brand"
-                  : "border-white/10 bg-white/5 text-muted hover:text-ink"
-              }`}
-            >
-              <KindIcon kind={k} className="h-3.5 w-3.5" />
-              {MEDIA_KIND_LABELS[k]}
-            </Link>
-          ))}
-        </div>
-      ) : null}
-      {activeKind && GENRES[activeKind]?.length ? (
+        ))}
+      </div>
+      {category && category !== "anime" && activeKind && GENRES[activeKind]?.length ? (
         <div className="mt-3 flex flex-wrap gap-2">
           {GENRES[activeKind].map((g) => (
             <Link
@@ -152,7 +161,7 @@ export default async function SearchPage({
 
           <section>
             <h2 className="mb-3 text-[17px] font-semibold text-ink">
-              {activeKind ? MEDIA_KIND_LABELS[activeKind] : "Titles"}
+              {category ? categoryLabel(category) : "Titles"}
             </h2>
             {!browsing ? null : items.length === 0 ? (
               <p className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 text-[13px] text-muted">

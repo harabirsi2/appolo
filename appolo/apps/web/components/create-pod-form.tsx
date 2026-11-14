@@ -14,6 +14,7 @@ export function CreatePodForm({
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [isCollaborative, setIsCollaborative] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,6 +31,7 @@ export function CreatePodForm({
           title: title.trim(),
           description: description.trim() || null,
           itemIds: initialItem ? [initialItem.id] : [],
+          isCollaborative,
         }),
       });
       if (!response.ok) {
@@ -85,6 +87,21 @@ export function CreatePodForm({
           </div>
         </div>
       ) : null}
+
+      <label className="flex items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+        <input
+          type="checkbox"
+          checked={isCollaborative}
+          onChange={(event) => setIsCollaborative(event.target.checked)}
+          className="mt-0.5 h-4 w-4"
+        />
+        <span className="min-w-0">
+          <span className="block text-[13px] font-medium text-ink">Make it collaborative</span>
+          <span className="block text-[11px] text-muted-2">
+            Invite members and combine everyone&apos;s scores into a group score.
+          </span>
+        </span>
+      </label>
 
       {error ? <p className="text-[12px] text-danger">{error}</p> : null}
 

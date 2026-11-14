@@ -4,6 +4,7 @@ import { type CatalogItem } from "./catalog-item";
 import { rankedRatings, watchlistFor, type RankedItem } from "./rankings";
 import { hasAnyGenre } from "./genre-filter";
 import { podsForProfile, type PodCard } from "./pods";
+import { sharedFavorites, tasteClashes, categoryRadar, genreRadar, distributionSimilarity, type SharedPick, type RadarAxis } from "./taste-dna";
 import { listInterests } from "./interests";
 import { z } from "zod";
 import { DomainError } from "./errors";
@@ -666,6 +667,15 @@ export interface TasteComparison {
   entries: CompareEntry[];
   /** Match broken down per media kind, only where the profiles overlap. */
   kinds: KindMatch[];
+  /** Titles both profiles scored at least 8.5. */
+  sharedFavorites: SharedPick[];
+  /** Titles where the two scores differ by at least 2.5. */
+  clashes: SharedPick[];
+  /** Category and genre taste distributions, 0–100 shares. */
+  categoryRadar: RadarAxis[];
+  genreRadar: RadarAxis[];
+  categorySimilarity: number | null;
+  genreSimilarity: number | null;
   /** Kendall tau-b over shared scores, or null with too little overlap. */
   kendallTauB: number | null;
   rankAgreement: number | null;
@@ -732,6 +742,9 @@ export async function compareTaste(orgId: string, otherOrgId: string): Promise<T
     };
   }).filter((entry) => entry.shared > 0);
 
+  const mineProfile = genreProfile(mine);
+  const theirsProfile = genreProfile(theirs);
+
   return {
     other,
     match: match.match ?? 0,
@@ -739,6 +752,18 @@ export async function compareTaste(orgId: string, otherOrgId: string): Promise<T
     agreements: match.agreements,
     entries,
     kinds,
+    sharedFavorites: sharedFavorites(entries),
+    clashes: tasteClashes(entries),
+    categoryRadar: categoryRadar(
+      new Map(MEDIA_KINDS.map((kind) => [kind, mine.filter((item) => item.kind === kind).length])),
+      new Map(MEDIA_KINDS.map((kind) => [kind, theirs.filter((item) => item.kind === kind).length])),
+    ),
+    genreRadar: genreRadar(mineProfile, theirsProfile),
+    categorySimilarity: distributionSimilarity(
+      new Map(MEDIA_KINDS.map((kind) => [kind, mine.filter((item) => item.kind === kind).length])),
+      new Map(MEDIA_KINDS.map((kind) => [kind, theirs.filter((item) => item.kind === kind).length])),
+    ),
+    genreSimilarity: distributionSimilarity(mineProfile, theirsProfile),
     kendallTauB: match.kendallTauB,
     rankAgreement: match.rankAgreement,
     ratingSimilarity: match.ratingSimilarity,

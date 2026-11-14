@@ -133,6 +133,53 @@ export function scoreForElo(elo: number): number {
   return Math.round(clamp(raw, 0, 10) * 10) / 10;
 }
 
+/** Inverse of `scoreForElo`: an exact 0–10 score to the Elo that renders it. */
+export function eloForScore(score: number): number {
+  return Math.round(SCORE_FLOOR_ELO + clamp(score, 0, 10) * SCORE_SPAN);
+}
+
+/** Weight of the category prior in the Bayesian community score. */
+export const BAYESIAN_PRIOR_WEIGHT = 5;
+
+export interface BayesianScoreInput {
+  /** Number of ratings backing the item mean. */
+  count: number;
+  /** Mean personal score for the item, 0–10. */
+  mean: number;
+  /** Mean score across the item's category, 0–10. */
+  categoryMean: number;
+  /** Prior weight; the product spec fixes this at 5. */
+  priorWeight?: number;
+}
+
+/**
+ * Bayesian community score: (v·R + m·C) / (v + m).
+ *
+ * With no ratings the category mean is the honest answer. The result is
+ * rounded to one decimal, matching every score shown in the UI.
+ */
+export function bayesianScore(input: BayesianScoreInput): number {
+  const count = Math.max(0, Math.floor(input.count));
+  const mean = clamp(input.mean, 0, 10);
+  const category = clamp(input.categoryMean, 0, 10);
+  const prior = Math.max(0, input.priorWeight ?? BAYESIAN_PRIOR_WEIGHT);
+  if (count === 0) return Math.round(category * 10) / 10;
+  if (prior === 0) return Math.round(mean * 10) / 10;
+  const value = (count * mean + prior * category) / (count + prior);
+  return Math.round(clamp(value, 0, 10) * 10) / 10;
+}
+
+/**
+ * The decimal scale has no dead zones: every Elo point moves the displayed
+ * score, and the 0.1 rounding boundaries are 6 Elo apart. This helper returns
+ * the boundary for a target tenth, used by manual entry and tests.
+ */
+export function scoreStepBounds(tenth: number): { lowerElo: number; upperElo: number } {
+  const target = Math.round(clamp(tenth, 0, 10) * 10) / 10;
+  const center = SCORE_FLOOR_ELO + target * SCORE_SPAN;
+  return { lowerElo: Math.round(center - SCORE_SPAN / 20), upperElo: Math.round(center + SCORE_SPAN / 20) };
+}
+
 /**
  * K-factor by how many decided matchups (wins + losses) an item has played.
  * New items move faster so their score settles in fewer votes.

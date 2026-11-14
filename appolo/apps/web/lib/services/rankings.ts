@@ -24,6 +24,10 @@ export interface RankedItem extends CatalogItem {
   videoUrl: string | null;
   favoriteCharacter: string | null;
   favoriteTracks: string[];
+  /** Optional per-aspect scores, e.g. { story: 9, visuals: 8 }. */
+  subScores: Record<string, number>;
+  /** Short micro-picks beyond character/tracks, e.g. "Best scene: ...". */
+  highlights: string[];
   position: number;
 }
 export interface MatchupView {
@@ -35,6 +39,54 @@ export interface TasteStats {
   matchups: number;
   averageScore: number;
   topKind: MediaKind | null;
+}
+
+/** Coerce the JSONB `sub_scores` column into safe 0–10 numbers. */
+export function normalizeSubScores(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const n = typeof raw === "number" ? raw : Number(raw);
+    if (!Number.isFinite(n) || n < 0 || n > 10) continue;
+    out[key.trim().slice(0, 32)] = Math.round(n * 10) / 10;
+  }
+  return out;
+}
+
+/** Coerce the JSONB `highlights` column (array or `{ picks }`) into strings. */
+export function normalizeHighlights(value: unknown): string[] {
+  const raw = Array.isArray(value)
+    ? value
+    : value && typeof value === "object" && Array.isArray((value as { picks?: unknown }).picks)
+      ? ((value as { picks: unknown[] }).picks)
+      : [];
+  return raw
+    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    .map((entry) => entry.trim().slice(0, 80))
+    .slice(0, 5);
+}
+
+/** The per-profile side of a catalog item: score, record, review, micro-picks. */
+function rankedExtras(rating: typeof itemRatings.$inferSelect): Omit<RankedItem, keyof CatalogItem> {
+  return {
+    ratingId: rating.id,
+    elo: rating.elo,
+    matches: rating.matches,
+    wins: rating.wins,
+    losses: rating.losses,
+    skips: rating.skips,
+    score: toScore(rating.elo),
+    reviewText: rating.reviewText ?? null,
+    reviewTags: rating.reviewTags ?? [],
+    spoiler: rating.spoiler,
+    photoUrl: rating.photoUrl ?? null,
+    videoUrl: rating.videoUrl ?? null,
+    favoriteCharacter: rating.favoriteCharacter ?? null,
+    favoriteTracks: rating.favoriteTracks ?? [],
+    subScores: normalizeSubScores(rating.subScores),
+    highlights: normalizeHighlights(rating.highlights),
+    position: 0,
+  };
 }
 export async function listCatalog(options: {
   kind?: string;
@@ -90,21 +142,7 @@ export async function rankedRatings(orgId: string, options: { kind?: string; lim
 
     const items = rows.map(({ item, rating }) => ({
       ...mapCatalogItem(item),
-      ratingId: rating.id,
-      elo: rating.elo,
-      matches: rating.matches,
-      wins: rating.wins,
-      losses: rating.losses,
-      skips: rating.skips,
-      score: toScore(rating.elo),
-      reviewText: rating.reviewText ?? null,
-      reviewTags: rating.reviewTags ?? [],
-      spoiler: rating.spoiler,
-      photoUrl: rating.photoUrl ?? null,
-      videoUrl: rating.videoUrl ?? null,
-      favoriteCharacter: rating.favoriteCharacter ?? null,
-      favoriteTracks: rating.favoriteTracks ?? [],
-      position: 0,
+      ...rankedExtras(rating),
     }));
 
     // A saved manual order wins over Elo for that kind; unplaced titles keep
@@ -138,21 +176,7 @@ export async function getRating(orgId: string, itemId: string): Promise<RankedIt
     if (!row) return null;
     return {
       ...mapCatalogItem(row.item),
-      ratingId: row.rating.id,
-      elo: row.rating.elo,
-      matches: row.rating.matches,
-      wins: row.rating.wins,
-      losses: row.rating.losses,
-      skips: row.rating.skips,
-      reviewText: row.rating.reviewText ?? null,
-      reviewTags: row.rating.reviewTags ?? [],
-      spoiler: row.rating.spoiler,
-      photoUrl: row.rating.photoUrl ?? null,
-      videoUrl: row.rating.videoUrl ?? null,
-      favoriteCharacter: row.rating.favoriteCharacter ?? null,
-      favoriteTracks: row.rating.favoriteTracks ?? [],
-      score: toScore(row.rating.elo),
-      position: 0,
+      ...rankedExtras(row.rating),
     };
   });
 }
@@ -330,7 +354,7 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
     const row = opponentItem[0]!;
 
     return {
-      item: { ...item, ratingId: "", elo: rating.elo, matches: rating.matches, wins: rating.wins, losses: rating.losses, skips: rating.skips, score: toScore(rating.elo), position: 0, reviewText: rating.reviewText ?? null, reviewTags: rating.reviewTags ?? [], spoiler: false, photoUrl: null, videoUrl: null, favoriteCharacter: null, favoriteTracks: [] },
+      item: { ...item, ratingId: "", elo: rating.elo, matches: rating.matches, wins: rating.wins, losses: rating.losses, skips: rating.skips, score: toScore(rating.elo), position: 0, reviewText: rating.reviewText ?? null, reviewTags: rating.reviewTags ?? [], spoiler: false, photoUrl: null, videoUrl: null, favoriteCharacter: null, favoriteTracks: [], subScores: {}, highlights: [] },
       opponent: {
         ...mapCatalogItem(row),
         ratingId: "",
@@ -348,6 +372,8 @@ export async function nextMatchup(orgId: string, itemId: string): Promise<Matchu
         videoUrl: null,
         favoriteCharacter: null,
         favoriteTracks: [],
+        subScores: {},
+        highlights: [],
       },
     };
   });
@@ -453,8 +479,8 @@ export async function submitVote(
     return {
       result,
       itemDelta: counted ? after.a - before.item : 0,
-      item: { ...item, ratingId: updatedItem.id, elo: updatedItem.elo, matches: updatedItem.matches, wins: updatedItem.wins, losses: updatedItem.losses, skips: updatedItem.skips, score: toScore(updatedItem.elo), position: 0, reviewText: updatedItem.reviewText ?? null, reviewTags: updatedItem.reviewTags ?? [], spoiler: updatedItem.spoiler, photoUrl: updatedItem.photoUrl ?? null, videoUrl: updatedItem.videoUrl ?? null, favoriteCharacter: updatedItem.favoriteCharacter ?? null, favoriteTracks: updatedItem.favoriteTracks ?? [] },
-      opponent: { ...opponent, ratingId: updatedOpponent.id, elo: updatedOpponent.elo, matches: updatedOpponent.matches, wins: updatedOpponent.wins, losses: updatedOpponent.losses, skips: updatedOpponent.skips, score: toScore(updatedOpponent.elo), position: 0, reviewText: updatedOpponent.reviewText ?? null, reviewTags: updatedOpponent.reviewTags ?? [], spoiler: updatedOpponent.spoiler, photoUrl: updatedOpponent.photoUrl ?? null, videoUrl: updatedOpponent.videoUrl ?? null, favoriteCharacter: updatedOpponent.favoriteCharacter ?? null, favoriteTracks: updatedOpponent.favoriteTracks ?? [] },
+      item: { ...item, ...rankedExtras(updatedItem) },
+      opponent: { ...opponent, ...rankedExtras(updatedOpponent) },
     };
   });
 
@@ -619,15 +645,16 @@ export async function catalogByIds(ids: string[]): Promise<CatalogItem[]> {
 export async function setManualRating(orgId: string, itemId: string, score: number): Promise<RankedItem> {
   const item = await getCatalogItem(itemId);
   if (!item) throw new DomainError("ITEM_NOT_FOUND", "That item is not in the catalog.", 404);
-  const elo = Math.round(1200 + clamp(score, 0, 10) * 60);
+  const clamped = clamp(score, 0, 10);
+  const elo = Math.round(1200 + clamped * 60);
 
   return withOrg(orgId, async (tx) => {
     const [row] = await tx
       .insert(itemRatings)
-      .values({ orgId, itemId, elo })
+      .values({ orgId, itemId, elo, manualScore: clamped.toFixed(1) })
       .onConflictDoUpdate({
         target: [itemRatings.orgId, itemRatings.itemId],
-        set: { elo, updatedAt: new Date() },
+        set: { elo, manualScore: clamped.toFixed(1), updatedAt: new Date() },
       })
       .returning();
     await tx.insert(ratingEvents).values({
@@ -639,21 +666,7 @@ export async function setManualRating(orgId: string, itemId: string, score: numb
     const saved = row!;
     return {
       ...item,
-      ratingId: saved.id,
-      elo: saved.elo,
-      matches: saved.matches,
-      wins: saved.wins,
-      losses: saved.losses,
-      skips: saved.skips,
-      score: toScore(saved.elo),
-      reviewText: saved.reviewText ?? null,
-      reviewTags: saved.reviewTags ?? [],
-      spoiler: saved.spoiler,
-      photoUrl: saved.photoUrl ?? null,
-      videoUrl: saved.videoUrl ?? null,
-      favoriteCharacter: saved.favoriteCharacter ?? null,
-      favoriteTracks: saved.favoriteTracks ?? [],
-      position: 0,
+      ...rankedExtras(saved),
     };
   });
 }

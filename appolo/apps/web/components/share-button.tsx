@@ -3,21 +3,54 @@
 import { useState } from "react";
 import { Icon } from "@/components/podiums";
 
-export function ShareButton({ title, path }: { title: string; path: string }) {
+/**
+ * Share a page.
+ *
+ * On mobile it uses the native share sheet; when an `imagePath` card exists and
+ * the browser can share files, the card is attached. Everywhere else it copies
+ * the link and offers the card as a PNG download.
+ */
+export function ShareButton({
+  title,
+  path,
+  imagePath,
+}: {
+  title: string;
+  path: string;
+  /** Optional PNG card, e.g. `/api/og/podium/ava`. */
+  imagePath?: string;
+}) {
   const [copied, setCopied] = useState(false);
 
   async function share() {
     const url = `${window.location.origin}${path}`;
-    try {
-      if (navigator.share) {
+    if (navigator.share) {
+      try {
+        if (imagePath && navigator.canShare) {
+          try {
+            const response = await fetch(imagePath);
+            const blob = await response.blob();
+            const file = new File([blob], "appolo.png", { type: blob.type || "image/png" });
+            if (navigator.canShare({ files: [file] })) {
+              await navigator.share({ title, text: title, files: [file] });
+              return;
+            }
+          } catch {
+            // Fall through to a link-only share.
+          }
+        }
         await navigator.share({ title, url });
         return;
+      } catch {
+        // User cancelled or sharing is unavailable; fall back to copying.
       }
+    }
+    try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
+      window.setTimeout(() => setCopied(false), 4000);
     } catch {
-      // user cancelled
+      // Clipboard blocked; nothing else to do silently.
     }
   }
 
@@ -32,8 +65,13 @@ export function ShareButton({ title, path }: { title: string; path: string }) {
         Share
       </button>
       {copied ? (
-        <span className="absolute -top-8 left-0 whitespace-nowrap rounded-md bg-white px-2 py-1 text-[10px] font-medium text-black">
+        <span className="absolute left-0 top-10 z-20 flex items-center gap-2 whitespace-nowrap rounded-md bg-white px-2 py-1 text-[10px] font-medium text-black shadow-lg">
           Link copied
+          {imagePath ? (
+            <a href={imagePath} download="appolo.png" className="rounded bg-black/10 px-1.5 py-0.5 text-[10px] font-semibold text-black">
+              Save image
+            </a>
+          ) : null}
         </span>
       ) : null}
     </span>

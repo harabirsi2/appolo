@@ -1073,12 +1073,25 @@ export const catalogItems = pgTable(
     genres: text("genres").array().notNull().default(emptyTextArray()),
     trailerUrl: text("trailer_url"),
     externalRef: text("external_ref"),
+    /** Provider-native id, e.g. tmdb:603. Paired with `source` for upserts. */
+    externalId: text("external_id"),
+    /** Metadata provider: tmdb, itunes, openlibrary, rawg, seed. */
+    source: text("source"),
+    /** Canonical artwork fields. `imageUrl` remains for older rows/clients. */
+    coverUrl: text("cover_url"),
+    backdropUrl: text("backdrop_url"),
+    /** Tracklist, cast, studio, publisher, runtime, etc. */
+    metadata: jsonb("metadata").notNull().default(emptyJson()),
+    /** Shrunk community score, maintained by the item_ratings trigger. */
+    bayesianScore: numeric("bayesian_score", { precision: 3, scale: 1 }),
+    totalReviews: integer("total_reviews").notNull().default(0),
     tags: text("tags").array().notNull().default(emptyTextArray()),
     createdAt: createdAt(),
   },
   (t) => ({
     kindTitleUq: uniqueIndex("catalog_items_kind_title_uq").on(t.kind, t.title, t.subtitle),
     externalRefUq: uniqueIndex("catalog_items_external_ref_uq").on(t.externalRef),
+    sourceExternalUq: uniqueIndex("catalog_items_source_external_uq").on(t.source, t.externalId),
     kindIdx: index("catalog_items_kind_idx").on(t.kind, t.title),
     titleTrgmIdx: index("catalog_items_title_trgm_idx").using("gin", sql`${t.title} gin_trgm_ops`),
     subtitleTrgmIdx: index("catalog_items_subtitle_trgm_idx").using("gin", sql`${t.subtitle} gin_trgm_ops`),
@@ -1106,6 +1119,12 @@ export const itemRatings = pgTable(
     videoUrl: text("video_url"),
     favoriteCharacter: text("favorite_character"),
     favoriteTracks: text("favorite_tracks").array().notNull().default(emptyTextArray()),
+    /** Exact score typed by the user, kept alongside the Elo projection. */
+    manualScore: numeric("manual_score", { precision: 3, scale: 1 }),
+    /** Optional per-aspect scores, e.g. { story: 9, visuals: 8 }. */
+    subScores: jsonb("sub_scores").notNull().default(emptyJson()),
+    /** Micro-picks beyond favorite character/tracks, e.g. { scene, aspect }. */
+    highlights: jsonb("highlights").notNull().default(emptyJson()),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1276,12 +1295,31 @@ export const pods = pgTable(
     slug: text("slug").notNull(),
     description: text("description"),
     visibility: text("visibility").notNull().default("public"),
+    /** Collaborative pods accept members and show a group consensus score. */
+    isCollaborative: boolean("is_collaborative").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => ({
     orgSlugUq: uniqueIndex("pods_org_slug_uq").on(t.orgId, t.slug),
     orgIdx: index("pods_org_idx").on(t.orgId),
+  }),
+);
+
+/** Membership and role for collaborative pods. Owner rows are created with the pod. */
+export const podMembers = pgTable(
+  "pod_members",
+  {
+    id: pk(),
+    podId: uuid("pod_id").notNull().references(() => pods.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("viewer"),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    podOrgUq: uniqueIndex("pod_members_pod_org_uq").on(t.podId, t.orgId),
+    podIdx: index("pod_members_pod_idx").on(t.podId, t.role),
+    orgIdx: index("pod_members_org_idx").on(t.orgId),
   }),
 );
 

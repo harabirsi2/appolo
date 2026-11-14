@@ -7,6 +7,7 @@ import { compareTaste, getProfileByOrgId, getProfileByUsername } from "@/lib/ser
 import { MediaArt } from "@/components/media-art";
 import { Avatar } from "@/components/podiums";
 import { BackButton } from "@/components/back-button";
+import { ShareButton } from "@/components/share-button";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Compare" };
@@ -30,7 +31,14 @@ export default async function ComparePage({ params }: Params) {
     <div className="px-5 pt-4 pb-24">
       <BackButton fallback={`/${other.username}`} />
 
-      <h1 className="mt-4 text-[30px] font-extrabold tracking-tight text-ink">Taste check</h1>
+      <div className="mt-4 flex items-center justify-between">
+        <h1 className="text-[30px] font-extrabold tracking-tight text-ink">Taste check</h1>
+        <ShareButton
+          title={`Me vs @${other.username} on Appolo`}
+          path={`/app/compare/${other.username}`}
+          imagePath={`/api/og/clash/${me.username}/${other.username}`}
+        />
+      </div>
 
       <div className="mt-4 flex items-center justify-between rounded-2xl border border-brand/25 bg-brand/[0.07] p-4">
         <div className="flex items-center gap-2">
@@ -96,6 +104,65 @@ export default async function ComparePage({ params }: Params) {
               </div>
             ))}
           </div>
+        </section>
+      ) : null}
+
+      {comparison.genreRadar.length > 0 ? (
+        <section className="mt-4">
+          <div className="mb-2 flex items-end justify-between">
+            <h2 className="text-[13px] font-semibold text-ink">Taste radar</h2>
+            <span className="text-[11px] text-muted-2">
+              {comparison.genreSimilarity === null ? "—" : `${comparison.genreSimilarity}% genre overlap`}
+            </span>
+          </div>
+          <div className="space-y-2 rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
+            {comparison.genreRadar.map((axis) => (
+              <div key={axis.axis} className="space-y-0.5">
+                <div className="flex items-center justify-between text-[10px] text-muted-2">
+                  <span className="truncate">{axis.axis}</span>
+                  <span className="tabular-nums">
+                    {axis.mine.toFixed(0)}% / {axis.theirs.toFixed(0)}%
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+                    <span className="block h-full rounded-full bg-brand" style={{ width: `${Math.min(100, axis.mine)}%` }} />
+                  </span>
+                  <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+                    <span className="block h-full rounded-full bg-fuchsia-400" style={{ width: `${Math.min(100, axis.theirs)}%` }} />
+                  </span>
+                </div>
+              </div>
+            ))}
+            <p className="pt-0.5 text-[10px] text-muted-2">
+              <span className="text-brand">You</span> · <span className="text-fuchsia-300">Them</span>
+            </p>
+          </div>
+        </section>
+      ) : null}
+
+      {comparison.sharedFavorites.length > 0 ? (
+        <section className="mt-6">
+          <div className="mb-3 flex items-end justify-between">
+            <h2 className="text-[17px] font-semibold text-ink">Shared favorites</h2>
+            <span className="text-[11px] text-muted-2">both 8.5+</span>
+          </div>
+          <ul className="space-y-2">
+            {comparison.sharedFavorites.map((pick) => (
+              <li key={pick.itemId}>
+                <Link
+                  href={`/app/item/${pick.itemId}`}
+                  className="flex items-center gap-3 rounded-2xl border border-brand/20 bg-brand/[0.05] p-2.5 transition-colors hover:border-brand/40"
+                >
+                  <KindIcon kind={pick.kind} className="h-4 w-4 shrink-0 text-brand" />
+                  <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{pick.title}</p>
+                  <span className="text-[12px] tabular-nums text-muted-2">
+                    {pick.mine.toFixed(1)} / {pick.theirs.toFixed(1)}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
         </section>
       ) : null}
 

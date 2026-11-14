@@ -4,7 +4,7 @@ import { z } from "zod";
 import { DomainError } from "./errors";
 import { getProfileByOrgId } from "./social-graph";
 import { listInterests } from "./interests";
-import { rankedRatings, type RankedItem } from "./rankings";
+import { rankedRatings, normalizeHighlights, normalizeSubScores, type RankedItem } from "./rankings";
 import { httpsUrl, mediaUrl } from "./social-validation";
 import { getDb, withOrg, schema } from "@/lib/db";
 const { profiles, follows, feedDismissals, pods, podItems, catalogItems, itemRatings, ratingReactions, ratingComments, ratingEvents, socialNotifications: notifications } = schema;
@@ -34,6 +34,10 @@ export interface ReviewView {
   videoUrl: string | null;
   favoriteCharacter: string | null;
   favoriteTracks: string[];
+  /** Optional per-aspect scores on the same 0–10 scale. */
+  subScores?: Record<string, number>;
+  /** Short micro-picks, e.g. "Best scene: …". */
+  highlights?: string[];
   reactions: ReactionSummary[];
   commentCount: number;
   updatedAt: Date;
@@ -58,6 +62,10 @@ export const reviewInputSchema = z.object({
   videoUrl: httpsUrl.optional().nullable(),
   favoriteCharacter: z.string().trim().max(120).optional().nullable(),
   favoriteTracks: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
+  /** Optional per-aspect scores on the same 0–10 scale as the overall score. */
+  subScores: z.record(z.string().trim().min(1).max(32), z.coerce.number().min(0).max(10)).optional(),
+  /** Short micro-picks, e.g. "Best scene: the hallway fight". */
+  highlights: z.array(z.string().trim().min(1).max(80)).max(5).optional(),
 });
 export type ReviewInput = z.infer<typeof reviewInputSchema>;
 
@@ -89,6 +97,8 @@ function toReview(row: {
     videoUrl: row.rating.videoUrl ?? null,
     favoriteCharacter: row.rating.favoriteCharacter ?? null,
     favoriteTracks: row.rating.favoriteTracks ?? [],
+    subScores: normalizeSubScores(row.rating.subScores),
+    highlights: normalizeHighlights(row.rating.highlights),
     reactions: [],
     commentCount: 0,
     updatedAt: row.rating.updatedAt,
@@ -265,6 +275,8 @@ export async function saveReview(
       videoUrl: input.videoUrl?.trim() || null,
       favoriteCharacter: input.favoriteCharacter?.trim() || null,
       favoriteTracks: input.favoriteTracks ?? [],
+      subScores: input.subScores ?? {},
+      highlights: input.highlights ?? [],
     };
     await tx
       .insert(itemRatings)

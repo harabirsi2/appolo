@@ -23,7 +23,18 @@ interface RatingSide {
   photoUrl: string | null;
   favoriteCharacter: string | null;
   favoriteTracks: string[];
+  subScores: Record<string, number>;
+  highlights: string[];
 }
+
+const SUB_SCORE_LABELS: Record<MediaKind, string[]> = {
+  movie: ["Story", "Direction", "Visuals"],
+  tv: ["Story", "Acting", "Visuals"],
+  music: ["Lyrics", "Production", "Replay"],
+  podcast: ["Host", "Guests", "Production"],
+  book: ["Prose", "Plot", "Characters"],
+  game: ["Gameplay", "Story", "Visuals"],
+};
 
 interface OpponentSide {
   id: string;
@@ -67,6 +78,10 @@ export function FinishRating({
   const [error, setError] = useState<string | null>(null);
   const [manualScore, setManualScore] = useState(initialItem.score);
   const [manualBusy, setManualBusy] = useState(false);
+  const [subScores, setSubScores] = useState<Record<string, number>>(initialItem.subScores ?? {});
+  const [highlights, setHighlights] = useState<string[]>(initialItem.highlights ?? []);
+  const [highlightInput, setHighlightInput] = useState("");
+  const subScoreLabels = SUB_SCORE_LABELS[item.kind] ?? ["Story", "Style", "Impact"];
 
   function toggleTag(tag: string) {
     setTags((current) =>
@@ -78,6 +93,17 @@ export function FinishRating({
     setPodIds((current) =>
       current.includes(podId) ? current.filter((value) => value !== podId) : [...current, podId],
     );
+  }
+
+  function addHighlight() {
+    const value = highlightInput.trim();
+    if (!value) return;
+    if (highlights.includes(value)) {
+      setHighlightInput("");
+      return;
+    }
+    setHighlights((prev) => [...prev, value].slice(0, 5));
+    setHighlightInput("");
   }
 
   type VoteResult = "win" | "loss" | "tie" | "undecided" | "skip";
@@ -188,6 +214,8 @@ export function FinishRating({
           photoUrl: photoUrl || null,
           favoriteCharacter: favoriteCharacter || null,
           favoriteTracks,
+          subScores,
+          highlights,
         }),
       });
       if (!response.ok) {
@@ -371,6 +399,104 @@ export function FinishRating({
                   className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-muted hover:text-ink"
                 >
                   {track} ×
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[12px] font-semibold text-ink">Sub-scores</p>
+            {Object.keys(subScores).length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setSubScores({})}
+                className="text-[11px] text-muted-2 hover:text-ink"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+          <div className="mt-2 space-y-2">
+            {subScoreLabels.map((label) => {
+              const key = label.toLowerCase();
+              const value = subScores[key];
+              return (
+                <div key={key} className="flex items-center gap-2">
+                  <span className="w-16 shrink-0 text-[11px] text-muted-2">{label}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    step={0.1}
+                    value={value ?? 0}
+                    onChange={(event) =>
+                      setSubScores((prev) => ({ ...prev, [key]: Number(event.target.value) }))
+                    }
+                    className="flex-1"
+                  />
+                  <span className="w-8 text-right text-[11px] text-ink">
+                    {value === undefined ? "—" : value.toFixed(1)}
+                  </span>
+                  {value !== undefined ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSubScores((prev) => {
+                          const next = { ...prev };
+                          delete next[key];
+                          return next;
+                        })
+                      }
+                      aria-label={`Remove ${label} sub-score`}
+                      className="w-4 text-[12px] text-muted-2 hover:text-ink"
+                    >
+                      ×
+                    </button>
+                  ) : (
+                    <span className="w-4" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <p className="text-[12px] font-semibold text-ink">Micro-picks</p>
+          <div className="mt-2 flex gap-2">
+            <input
+              value={highlightInput}
+              onChange={(event) => setHighlightInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  addHighlight();
+                }
+              }}
+              maxLength={80}
+              placeholder="Best scene, standout moment..."
+              className="h-10 flex-1 rounded-xl border border-white/[0.06] bg-[#1a1a1d] px-3 text-[13px] text-ink focus:border-white/20 focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={addHighlight}
+              className="rounded-full border border-white/10 px-3 text-[12px] text-muted hover:text-ink"
+            >
+              Add
+            </button>
+          </div>
+          {highlights.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {highlights.map((highlight) => (
+                <button
+                  key={highlight}
+                  type="button"
+                  onClick={() => setHighlights((prev) => prev.filter((entry) => entry !== highlight))}
+                  className="rounded-full border border-brand/30 bg-brand/10 px-2.5 py-1 text-[11px] text-brand hover:bg-brand/20"
+                >
+                  {highlight} ×
                 </button>
               ))}
             </div>

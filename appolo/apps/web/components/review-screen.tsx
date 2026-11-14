@@ -5,7 +5,7 @@ import type { ReviewView } from "@/lib/services/social";
 import { MediaArt } from "./media-art";
 import { Avatar, Icon, ScoreText } from "./podiums";
 import { ReviewEngagement } from "./review-engagement";
-import { SpoilerText } from "./spoiler-text";
+import { ReviewBody } from "./review-body";
 import { ShareButton } from "./share-button";
 
 /** The full, shareable view of a single review. */
@@ -38,7 +38,11 @@ export function ReviewScreen({
             </Link>
             <p className="truncate text-[11px] text-muted-2">{`@${review.username}`}</p>
           </div>
-          <ShareButton title={`${review.displayName} on ${review.itemTitle}`} path={`/review/${review.id}`} />
+          <ShareButton
+            title={`${review.displayName} on ${review.itemTitle}`}
+            path={`/review/${review.id}`}
+            imagePath={`/api/og/review/${review.id}`}
+          />
         </div>
 
         <div className="mt-4 flex items-center gap-3 rounded-xl border border-white/[0.06] bg-black/25 p-3">
@@ -62,11 +66,7 @@ export function ReviewScreen({
         </div>
 
         {review.text ? (
-          <SpoilerText
-            text={review.text}
-            spoiler={review.spoiler}
-            className="mt-4 whitespace-pre-line text-[14px] leading-relaxed text-muted"
-          />
+          <ReviewBody text={review.text} spoiler={review.spoiler} className="mt-4 text-[14px]" />
         ) : (
           <p className="mt-4 text-[13px] text-muted-2">Rated without a written note.</p>
         )}
@@ -93,6 +93,30 @@ export function ReviewScreen({
           <p className="mt-1 text-[12px] text-muted-2">
             Favourite tracks: <span className="text-ink">{review.favoriteTracks.join(", ")}</span>
           </p>
+        ) : null}
+
+        {review.highlights && review.highlights.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {review.highlights.map((highlight) => (
+              <span key={highlight} className="rounded-full border border-brand/30 bg-brand/10 px-2.5 py-1 text-[11px] text-brand">
+                {highlight}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {review.subScores && Object.keys(review.subScores).length > 0 ? (
+          <div className="mt-3 space-y-1.5">
+            {Object.entries(review.subScores).map(([name, value]) => (
+              <div key={name} className="flex items-center gap-2">
+                <span className="w-20 shrink-0 truncate text-[11px] capitalize text-muted-2">{name}</span>
+                <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+                  <span className="block h-full rounded-full bg-brand" style={{ width: `${Math.min(100, value * 10)}%` }} />
+                </span>
+                <span className="w-8 shrink-0 text-right text-[11px] text-ink">{value.toFixed(1)}</span>
+              </div>
+            ))}
+          </div>
         ) : null}
 
         {review.tags.length > 0 ? (

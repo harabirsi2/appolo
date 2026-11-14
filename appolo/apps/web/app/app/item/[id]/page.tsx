@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { MEDIA_KIND_LABELS, MEDIA_KIND_SINGULAR, scoreBand } from "@appolo/core";
+import { after } from "next/server";
+import { MEDIA_KIND_LABELS, MEDIA_KIND_SINGULAR, scoreBand, youtubeEmbedUrl } from "@appolo/core";
 import { requireSession } from "@/lib/session";
 import { getCatalogItem, getRating, creditsForItem, isWatchlisted, similarItems } from "@/lib/services/rankings";
 import { itemCommunity } from "@/lib/services/social";
+import { hydrateCatalogItem } from "@/lib/services/catalog-search";
 import { MediaArt, mediaHue } from "@/components/media-art";
 import { Icon, RatingCurve, ReviewCard, ScoreText } from "@/components/podiums";
 import { ItemActions } from "@/components/item-actions";
@@ -11,6 +13,8 @@ import { WatchlistButton } from "@/components/watchlist-button";
 import { AddToPod } from "@/components/add-to-pod";
 import { KindIcon, isAnime } from "@/components/kind-icon";
 import { BackButton } from "@/components/back-button";
+import { ReviewBody } from "@/components/review-body";
+import { TrailerModal } from "@/components/trailer-modal";
 
 export const dynamic = "force-dynamic";
 
@@ -41,9 +45,24 @@ export default async function ItemPage({ params }: Params) {
   const displayScore = community.average ?? rating?.score ?? null;
   const band = displayScore === null ? null : scoreBand(displayScore);
   const anime = isAnime(item.kind, item.genres);
+  const trailerEmbed = youtubeEmbedUrl(item.trailerUrl);
+  const subScores = rating ? Object.entries(rating.subScores) : [];
+  const highlights = rating?.highlights ?? [];
+
+  // Provider-sourced rows arrive with search-level metadata only; fill in the
+  // trailer, backdrop, cast and tracklist after the page has been served.
+  if (item.source && item.metadata.hydrated !== true) {
+    after(() => hydrateCatalogItem(item.id));
+  }
 
   return (
     <div className="relative">
+      {item.backdropUrl ? (
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-[340px] overflow-hidden" aria-hidden>
+          <img src={item.backdropUrl} alt="" className="h-full w-full object-cover opacity-40" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/65 to-black" />
+        </div>
+      ) : null}
       <div
         className="pointer-events-none absolute inset-x-0 top-0 h-[520px]"
         style={{
@@ -127,6 +146,29 @@ export default async function ItemPage({ params }: Params) {
             <span>5</span>
             <span>10</span>
           </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+            <div className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-2">
+              <p className="text-[9px] uppercase tracking-[0.12em] text-muted-2">Community</p>
+              <p className="mt-0.5 font-semibold text-ink">
+                {item.bayesianScore === null ? "—" : item.bayesianScore.toFixed(1)}
+                <span className="text-muted-2"> /10</span>
+              </p>
+              <p className="text-[10px] text-muted-2">
+                Bayesian · {item.totalReviews} {item.totalReviews === 1 ? "rating" : "ratings"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-2">
+              <p className="text-[9px] uppercase tracking-[0.12em] text-muted-2">You</p>
+              <p className="mt-0.5 font-semibold text-brand">
+                {rating ? rating.score.toFixed(1) : "—"}
+                <span className="text-muted-2"> /10</span>
+              </p>
+              <p className="text-[10px] text-muted-2">
+                {rating ? `${rating.wins}W · ${rating.losses}L` : "Not rated yet"}
+              </p>
+            </div>
+          </div>
         </div>
 
         <section className="mt-7">
@@ -169,7 +211,9 @@ export default async function ItemPage({ params }: Params) {
                 Listen in Spotify <Icon name="spotify" className="h-4 w-4" />
               </a>
             ) : null}
-            {item.trailerUrl ? (
+            {trailerEmbed ? (
+              <TrailerModal embedUrl={trailerEmbed} title={item.title} />
+            ) : item.trailerUrl ? (
               <a
                 href={item.trailerUrl}
                 target="_blank"
@@ -189,7 +233,7 @@ export default async function ItemPage({ params }: Params) {
               {credits.map((credit) => (
                 <Link
                   key={credit.id}
-                  href={`/app/person/${credit.personSlug}`}
+                  href={`/app/creator/${credit.personSlug}`}
                   className="rounded-full border border-white/15 bg-white/[0.06] px-2.5 py-1 text-[11px] text-ink transition-colors hover:bg-white/10"
                 >
                   {credit.personName}
@@ -217,14 +261,36 @@ export default async function ItemPage({ params }: Params) {
           </section>
         ) : null}
 
-        {rating && (rating.reviewText || rating.reviewTags.length > 0) ? (
+        {rating && (rating.reviewText || rating.reviewTags.length > 0 || subScores.length > 0 || highlights.length > 0) ? (
           <section className="mt-6 rounded-2xl border border-brand/25 bg-brand/[0.07] p-4">
             <div className="flex items-center justify-between">
               <h2 className="text-[13px] font-semibold text-ink">Your review</h2>
               <ScoreText score={rating.score} />
             </div>
             {rating.reviewText ? (
-              <p className="mt-2 whitespace-pre-line text-[13px] leading-relaxed text-muted">{rating.reviewText}</p>
+              <ReviewBody text={rating.reviewText} spoiler={rating.spoiler} className="mt-2" />
+            ) : null}
+            {highlights.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {highlights.map((highlight) => (
+                  <span key={highlight} className="rounded-full border border-brand/30 bg-brand/10 px-2.5 py-1 text-[11px] text-brand">
+                    {highlight}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {subScores.length > 0 ? (
+              <div className="mt-3 space-y-1.5">
+                {subScores.map(([name, value]) => (
+                  <div key={name} className="flex items-center gap-2">
+                    <span className="w-20 shrink-0 truncate text-[11px] capitalize text-muted-2">{name}</span>
+                    <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+                      <span className="block h-full rounded-full bg-brand" style={{ width: `${Math.min(100, value * 10)}%` }} />
+                    </span>
+                    <span className="w-8 shrink-0 text-right text-[11px] text-ink">{value.toFixed(1)}</span>
+                  </div>
+                ))}
+              </div>
             ) : null}
             {rating.reviewTags.length > 0 ? (
               <div className="mt-2.5 flex flex-wrap gap-1.5">
