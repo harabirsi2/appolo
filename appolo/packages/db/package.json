@@ -13,6 +13,7 @@
     "migrate": "tsx src/migrate.ts",
     "seed": "tsx src/seed.ts",
     "rls-test": "tsx src/rls-test.ts",
+    "role-guard": "tsx src/role-guard.ts",
     "reset": "tsx src/reset.ts",
     "typecheck": "tsc --noEmit"
   },

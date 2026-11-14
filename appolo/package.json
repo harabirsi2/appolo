@@ -23,9 +23,10 @@
     "smoke": "powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1",
     "e2e": "node scripts/e2e.mjs",
     "preflight": "node scripts/preflight.mjs",
+    "db:role-guard": "pnpm --filter @appolo/db role-guard",
     "visual": "node scripts/visual.mjs",
     "media-art": "node scripts/media-art.mjs",
-    "verify": "pnpm preflight && pnpm media-art && pnpm typecheck && pnpm test && pnpm e2e && pnpm visual",
+    "verify": "pnpm preflight && pnpm db:role-guard && pnpm media-art && pnpm typecheck && pnpm test && pnpm e2e && pnpm visual",
     "ci": "powershell -ExecutionPolicy Bypass -File scripts/ci.ps1",
     "a11y": "node scripts/a11y.mjs"
   },

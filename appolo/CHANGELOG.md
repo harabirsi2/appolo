@@ -24,6 +24,16 @@ why the change was made, not every commit.
   applies them without the network pacing delay. A reseed dropped from tens of
   minutes of rate-limited art lookups to under a minute.
 
+## Cross-tenant isolation guard
+
+- Added `packages/db/src/rls-guard.ts` and `pnpm db:role-guard`: the app role
+  must be neither a superuser nor `BYPASSRLS`, otherwise the guard fails with
+  the role name and a fix. `pnpm verify` now runs it before the browser suites.
+- `pnpm db:rls-test` now fails instead of skipping when the role bypasses RLS,
+  and reads a second org's ratings (and written reviews), private pods,
+  notifications and reviews through `withOrg()`, asserting zero rows while the
+  owning org still sees its own. Public pods stay readable by design.
+
 ## Ranking quality evaluation
 
 - Added `packages/core/src/ranking-quality.ts`, a seeded harness that simulates

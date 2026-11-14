@@ -21,7 +21,9 @@ What runs, how to run it, and what is not covered.
 | `pnpm e2e` | 27 HTTP checks: health, auth guards, signup, rating, tie, undo, model rebuild, follow, feed explanations, taste comparison, moderation, export, deletion | **27/27** |
 | `pnpm visual` | 8 screens, pixel comparison against committed baselines, 0.1% tolerance | **8/8** |
 | `pnpm a11y` | axe-core on 8 screens; fails on serious/critical violations | **0 violations** |
-| `pnpm verify` | preflight → media-art → typecheck → unit tests → e2e → visual (the gate used before commits and in CI) | pass |
+| `pnpm db:role-guard` | Fails if the app's database role is a superuser or has `BYPASSRLS` | pass |
+| `pnpm db:rls-test` | Cross-tenant isolation through `withOrg()` on orgs, locations, contacts, ratings, reviews, notifications and pods; refuses to run under a role that bypasses RLS | **16/16** |
+| `pnpm verify` | preflight → role guard → media-art → typecheck → unit tests → e2e → visual (the gate used before commits and in CI) | pass |
 
 `VISUAL_UPDATE=1 pnpm visual` accepts intentional rendering changes and rewrites
 the baselines in `scripts/visual-baselines/`. Review the generated
@@ -52,6 +54,30 @@ explicit thresholds:
   ~280 ms here) while still recovering the order.
 
 All stages are seeded, so failures are actionable rather than flaky.
+
+## Cross-tenant isolation
+
+Two layers keep one organisation's data out of another's requests.
+
+`pnpm db:role-guard` (and the same check at the start of `db:rls-test`) reads
+`current_user`, `rolsuper` and `rolbypassrls` from `pg_roles`. A superuser or a
+role with `BYPASSRLS` turns every policy into a no-op, so it is a hard failure,
+never a skip: point `DATABASE_URL` at the non-superuser `appolo_app` role.
+`verify` runs this guard before the browser suites, and CI asserts the same
+attributes before migrating.
+
+`pnpm db:rls-test` creates two throwaway orgs, then reads through `withOrg()` —
+the wrapper every service uses — and asserts:
+
+- org A gets zero rows for org B's `item_ratings` (including written review
+  text), `social_notifications`, and `reviews`, both unfiltered and by id;
+- org A gets zero rows for B's private `pods`; public pods remain readable by
+  design so signed-in users can contribute to someone else's public pod;
+- B still sees its own rows, so a deny-everything policy cannot pass silently;
+- cross-org inserts, org-table visibility, and reads with no org context behave
+  as before.
+
+Fixtures are deleted by cascade at the end, including the shared catalog item.
 
 ## Test data
 

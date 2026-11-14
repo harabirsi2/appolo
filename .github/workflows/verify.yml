@@ -116,7 +116,7 @@ jobs:
           cat /tmp/web.log
           exit 1
 
-      - name: Verify (preflight, media-art, typecheck, unit + quality tests, e2e, visual)
+      - name: Verify (preflight, role guard, media-art, typecheck, unit + quality tests, e2e, visual)
         run: pnpm verify
 
       - name: Accessibility audit
