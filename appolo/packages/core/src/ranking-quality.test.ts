@@ -4,6 +4,7 @@ import { fitBradleyTerry, type ComparisonEvent } from "./ranking-model.ts";
 import {
   evaluateSyntheticPreferences,
   createRng,
+  createSyntheticStrengths,
   generateSyntheticPreferences,
   heldOutAccuracy,
   medianIntervalWidth,
@@ -53,12 +54,12 @@ function normalCdf(z: number): number {
   return z > 0 ? 1 - tail : tail;
 }
 
+const PROBIT_SCALE = 1.2;
+const LABEL_FLIP_RATE = 0.2;
+
 /**
- * Sample from a deliberately different outcome process: a probit link instead
- * of the fitter's logistic Davidson model, a uniform tie chance that ignores
- * how close the items are, and heavy label noise that flips otherwise decided
- * outcomes. None of this matches what `fitBradleyTerry` assumes, so recovering
- * the ordering here is evidence of robustness rather than self-consistency.
+ * A different process than `fitBradleyTerry` assumes: a probit link, no ties,
+ * and 20% of decided outcomes flipped.
  */
 function sampleMisspecifiedPreferences(
   strengths: ReadonlyMap<string, number>,
@@ -74,13 +75,9 @@ function sampleMisspecifiedPreferences(
     if (bIndex >= aIndex) bIndex += 1;
     const aId = ids[aIndex]!;
     const bId = ids[bIndex]!;
-    if (rng() < 0.15) {
-      events.push({ aId, bId, outcome: "tie" });
-      continue;
-    }
-    const pA = normalCdf((strengths.get(aId)! - strengths.get(bId)!) / 1.2);
+    const pA = normalCdf((strengths.get(aId)! - strengths.get(bId)!) / PROBIT_SCALE);
     let outcome: ComparisonEvent["outcome"] = rng() < pA ? "a" : "b";
-    if (rng() < 0.2) outcome = outcome === "a" ? "b" : "a";
+    if (rng() < LABEL_FLIP_RATE) outcome = outcome === "a" ? "b" : "a";
     events.push({ aId, bId, outcome });
   }
   return events;
@@ -99,7 +96,7 @@ test("recovers the latent ordering from noisy preferences", () => {
 
 test("recovers the ordering when outcomes follow a different process", () => {
   for (const seed of [1, 7, 42, 99]) {
-    const { strengths } = generateSyntheticPreferences({ seed, items: 40, users: 32, comparisons: 1 });
+    const strengths = createSyntheticStrengths(seed, 40);
     const events = sampleMisspecifiedPreferences(strengths, 2_400, seed + 100);
     const fit = fitBradleyTerry(events);
     assert.ok(fit.converged, `misspecified fit did not converge for seed ${seed}`);

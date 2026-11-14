@@ -38,6 +38,18 @@ function gaussian(rng: () => number): number {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
+/** Draw centred latent strengths; the only random input to an outcome process. */
+export function createSyntheticStrengths(seed = 42, items = 24): Map<string, number> {
+  return drawStrengths(createRng(seed), items);
+}
+
+function drawStrengths(rng: () => number, itemCount: number): Map<string, number> {
+  const ids = Array.from({ length: itemCount }, (_, i) => `item-${String(i).padStart(2, "0")}`);
+  const raw = ids.map(() => rng() * 3 - 1.5);
+  const mean = raw.reduce((sum, value) => sum + value, 0) / raw.length;
+  return new Map(ids.map((id, i) => [id, raw[i]! - mean]));
+}
+
 function shuffledIndices(rng: () => number, n: number): number[] {
   const order = Array.from({ length: n }, (_, i) => i);
   for (let i = n - 1; i > 0; i -= 1) {
@@ -122,10 +134,8 @@ export function generateSyntheticPreferences(options: SyntheticOptions = {}): Sy
   const sparseFraction = options.sparseFraction ?? 0.3;
 
   const rng = createRng(seed);
-  const ids = Array.from({ length: itemCount }, (_, i) => `item-${String(i).padStart(2, "0")}`);
-  const raw = ids.map(() => rng() * 3 - 1.5);
-  const mean = raw.reduce((sum, value) => sum + value, 0) / raw.length;
-  const strengths = new Map(ids.map((id, i) => [id, raw[i]! - mean]));
+  const strengths = drawStrengths(rng, itemCount);
+  const ids = [...strengths.keys()];
 
   const allEvents: ComparisonEvent[] = [];
   // Warm-up pass: every item appears, so a single unlucky draw cannot make an
