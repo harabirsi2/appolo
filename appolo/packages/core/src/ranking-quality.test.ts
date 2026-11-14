@@ -3,6 +3,7 @@ import test from "node:test";
 import { fitBradleyTerry, type ComparisonEvent } from "./ranking-model.ts";
 import {
   evaluateSyntheticPreferences,
+  createRng,
   generateSyntheticPreferences,
   heldOutAccuracy,
   medianIntervalWidth,
@@ -23,6 +24,10 @@ const MIN_HELD_OUT_ACCURACY = 0.65;
 /** Coverage at 95% should approach 0.95; judging four seeds together averages
  *  out the binomial noise a single 24-item sample carries. */
 const COVERAGE_SEEDS = [1, 7, 42, 99];
+/** Robustness floor for preferences drawn from a process the fitter does not
+ * assume, so the check is about surviving misspecification, not mirroring the
+ * optimiser. */
+const MIN_MISSPECIFIED_SPEARMAN = 0.85;
 const MIN_MEAN_INTERVAL_COVERAGE = 0.85;
 /** A single seed this far below nominal is a calibration bug, not luck. */
 const MIN_PER_SEED_INTERVAL_COVERAGE = 0.7;
@@ -39,6 +44,48 @@ test("generator produces ties, sparse users and full coverage", () => {
   assert.ok(synthetic.events.length > 500, "the sample should be large enough to fit");
 });
 
+/** Standard normal CDF (Abramowitz–Stegun 26.2.17), used for a probit link. */
+function normalCdf(z: number): number {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const density = 0.3989423 * Math.exp((-z * z) / 2);
+  const tail =
+    density * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return z > 0 ? 1 - tail : tail;
+}
+
+/**
+ * Sample from a deliberately different outcome process: a probit link instead
+ * of the fitter's logistic Davidson model, a uniform tie chance that ignores
+ * how close the items are, and heavy label noise that flips otherwise decided
+ * outcomes. None of this matches what `fitBradleyTerry` assumes, so recovering
+ * the ordering here is evidence of robustness rather than self-consistency.
+ */
+function sampleMisspecifiedPreferences(
+  strengths: ReadonlyMap<string, number>,
+  count: number,
+  seed: number,
+): ComparisonEvent[] {
+  const rng = createRng(seed);
+  const ids = [...strengths.keys()];
+  const events: ComparisonEvent[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const aIndex = Math.floor(rng() * ids.length);
+    let bIndex = Math.floor(rng() * (ids.length - 1));
+    if (bIndex >= aIndex) bIndex += 1;
+    const aId = ids[aIndex]!;
+    const bId = ids[bIndex]!;
+    if (rng() < 0.15) {
+      events.push({ aId, bId, outcome: "tie" });
+      continue;
+    }
+    const pA = normalCdf((strengths.get(aId)! - strengths.get(bId)!) / 1.2);
+    let outcome: ComparisonEvent["outcome"] = rng() < pA ? "a" : "b";
+    if (rng() < 0.2) outcome = outcome === "a" ? "b" : "a";
+    events.push({ aId, bId, outcome });
+  }
+  return events;
+}
+
 test("recovers the latent ordering from noisy preferences", () => {
   for (const seed of [7, 42]) {
     const { spearman, fit } = evaluateSyntheticPreferences({ seed, items: 24, users: 32, comparisons: 1_600 });
@@ -46,6 +93,21 @@ test("recovers the latent ordering from noisy preferences", () => {
     assert.ok(
       spearman >= MIN_SPEARMAN,
       `seed ${seed}: Spearman ${spearman.toFixed(3)} below ${MIN_SPEARMAN}`,
+    );
+  }
+});
+
+test("recovers the ordering when outcomes follow a different process", () => {
+  for (const seed of [1, 7, 42, 99]) {
+    const { strengths } = generateSyntheticPreferences({ seed, items: 40, users: 32, comparisons: 1 });
+    const events = sampleMisspecifiedPreferences(strengths, 2_400, seed + 100);
+    const fit = fitBradleyTerry(events);
+    assert.ok(fit.converged, `misspecified fit did not converge for seed ${seed}`);
+    const spearman = spearmanCorrelation(fit, strengths);
+    assert.ok(
+      spearman >= MIN_MISSPECIFIED_SPEARMAN,
+      `seed ${seed}: Spearman ${spearman.toFixed(3)} under a misspecified outcome process ` +
+        `below ${MIN_MISSPECIFIED_SPEARMAN}`,
     );
   }
 });

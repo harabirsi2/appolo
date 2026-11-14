@@ -42,6 +42,9 @@ explicit thresholds:
 
 - recovered ordering: Spearman correlation with the latent strengths **≥ 0.85**
   on two seeds (observed 0.90–0.96);
+- robustness to misspecification: when outcomes come from a probit process with
+  uniform ties and 20% of decided outcomes flipped, Spearman with the latent
+  ordering stays **≥ 0.85** on four seeds (observed 0.92–0.97);
 - predictive accuracy on held-out comparisons **≥ 0.65** (observed 0.68–0.73);
 - 95% interval coverage of the true strengths: **mean ≥ 0.85 across four
   seeds** (observed mean 0.875) with a per-seed sanity floor of **≥ 0.70**
