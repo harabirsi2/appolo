@@ -203,8 +203,8 @@ Prioritised gaps:
    overhead dominates; a production server answers `/app` in ~10 ms, so treat
    the absolute values as dev-only.
 10. **Leaderboard cache — no measurable latency gain.** `catalogLeaderboard`
-    is cached for 30 s and tag-invalidated when a vote, manual score or undo
-    lands. A production A/B was run on the same route and session, 60 warm
+    is cached for 30 s and tag-invalidated on every write that changes ratings:
+    vote, manual score, undo, review save and account deletion. A production A/B was run on the same route and session, 60 warm
     requests per arm, with 300 rated titles:
 
     | arm | median | p10 | p90 | DB transactions/request |

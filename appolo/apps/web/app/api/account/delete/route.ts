@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { invalidateCommunity } from "@/lib/cache";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { apiError, jsonError } from "@/lib/api";
@@ -38,6 +39,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       password: parsed.data.password,
       confirm: parsed.data.confirm,
     });
+    // Deleting the workspace cascades its ratings, so shared rankings move.
+    invalidateCommunity();
 
     const store = await cookies();
     store.set(SESSION_COOKIE, "", {

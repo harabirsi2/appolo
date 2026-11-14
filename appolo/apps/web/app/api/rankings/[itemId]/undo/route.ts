@@ -19,7 +19,7 @@ export async function POST(_request: NextRequest, { params }: Params): Promise<N
 
     const { itemId } = await params;
     const result = await undoLastComparison(session.org.id, itemId);
-    invalidateCommunity();
+    if (result.undone) invalidateCommunity();
     return NextResponse.json(result);
   } catch (error) {
     return apiError(error);

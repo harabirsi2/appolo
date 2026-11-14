@@ -148,7 +148,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 | Image optimisation | Done | `next/image` + per-slot `sizes` + 96–360 px device widths; Browse −80%, Home −73% |
 | Bundle size checked | Done | 102 kB shared First Load JS in production build |
 | DB latency addressed | Done | indexes, batched follow counts, session cache |
-| Caching | Done | popular rail 60 s, leaderboard 30 s, both tag-invalidated on rating; production A/B shows no measurable latency gain at 300 rated titles; search uncached |
+| Caching | Done | popular rail 60 s, leaderboard 30 s, both tag-invalidated on vote/manual/undo/review/account deletion; production A/B shows no measurable latency gain at 300 rated titles; search uncached |
 | Large-list rendering | Partial | rails/grids are bounded; no virtualisation |
 
 ## 13. Implementation strategy

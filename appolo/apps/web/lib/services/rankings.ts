@@ -1,4 +1,5 @@
 import { unstable_cache } from "next/cache";
+import { COMMUNITY_TAGS } from "@/lib/cache";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import {
   START_ELO,
@@ -1140,7 +1141,7 @@ async function popularThisWeekUncached(limit: number): Promise<PopularItem[]> {
 const popularThisWeekCached = unstable_cache(
   popularThisWeekUncached,
   ["popular-this-week"],
-  { revalidate: 60, tags: ["community-popular"] },
+  { revalidate: 60, tags: [COMMUNITY_TAGS.popular] },
 );
 
 export async function popularThisWeek(limit = 8): Promise<PopularItem[]> {
@@ -1214,6 +1215,13 @@ export interface CommunityItem extends CatalogItem {
   coordination: "none" | "suspected";
 }
 
+interface LeaderboardOptions {
+  kind?: MediaKind;
+  genre?: string;
+  sort?: LeaderboardSort;
+  limit?: number;
+}
+
 /**
  * The shared catalog ordered by community opinion rather than by one taste
  * profile. `top` ranks by average score, `rated` by how many people weighed
@@ -1221,9 +1229,7 @@ export interface CommunityItem extends CatalogItem {
  *
  * Global and identical for every viewer, so the public wrapper caches it.
  */
-async function catalogLeaderboardUncached(
-  options: { kind?: MediaKind; genre?: string; sort?: LeaderboardSort; limit?: number } = {},
-): Promise<CommunityItem[]> {
+async function catalogLeaderboardUncached(options: LeaderboardOptions = {}): Promise<CommunityItem[]> {
   const db = getDb();
   const sort = options.sort ?? "top";
   const filters = [];
@@ -1289,12 +1295,10 @@ async function catalogLeaderboardUncached(
 const catalogLeaderboardCached = unstable_cache(
   catalogLeaderboardUncached,
   ["catalog-leaderboard"],
-  { revalidate: 30, tags: ["community-leaderboard"] },
+  { revalidate: 30, tags: [COMMUNITY_TAGS.leaderboard] },
 );
 
-export async function catalogLeaderboard(
-  options: { kind?: MediaKind; genre?: string; sort?: LeaderboardSort; limit?: number } = {},
-): Promise<CommunityItem[]> {
+export async function catalogLeaderboard(options: LeaderboardOptions = {}): Promise<CommunityItem[]> {
   return catalogLeaderboardCached(options);
 }
 

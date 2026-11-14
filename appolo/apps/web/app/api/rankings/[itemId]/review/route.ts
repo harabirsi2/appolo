@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { invalidateCommunity } from "@/lib/cache";
 import { firstIssue } from "@appolo/core";
 import { apiError, jsonError } from "@/lib/api";
 import { getSession } from "@/lib/session";
@@ -25,6 +26,10 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     if (!parsed.success) return jsonError(firstIssue(parsed.error), 400, "INVALID_REVIEW");
 
     const rating = await saveReview(session.org.id, itemId, parsed.data);
+    // A review creates or refreshes the item rating row, which changes the
+    // community count, the seven-day popular rail and the review text shown
+    // beside the score.
+    invalidateCommunity();
     return NextResponse.json({ rating });
   } catch (error) {
     return apiError(error);

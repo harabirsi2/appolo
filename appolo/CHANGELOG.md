@@ -11,7 +11,8 @@ why the change was made, not every commit.
 - Replaced two hand-rolled catalog mappers in `social.ts` with the canonical
   `mapCatalogItem`, so a new item field is mapped in one place.
 - Cached the community leaderboard for 30 s and invalidated both community
-  tags on rating changes. A production A/B over 60 warm requests per arm found
+  tags on every write that moves rankings: votes, manual scores, undo, review
+  saves and account deletion. A production A/B over 60 warm requests per arm found
   **no measurable latency change**: 9.4 ms median with the cache and 9.4 ms
   bypassed (300 rated titles). It saves one aggregation and one vote scan per
   request, but those are not where Browse spends its time. The earlier
