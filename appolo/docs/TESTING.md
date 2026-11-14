@@ -45,6 +45,11 @@ explicit thresholds:
 - robustness to misspecification: when outcomes come from a probit process with
   no ties and 20% of decided outcomes flipped, Spearman with the latent ordering
   stays **≥ 0.85** on four seeds (observed 0.93–0.94);
+- interval coverage under that same probit process is measured and reported but
+  **not gated**: it is **0.825 pooled** against nominal 0.95, so the intervals
+  are too narrow when the model is misspecified (the 95th percentile of
+  |error|/SE is 2.61, not 1.96), so the variance estimate needs widening before
+  this can become an assertion;
 - predictive accuracy on held-out comparisons **≥ 0.65** (observed 0.68–0.73);
 - 95% interval coverage of the true strengths: **mean ≥ 0.85 across four
   seeds** (observed mean 0.875) with a per-seed sanity floor of **≥ 0.70**

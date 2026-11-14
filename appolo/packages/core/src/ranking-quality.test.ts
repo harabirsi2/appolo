@@ -7,6 +7,7 @@ import {
   createSyntheticStrengths,
   generateSyntheticPreferences,
   heldOutAccuracy,
+  intervalCoverage,
   medianIntervalWidth,
   sampleComparisons,
   spearmanCorrelation,
@@ -56,6 +57,9 @@ function normalCdf(z: number): number {
 
 const PROBIT_SCALE = 1.2;
 const LABEL_FLIP_RATE = 0.2;
+const MISSPECIFIED_SEEDS = [1, 7, 42, 99];
+const MISSPECIFIED_ITEMS = 40;
+const MISSPECIFIED_COMPARISONS = 2_400;
 
 /**
  * A different process than `fitBradleyTerry` assumes: a probit link, no ties,
@@ -83,6 +87,15 @@ function sampleMisspecifiedPreferences(
   return events;
 }
 
+function misspecifiedScenario(seed: number): {
+  strengths: Map<string, number>;
+  fit: ReturnType<typeof fitBradleyTerry>;
+} {
+  const strengths = createSyntheticStrengths(seed, MISSPECIFIED_ITEMS);
+  const events = sampleMisspecifiedPreferences(strengths, MISSPECIFIED_COMPARISONS, seed + 100);
+  return { strengths, fit: fitBradleyTerry(events) };
+}
+
 test("recovers the latent ordering from noisy preferences", () => {
   for (const seed of [7, 42]) {
     const { spearman, fit } = evaluateSyntheticPreferences({ seed, items: 24, users: 32, comparisons: 1_600 });
@@ -95,10 +108,8 @@ test("recovers the latent ordering from noisy preferences", () => {
 });
 
 test("recovers the ordering when outcomes follow a different process", () => {
-  for (const seed of [1, 7, 42, 99]) {
-    const strengths = createSyntheticStrengths(seed, 40);
-    const events = sampleMisspecifiedPreferences(strengths, 2_400, seed + 100);
-    const fit = fitBradleyTerry(events);
+  for (const seed of MISSPECIFIED_SEEDS) {
+    const { strengths, fit } = misspecifiedScenario(seed);
     assert.ok(fit.converged, `misspecified fit did not converge for seed ${seed}`);
     const spearman = spearmanCorrelation(fit, strengths);
     assert.ok(
@@ -107,6 +118,38 @@ test("recovers the ordering when outcomes follow a different process", () => {
         `below ${MIN_MISSPECIFIED_SPEARMAN}`,
     );
   }
+});
+
+/**
+ * Diagnostic, deliberately not a gate: the fitted standard errors assume the
+ * Davidson model that generated neither these outcomes nor their noise, so
+ * this reports how far the nominal 95% intervals fall short. Promote it to an
+ * assertion once the variance estimate is widened.
+ */
+test("reports interval coverage under the probit outcome process", (t) => {
+  let covered = 0;
+  let total = 0;
+  const perSeed: string[] = [];
+  const zScores: number[] = [];
+  for (const seed of MISSPECIFIED_SEEDS) {
+    const { strengths, fit } = misspecifiedScenario(seed);
+    assert.ok(fit.converged, `misspecified fit did not converge for seed ${seed}`);
+    const coverage = intervalCoverage(fit, strengths);
+    assert.equal(coverage.total, strengths.size);
+    covered += coverage.covered;
+    total += coverage.total;
+    perSeed.push(`seed ${seed} ${coverage.covered}/${coverage.total}`);
+    for (const item of fit.items) {
+      zScores.push(Math.abs(item.theta - strengths.get(item.id)!) / item.standardError);
+    }
+  }
+  const ordered = [...zScores].sort((a, b) => a - b);
+  const q95 = ordered[Math.ceil(0.95 * ordered.length) - 1]!;
+  t.diagnostic(
+    `probit-process 95% interval coverage ${(covered / total).toFixed(3)} ` +
+      `(${covered}/${total}); ${perSeed.join(", ")}; ` +
+      `95th percentile |error|/SE ${q95.toFixed(2)} vs the 1.96 assumed by the intervals`,
+  );
 });
 
 test("predicts held-out comparisons better than chance", () => {

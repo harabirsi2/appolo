@@ -42,7 +42,9 @@ why the change was made, not every commit.
   recovery (Spearman ≥ 0.85), held-out predictive accuracy (≥ 0.65), 95%
   interval coverage (mean ≥ 0.85 over four seeds, each seed ≥ 0.70),
   recovery under a different outcome process (probit link, no ties, 20% label
-  noise; Spearman ≥ 0.85), invariance to event order and a/b side
+  noise; Spearman ≥ 0.85) plus a non-gating diagnostic of interval coverage
+  under that process (0.825 pooled, so the nominal 95% intervals need a wider
+  variance estimate), invariance to event order and a/b side
   assignment, cold-start shrinkage, and a 5 s runtime budget for 300 items.
   The seven checks run in `pnpm test` and `pnpm verify`.
 
