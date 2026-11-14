@@ -12,25 +12,32 @@ for (const candidate of [path.join(pkgRoot, ".env"), path.join(pkgRoot, "..", ".
   }
 }
 
-if ((process.env.NODE_ENV ?? "development") === "production") {
-  console.error("refusing to reset a production database");
+async function main(): Promise<void> {
+  if ((process.env.NODE_ENV ?? "development") === "production") {
+    console.error("refusing to reset a production database");
+    process.exit(1);
+  }
+
+  const url = process.env.MIGRATE_DATABASE_URL || process.env.DATABASE_URL;
+  if (!url) {
+    console.error("DATABASE_URL (or MIGRATE_DATABASE_URL) is required");
+    process.exit(1);
+  }
+
+  const { createDb } = await import("./client");
+  const { client } = createDb(url, 1);
+
+  try {
+    await client.unsafe("drop schema public cascade");
+    await client.unsafe("create schema public");
+    await client.unsafe("grant usage on schema public to public");
+    console.log("database reset. run `pnpm db:migrate` next.");
+  } finally {
+    await client.end();
+  }
+}
+
+main().catch((err) => {
+  console.error("reset failed:", err);
   process.exit(1);
-}
-
-import { createDb } from "./client";
-const url = process.env.MIGRATE_DATABASE_URL || process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL (or MIGRATE_DATABASE_URL) is required");
-  process.exit(1);
-}
-
-const { client } = createDb(url, 1);
-
-try {
-  await client.unsafe("drop schema public cascade");
-  await client.unsafe("create schema public");
-  await client.unsafe("grant usage on schema public to public");
-  console.log("database reset. run `pnpm db:migrate` next.");
-} finally {
-  await client.end();
-}
+});

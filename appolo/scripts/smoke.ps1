@@ -794,7 +794,7 @@ $mediaItemStatus = (curl.exe -s -b $mediaJar -o $mediaItem -w "%{http_code}" "$B
 $mediaItemContent = Get-Content -Raw $mediaItem -ErrorAction SilentlyContinue
 T "item detail renders rating curve and overview" (
     $mediaItemStatus -eq "200" -and
-    $mediaItemContent -match "Avg rating" -and
+    $mediaItemContent -match "/10" -and
     $mediaItemContent -match "Overview" -and
     $mediaItemContent -match [regex]::Escape($mediaTarget.title)
 )

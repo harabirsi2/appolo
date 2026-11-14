@@ -319,7 +319,10 @@ export type PodUpdate = z.infer<typeof podUpdateSchema>;
 export async function updatePod(orgId: string, podId: string, input: PodUpdate): Promise<PodDetail> {
   await withOrg(orgId, async (tx) => {
     const rows = await tx.select().from(pods).where(eq(pods.id, podId)).limit(1);
-    if (!rows[0]) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
+    // Public pods are readable by every org, but only the owner may edit them.
+    // Without the explicit owner check the UPDATE matches no rows (RLS) and the
+    // endpoint would still report success.
+    if (!rows[0] || rows[0].orgId !== orgId) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
     await tx
       .update(pods)
       .set({
@@ -334,8 +337,10 @@ export async function updatePod(orgId: string, podId: string, input: PodUpdate):
 }
 export async function deletePod(orgId: string, podId: string): Promise<void> {
   await withOrg(orgId, async (tx) => {
-    const rows = await tx.select({ id: pods.id }).from(pods).where(eq(pods.id, podId)).limit(1);
-    if (!rows[0]) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
+    const rows = await tx.select({ id: pods.id, orgId: pods.orgId }).from(pods).where(eq(pods.id, podId)).limit(1);
+    // Owner check up front: a cross-org DELETE would otherwise match no rows
+    // and return a misleading { ok: true } while the pod survives.
+    if (!rows[0] || rows[0].orgId !== orgId) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
     await tx.delete(pods).where(eq(pods.id, podId));
   });
 }
@@ -363,8 +368,8 @@ export async function removeItemFromPod(orgId: string, podId: string, itemId: st
 /** Persist a new manual order for a pod's items. */
 export async function reorderPodItems(orgId: string, podId: string, itemIds: string[]): Promise<PodDetail> {
   await withOrg(orgId, async (tx) => {
-    const rows = await tx.select({ id: pods.id }).from(pods).where(eq(pods.id, podId)).limit(1);
-    if (!rows[0]) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
+    const rows = await tx.select({ id: pods.id, orgId: pods.orgId }).from(pods).where(eq(pods.id, podId)).limit(1);
+    if (!rows[0] || rows[0].orgId !== orgId) throw new DomainError("POD_NOT_FOUND", "That pod does not exist.", 404);
     const existing = await tx
       .select({ itemId: podItems.itemId })
       .from(podItems)

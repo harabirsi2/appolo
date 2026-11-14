@@ -324,6 +324,45 @@ await check("session data survives a fresh login", async () => {
   assert.ok(after.json.rankings.some((item) => item.id === first.id));
 });
 
+// Pods: owner-scoped writes, with public contributions from other orgs.
+const podCreate = await call("/api/pods", {
+  method: "POST",
+  body: { title: `E2E pod ${stamp}`, itemIds: [first.id] },
+  cookie: alpha.cookie,
+});
+const podId = podCreate.json?.pod?.id;
+await check("pod creation returns an owner-scoped pod", () => {
+  assert.equal(podCreate.status, 201, podCreate.text.slice(0, 160));
+  assert.ok(podId, "create pod returned no id");
+  assert.equal(podCreate.json.pod.count, 1);
+});
+await check("a non-owner cannot edit, reorder or delete someone else's pod", async () => {
+  const update = await call(`/api/pods/${podId}`, { method: "PATCH", body: { title: "hijacked" }, cookie: beta.cookie });
+  const order = await call(`/api/pods/${podId}/items`, { method: "PATCH", body: { itemIds: [first.id] }, cookie: beta.cookie });
+  const remove = await call(`/api/pods/${podId}`, { method: "DELETE", cookie: beta.cookie });
+  assert.equal(update.status, 404, `cross-org update returned ${update.status}`);
+  assert.equal(order.status, 404, `cross-org reorder returned ${order.status}`);
+  assert.equal(remove.status, 404, `cross-org delete returned ${remove.status}`);
+  const list = await call("/api/pods", { cookie: alpha.cookie });
+  const pod = list.json.pods.find((p) => p.id === podId);
+  assert.ok(pod && !/hijacked/.test(pod.title), "another org changed or removed the pod");
+});
+await check("a non-owner can contribute to a public pod but only remove their own item", async () => {
+  const add = await call(`/api/pods/${podId}/items`, { method: "POST", body: { itemId: second.id }, cookie: beta.cookie });
+  assert.equal(add.status, 200, `contribute -> ${add.status}: ${add.text.slice(0, 120)}`);
+  assert.equal(add.json.pod.count, 2);
+  const removeOwn = await call(`/api/pods/${podId}/items`, { method: "DELETE", body: { itemId: second.id }, cookie: beta.cookie });
+  assert.equal(removeOwn.status, 200);
+  assert.equal(removeOwn.json.pod.count, 1);
+  const removeOwner = await call(`/api/pods/${podId}/items`, { method: "DELETE", body: { itemId: first.id }, cookie: beta.cookie });
+  assert.equal(removeOwner.status, 200);
+  assert.equal(removeOwner.json.pod.count, 1, "a non-owner removed the owner's item");
+});
+const deletePod = await call(`/api/pods/${podId}`, { method: "DELETE", cookie: alpha.cookie });
+await check("the owner can delete their own pod", () => {
+  assert.equal(deletePod.status, 200, deletePod.text.slice(0, 160));
+});
+
 const mediaExport = await call("/api/account/export", { cookie: alpha.cookie });
 await check("media export covers ratings, reviews, matchups and ranking order", () => {
   assert.equal(mediaExport.status, 200, `export failed: ${mediaExport.text.slice(0, 160)}`);
