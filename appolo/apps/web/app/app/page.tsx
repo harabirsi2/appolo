@@ -92,7 +92,7 @@ export default async function HomePage({
         />
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.16em] text-muted-2">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-muted-2" suppressHydrationWarning>
               {new Date().toLocaleDateString("en-US", { weekday: "long" })}
             </p>
             <h1 className="mt-1 text-[24px] font-bold leading-tight tracking-[-0.02em] text-ink">

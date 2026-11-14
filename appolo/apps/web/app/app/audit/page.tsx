@@ -58,7 +58,7 @@ export default async function AuditPage({
               <tbody className="divide-y divide-border">
                 {logs.map((log) => (
                   <tr key={log.id}>
-                    <td className="py-3 pr-3 text-muted-2">{new Date(log.createdAt).toLocaleString()}</td>
+                    <td className="py-3 pr-3 text-muted-2" suppressHydrationWarning>{new Date(log.createdAt).toLocaleString()}</td>
                     <td className="py-3 pr-3">{log.actorName ?? "System"}</td>
                     <td className="py-3 pr-3">
                       <Badge tone={toneFor(log.action)}>{log.action}</Badge>

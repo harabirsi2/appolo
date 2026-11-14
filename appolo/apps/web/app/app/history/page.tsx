@@ -31,7 +31,7 @@ export default async function HistoryPage() {
                 <Link href={`/app/item/${entry.item.id}`} className="block truncate text-sm font-medium text-ink hover:underline">
                   {entry.item.title}
                 </Link>
-                <p className="truncate text-[12px] text-muted-2">
+                <p className="truncate text-[12px] text-muted-2" suppressHydrationWarning>
                   {entry.kind} · {new Date(entry.createdAt).toLocaleString()}
                 </p>
                 {entry.detail ? <p className="mt-0.5 truncate text-[11px] text-muted-2">{entry.detail}</p> : null}

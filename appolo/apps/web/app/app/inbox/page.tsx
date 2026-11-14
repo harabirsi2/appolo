@@ -138,7 +138,7 @@ export default async function InboxPage({
                           <span className="truncate text-sm font-medium">
                             {convo.contactName ?? "Unknown contact"}
                           </span>
-                          <span className="shrink-0 text-[11px] text-muted-2">
+                          <span className="shrink-0 text-[11px] text-muted-2" suppressHydrationWarning>
                             {timeAgo(convo.lastMessageAt)}
                           </span>
                         </div>
@@ -276,7 +276,7 @@ export default async function InboxPage({
                             <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-2">
                               <span>{isOutbound ? message.senderType === "ai" ? "AI" : "Team" : "Customer"}</span>
                               <span>·</span>
-                              <span>{new Date(message.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                              <span suppressHydrationWarning>{new Date(message.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
                               {isOutbound ? <span>· {message.status}</span> : null}
                             </div>
                           ) : null}

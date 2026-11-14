@@ -48,7 +48,7 @@ export default async function NotificationsPage() {
                     {n.itemTitle}
                   </Link>
                 ) : null}
-                <p className="mt-0.5 text-[10px] text-muted-2">{new Date(n.createdAt).toLocaleString()}</p>
+                <p className="mt-0.5 text-[10px] text-muted-2" suppressHydrationWarning>{new Date(n.createdAt).toLocaleString()}</p>
               </div>
             </li>
           ))}

@@ -60,7 +60,7 @@ const STATUS_TONES: Record<string, "neutral" | "brand" | "success" | "warn" | "d
 function formatDate(value: Date | string | null): string {
   if (!value) return "—";
   const date = typeof value === "string" ? new Date(value) : value;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export default async function ReviewsPage({
