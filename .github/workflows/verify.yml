@@ -16,6 +16,9 @@ jobs:
     name: Full verify suite
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: appolo
 
     services:
       postgres:
@@ -53,6 +56,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: appolo/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -135,6 +139,6 @@ jobs:
           path: |
             /tmp/web.log
             /tmp/app-role.txt
-            scripts/visual-output
+            appolo/scripts/visual-output
           if-no-files-found: ignore
           retention-days: 7
