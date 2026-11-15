@@ -24,7 +24,8 @@ export interface RankingsListEntry {
 /**
  * The rankings list with an explicit manual order. Reordering saves the whole
  * list in one request, which the server stores as positions plus audit events —
- * never as fake matchups — and the statistical model keeps its own order.
+ * never as fake matchups. Without a manual order the list follows the score on
+ * each row, and the statistical model only breaks ties.
  */
 export function RankingsList({ kind, items }: { kind: MediaKind | null; items: RankingsListEntry[] }) {
   const router = useRouter();

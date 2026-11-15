@@ -238,9 +238,12 @@ await check("model rebuilds from comparison history and records the tie", () => 
 });
 
 const allRankings = await call("/app/rankings", { cookie: alpha.cookie });
-await check("all rankings view uses the fitted model", () => {
+await check("all rankings view sorts by score and lets the model break ties", () => {
   assert.equal(allRankings.status, 200);
-  assert.match(allRankings.text, /Model order from \d+ comparisons across/);
+  // The visible number is the score, so the list must be ordered by it; the
+  // fitted model only settles equal scores. Ordering by the model first used
+  // to put a 4.5 above a 9.5.
+  assert.match(allRankings.text, /Highest score first · model breaks ties from \d+ comparisons across/);
 });
 
 const undo = await call(`/api/rankings/${first.id}/undo`, { method: "POST", cookie: alpha.cookie });

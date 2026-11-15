@@ -42,20 +42,22 @@ export async function RankingsScreen({
     : await rankingFitsForKinds(session.org.id, [...new Set(rankings.map((item) => item.kind))]);
   const hasModel = fits.byId.size > 0;
 
-  // A saved manual order already comes back in order; only fall back to the
-  // fitted model when the user has not overridden it.
+  // A saved manual order already comes back in order. Otherwise the list is
+  // ordered by the score shown on each row: the model only breaks ties, so a
+  // title with a single comparison can never outrank a clearly higher-rated
+  // one. Ordering by the model first used to put a 4.5 above a 9.5.
   const ordered = manual
     ? rankings
-    : hasModel
-      ? [...rankings].sort((a, b) => {
-          const fitA = fits.byId.get(a.id);
-          const fitB = fits.byId.get(b.id);
-          if (fitA && fitB) return fitB.personalScore - fitA.personalScore;
-          if (fitA) return -1;
-          if (fitB) return 1;
-          return b.elo - a.elo;
-        })
-      : rankings;
+    : [...rankings].sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const fitA = fits.byId.get(a.id);
+        const fitB = fits.byId.get(b.id);
+        if (fitA && fitB && fitB.personalScore !== fitA.personalScore) {
+          return fitB.personalScore - fitA.personalScore;
+        }
+        if (b.elo !== a.elo) return b.elo - a.elo;
+        return a.title.localeCompare(b.title);
+      });
 
   return (
     <div className="px-5 pt-4">
@@ -73,8 +75,8 @@ export async function RankingsScreen({
       {hasModel ? (
         <p className="mt-1 text-[11px] text-muted-2">
           {activeKind && model
-            ? `Model order from ${model.comparisons} comparisons · tie parameter ν ${model.tieParameter.toFixed(2)} · ${model.converged ? "converged" : "approximate"}`
-            : `Model order from ${fits.comparisons} comparisons across ${fits.kindCount} ${
+            ? `Highest score first · model breaks ties from ${model.comparisons} comparisons · ν ${model.tieParameter.toFixed(2)} · ${model.converged ? "converged" : "approximate"}`
+            : `Highest score first · model breaks ties from ${fits.comparisons} comparisons across ${fits.kindCount} ${
                 fits.kindCount === 1 ? "category" : "categories"
               }`}
         </p>

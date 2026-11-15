@@ -1,10 +1,10 @@
-import { inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { MEDIA_KINDS, genreKey, scoreForElo, type MediaKind } from "@appolo/core";
-import { getDb, schema } from "@/lib/db";
+import { getDb, withOrg, schema } from "@/lib/db";
 import { rankedRatings, type CatalogItem } from "./rankings";
 import { ratingStreak, type Streak } from "./streaks";
 
-const { itemRatings } = schema;
+const { itemRatings, itemMatchups } = schema;
 
 /** Capitalise each word so a stored "sci-fi" reads as "Sci-Fi" in the UI. */
 function displayGenre(value: string): string {
@@ -55,15 +55,25 @@ function mean(values: number[]): number {
  * so this reads them outside a tenant scope.
  */
 export async function tasteDna(orgId: string): Promise<TasteDna> {
-  const [ratings, streak] = await Promise.all([rankedRatings(orgId), ratingStreak(orgId)]);
+  const [ratings, streak, logged] = await Promise.all([
+    rankedRatings(orgId),
+    ratingStreak(orgId),
+    withOrg(orgId, (tx) =>
+      tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(itemMatchups)
+        .where(eq(itemMatchups.orgId, orgId)),
+    ),
+  ]);
 
   const distribution = new Array<number>(10).fill(0);
-  let matchups = 0;
   for (const rating of ratings) {
     const bucket = Math.min(9, Math.floor(rating.score));
     distribution[bucket] = (distribution[bucket] ?? 0) + 1;
-    matchups += rating.matches;
   }
+  // Comparisons actually played. Summing the per-item counter double-counts,
+  // because one vote bumps both sides.
+  const matchups = logged[0]?.count ?? 0;
 
   const kinds: TasteKind[] = MEDIA_KINDS.map((kind) => {
     const items = ratings.filter((rating) => rating.kind === kind);

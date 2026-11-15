@@ -5,7 +5,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { fileURLToPath } from "node:url";
 import { eq, and, sql } from "drizzle-orm";
-import { hashPassword, sha256, DEFAULT_REVIEW_TEMPLATES } from "@appolo/core";
+import { hashPassword, sha256, DEFAULT_REVIEW_TEMPLATES, START_ELO, nextElo } from "@appolo/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pkgRoot = path.resolve(here, "..");
@@ -51,6 +51,7 @@ const {
   aiKnowledgeChunks,
   catalogItems,
   itemRatings,
+  itemMatchups,
   catalogCredits,
   profiles,
   follows,
@@ -813,6 +814,186 @@ async function enrichCoverImages(rows: Array<{ id: string; kind: string; title: 
   }
 }
 
+/**
+ * Record a real comparison history for the demo profile.
+ *
+ * `item_matchups` is the durable source of truth for every ranking, so a seeded
+ * profile must not claim comparisons that were never recorded: the header, the
+ * history screen, undo and the fitted model all read this log. Each rated title
+ * plays a deterministic round robin inside its media kind, biased towards the
+ * title with the stronger curated record, and the per-item counters are then
+ * recomputed from the log instead of being hardcoded.
+ */
+async function seedMatchupHistory(orgId: string, idByKey: Map<string, string>): Promise<void> {
+  const byKind = new Map<string, CatalogSeed[]>();
+  for (const item of MEDIA_CATALOG) {
+    if (item.elo === undefined) continue;
+    if (!idByKey.has(`${item.kind}:${item.title}`)) continue;
+    const group = byKind.get(item.kind) ?? [];
+    group.push(item);
+    byKind.set(item.kind, group);
+  }
+
+  /** Curated record nudges the outcome, but the higher score still dominates. */
+  const strength = (item: CatalogSeed): number => {
+    const played = (item.wins ?? 0) + (item.losses ?? 0);
+    const record = played > 0 ? ((item.wins ?? 0) - (item.losses ?? 0)) / played : 0;
+    return (item.elo ?? START_ELO) + record * 40;
+  };
+
+  type PlannedVote = {
+    a: string;
+    b: string;
+    result: "win" | "loss" | "tie";
+    deltaA: number;
+    deltaB: number;
+    beforeA: number;
+    afterA: number;
+    beforeB: number;
+    afterB: number;
+  };
+
+  const planned: PlannedVote[] = [];
+  for (const items of byKind.values()) {
+    if (items.length < 2) continue;
+    const ordered = [...items].sort((left, right) => strength(right) - strength(left));
+    // Two full round robins give every title enough comparisons for the model
+    // to say something; a two-title category plays three.
+    const rounds = ordered.length === 2 ? 3 : 2;
+    for (let round = 0; round < rounds; round += 1) {
+      for (let i = 0; i < ordered.length; i += 1) {
+        for (let j = i + 1; j < ordered.length; j += 1) {
+          const left = ordered[i]!;
+          const right = ordered[j]!;
+          const index = planned.length;
+          // Deterministic upsets keep the log from being a perfect ladder.
+          const result: "win" | "loss" | "tie" =
+            index % 11 === 10 ? "tie" : index % 5 === 4 ? "loss" : "win";
+          planned.push({
+            a: idByKey.get(`${left.kind}:${left.title}`)!,
+            b: idByKey.get(`${right.kind}:${right.title}`)!,
+            result,
+            deltaA: 0,
+            deltaB: 0,
+            beforeA: 0,
+            afterA: 0,
+            beforeB: 0,
+            afterB: 0,
+          });
+        }
+      }
+    }
+  }
+  if (planned.length === 0) return;
+
+  // Simulate the Elo path, then anchor each title's path on its curated score,
+  // so the last recorded `after` equals the score the profile actually shows.
+  const running = new Map<string, number>();
+  for (const vote of planned) {
+    const beforeA = running.get(vote.a) ?? START_ELO;
+    const beforeB = running.get(vote.b) ?? START_ELO;
+    const after = nextElo(beforeA, beforeB, vote.result);
+    vote.deltaA = after.a - beforeA;
+    vote.deltaB = after.b - beforeB;
+    running.set(vote.a, after.a);
+    running.set(vote.b, after.b);
+  }
+
+  const totals = new Map<string, number>();
+  for (const vote of planned) {
+    totals.set(vote.a, (totals.get(vote.a) ?? 0) + vote.deltaA);
+    totals.set(vote.b, (totals.get(vote.b) ?? 0) + vote.deltaB);
+  }
+
+  const cursor = new Map<string, number>();
+  for (const items of byKind.values()) {
+    for (const item of items) {
+      const id = idByKey.get(`${item.kind}:${item.title}`)!;
+      cursor.set(id, (item.elo ?? START_ELO) - (totals.get(id) ?? 0));
+    }
+  }
+  for (const vote of planned) {
+    vote.beforeA = cursor.get(vote.a)!;
+    vote.afterA = vote.beforeA + vote.deltaA;
+    cursor.set(vote.a, vote.afterA);
+    vote.beforeB = cursor.get(vote.b)!;
+    vote.afterB = vote.beforeB + vote.deltaB;
+    cursor.set(vote.b, vote.afterB);
+  }
+
+  const spacing = 4 * 60 * 60 * 1000;
+  const startedAt = Date.now() - planned.length * spacing;
+
+  await withOrgAdmin(orgId, async (tx) => {
+    const [existing] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(itemMatchups)
+      .where(eq(itemMatchups.orgId, orgId));
+
+    // A profile that already played real matchups keeps them untouched.
+    if ((existing?.count ?? 0) === 0) {
+      await tx.insert(itemMatchups).values(
+        planned.map((vote, index) => ({
+          orgId,
+          itemId: vote.a,
+          opponentId: vote.b,
+          result: vote.result,
+          outcome: vote.result === "win" ? "a" : vote.result === "loss" ? "b" : "tie",
+          itemEloBefore: vote.beforeA,
+          itemEloAfter: vote.afterA,
+          opponentEloBefore: vote.beforeB,
+          opponentEloAfter: vote.afterB,
+          createdAt: new Date(startedAt + index * spacing),
+        })),
+      );
+    }
+
+    // Recompute the denormalised counters from the log: every vote bumps both
+    // sides, so the log — not the cached columns — is the truth.
+    const events = await tx
+      .select({
+        itemId: itemMatchups.itemId,
+        opponentId: itemMatchups.opponentId,
+        result: itemMatchups.result,
+      })
+      .from(itemMatchups)
+      .where(eq(itemMatchups.orgId, orgId));
+
+    const records = new Map<
+      string,
+      { matches: number; wins: number; losses: number; ties: number; skips: number }
+    >();
+    const bump = (itemId: string, key: "win" | "loss" | "tie" | "skip") => {
+      const record = records.get(itemId) ?? { matches: 0, wins: 0, losses: 0, ties: 0, skips: 0 };
+      record.matches += 1;
+      if (key === "win") record.wins += 1;
+      else if (key === "loss") record.losses += 1;
+      else if (key === "tie") record.ties += 1;
+      else record.skips += 1;
+      records.set(itemId, record);
+    };
+    for (const event of events) {
+      const key =
+        event.result === "win" || event.result === "loss" || event.result === "tie"
+          ? event.result
+          : "skip";
+      bump(event.itemId, key);
+      bump(event.opponentId, key === "win" ? "loss" : key === "loss" ? "win" : key);
+    }
+
+    await tx
+      .update(itemRatings)
+      .set({ matches: 0, wins: 0, losses: 0, ties: 0, skips: 0 })
+      .where(eq(itemRatings.orgId, orgId));
+    for (const [itemId, record] of records) {
+      await tx
+        .update(itemRatings)
+        .set({ ...record, updatedAt: new Date() })
+        .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, itemId)));
+    }
+  });
+}
+
 /** Seed the shared catalog and, on first run, a demo org's taste profile. */
 async function seedMedia(orgId: string): Promise<void> {
   await db
@@ -884,17 +1065,14 @@ async function seedMedia(orgId: string): Promise<void> {
       if (!itemId) continue;
       await tx
         .insert(itemRatings)
-        .values({
-          orgId,
-          itemId,
-          elo: item.elo,
-          matches: item.matches ?? 0,
-          wins: item.wins ?? 0,
-          losses: item.losses ?? 0,
-        })
+        .values({ orgId, itemId, elo: item.elo })
         .onConflictDoNothing();
     }
   });
+
+  // Counters are derived from the comparison log, never hardcoded, so the
+  // profile cannot claim matchups that were never played.
+  await seedMatchupHistory(orgId, idByKey);
 }
 
 type CommunityRating = { title: string; score: number; tags: string[]; text: string; spoiler?: boolean; favoriteCharacter?: string; favoriteTracks?: string[] };

@@ -185,11 +185,18 @@ export async function tasteStats(orgId: string): Promise<TasteStats> {
     const [totals] = await tx
       .select({
         rated: sql<number>`count(*)::int`,
-        matchups: sql<number>`coalesce(sum(${itemRatings.matches}), 0)::int`,
         avgElo: sql<number>`coalesce(avg(${itemRatings.elo}), ${START_ELO})::float`,
       })
       .from(itemRatings)
       .where(eq(itemRatings.orgId, orgId));
+
+    // "Matchups" means comparisons that were actually played. Counting the
+    // denormalised per-item `matches` column double-counts (every vote bumps
+    // both sides) and used to report history that no row backed.
+    const [logged] = await tx
+      .select({ matchups: sql<number>`count(*)::int` })
+      .from(itemMatchups)
+      .where(eq(itemMatchups.orgId, orgId));
 
     const kindRows = await tx
       .select({
@@ -205,7 +212,7 @@ export async function tasteStats(orgId: string): Promise<TasteStats> {
 
     return {
       rated: totals?.rated ?? 0,
-      matchups: totals?.matchups ?? 0,
+      matchups: logged?.matchups ?? 0,
       averageScore: toScore(totals?.avgElo ?? START_ELO),
       topKind: (kindRows[0]?.kind as MediaKind | undefined) ?? null,
     };
