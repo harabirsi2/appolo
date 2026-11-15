@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@appolo/ui";
 import { scoreBand, type MediaKind } from "@appolo/core/ranking";
 import { MediaArt } from "@/components/media-art";
-import { GradientSlider, Icon } from "@/components/podiums";
+import { Icon } from "@/components/podiums";
 import { BackButton } from "@/components/back-button";
 
 interface RatingSide {
@@ -229,8 +229,6 @@ export function FinishRating({
     }
   }
 
-  const band = scoreBand(item.score);
-
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (busy || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -275,26 +273,59 @@ export function FinishRating({
           </Link>
         </div>
 
-        <GradientSlider score={item.score} className="mt-6" />
-        <div className="mt-1.5 flex justify-between text-[10px] text-muted-2">
-          <span>0</span>
-          <span>5</span>
-          <span>10</span>
+        <div className="mt-6">
+          <div className="flex items-baseline justify-between">
+            <label
+              htmlFor="manual-score"
+              className="text-[10px] uppercase tracking-[0.14em] text-muted-2"
+            >
+              Your score
+            </label>
+            <span className="text-[10px] text-muted-2">Drag or use arrow keys</span>
+          </div>
+          <input
+            id="manual-score"
+            type="range"
+            min={0}
+            max={10}
+            step={0.1}
+            value={manualScore}
+            onChange={(event) => setManualScore(Number(event.target.value))}
+            aria-valuetext={`${manualScore.toFixed(1)} out of 10`}
+            className="score-slider mt-3"
+          />
+          <div className="mt-1.5 flex justify-between text-[10px] text-muted-2" aria-hidden>
+            <span>0</span>
+            <span>5</span>
+            <span>10</span>
+          </div>
         </div>
 
         <div className="mt-4 flex items-end justify-between">
           <div>
-            <p className="text-[10px] uppercase tracking-[0.14em] text-muted-2">Your score</p>
             <p className="text-[30px] font-bold leading-none text-brand">
-              {item.score.toFixed(1)}
+              {manualScore.toFixed(1)}
               <span className="ml-1 text-[13px] font-normal text-muted-2">/10</span>
             </p>
+            <p className="mt-1 text-[10px] text-muted-2">
+              {Math.abs(manualScore - item.score) < 0.05
+                ? "Current score"
+                : `Current score ${item.score.toFixed(1)}`}
+            </p>
+            {votes > 0 ? <p className="mt-1 text-[10px] text-muted-2">{votes} votes this session</p> : null}
           </div>
-          <div className="text-right">
+          <div className="flex flex-col items-end gap-2">
             <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-muted">
-              {band.label}
+              {scoreBand(manualScore).label}
             </span>
-            {votes > 0 ? <p className="mt-1.5 text-[10px] text-muted-2">{votes} votes this session</p> : null}
+            <button
+              type="button"
+              onClick={setManual}
+              disabled={manualBusy || Math.abs(manualScore - item.score) < 0.05}
+              className="rounded-full border border-brand/40 bg-brand/15 px-3 py-1 text-[11px] font-medium text-brand transition-colors hover:bg-brand/25 disabled:opacity-40"
+            >
+              {manualBusy ? "Saving…" : "Set score"}
+            </button>
           </div>
         </div>
 
@@ -346,6 +377,7 @@ export function FinishRating({
           onChange={(event) => setText(event.target.value)}
           maxLength={10000}
           rows={3}
+          aria-label="Your review"
           placeholder="“One of the greatest movies of the year...”"
           className="mt-4 w-full resize-none rounded-xl border border-white/[0.06] bg-black/40 px-3 py-2.5 text-[13px] italic leading-relaxed text-ink placeholder:text-muted-2 focus:border-white/20 focus:outline-none"
         />
@@ -430,6 +462,8 @@ export function FinishRating({
                     max={10}
                     step={0.1}
                     value={value ?? 0}
+                    aria-label={`${label} sub-score`}
+                    aria-valuetext={value === undefined ? "not set" : `${value.toFixed(1)} out of 10`}
                     onChange={(event) =>
                       setSubScores((prev) => ({ ...prev, [key]: Number(event.target.value) }))
                     }
@@ -501,30 +535,6 @@ export function FinishRating({
             </div>
           ) : null}
         </div>
-
-        <div className="mt-4 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-3">
-            <p className="text-[12px] font-semibold text-ink">Manual score</p>
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                type="range"
-                min={0}
-                max={10}
-                step={0.1}
-                value={manualScore}
-                onChange={(e) => setManualScore(Number(e.target.value))}
-                className="flex-1"
-              />
-              <span className="w-10 text-right text-[13px] text-ink">{manualScore.toFixed(1)}</span>
-              <button
-                type="button"
-                onClick={setManual}
-                disabled={manualBusy}
-                className="rounded-full border border-white/10 px-3 py-1 text-[12px] text-muted hover:text-ink disabled:opacity-60"
-              >
-                Set
-              </button>
-            </div>
-          </div>
 
         <div className="mt-5">
           <p className="text-center text-[13px] font-semibold text-ink">Which is better?</p>

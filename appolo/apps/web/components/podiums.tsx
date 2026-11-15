@@ -244,23 +244,6 @@ export function RatingCurve({
   );
 }
 
-/** Static gradient rail with a thumb, mirroring the finishing sheet. */
-export function GradientSlider({ score, className }: { score: number; className?: string }) {
-  const pct = Math.max(0, Math.min(100, score * 10));
-  return (
-    <div className={cn("relative h-2 w-full rounded-full", className)} style={{
-      background: "linear-gradient(90deg, #fb7185 0%, #f59e0b 35%, #a3e635 68%, #22c55e 100%)",
-    }}>
-      <span
-        className="absolute top-1/2 grid h-8 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-[#86efac] bg-black/30 shadow-[0_0_18px_rgba(74,222,128,0.45)] backdrop-blur"
-        style={{ left: `${pct}%` }}
-      >
-        <span className="h-1 w-6 rounded-full bg-white/80" />
-      </span>
-    </div>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 /* scores                                                             */
 /* ------------------------------------------------------------------ */

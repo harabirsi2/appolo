@@ -69,7 +69,7 @@ export function OgFrame({
         justifyContent: "space-between",
         padding: story ? 80 : 56,
         backgroundColor: OG_COLORS.bg,
-        backgroundImage: "radial-gradient(circle at 18% 8%, rgba(74,222,128,0.22), transparent 42%), radial-gradient(circle at 88% 92%, rgba(232,121,249,0.16), transparent 46%)",
+        backgroundImage: "radial-gradient(circle at 18% 8%, rgba(16,185,129,0.22), transparent 42%), radial-gradient(circle at 88% 92%, rgba(232,121,249,0.16), transparent 46%)",
         color: OG_COLORS.ink,
         fontFamily: "sans-serif",
       }}

@@ -20,7 +20,7 @@ export function DesktopNav() {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-0 hidden h-screen w-[232px] shrink-0 flex-col border-r border-white/[0.06] px-5 py-8 lg:flex">
+    <aside aria-label="Main navigation" className="sticky top-0 hidden h-screen w-[232px] shrink-0 flex-col border-r border-white/[0.06] px-5 py-8 lg:flex">
       <Link href="/app" className="group block w-fit">
         <span className="font-display text-[29px] leading-none tracking-[-0.035em] text-ink">
           Appolo<span className="text-brand">.</span>
