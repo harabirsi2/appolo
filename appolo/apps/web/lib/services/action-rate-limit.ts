@@ -1,4 +1,4 @@
-import { consumeAttempt, type AttemptWindow } from "./auth-rate-limit";
+import { consumeAttempt, type AttemptResult, type AttemptWindow } from "./auth-rate-limit";
 
 /**
  * Fixed-window limits for interactive ranking/social endpoints.
@@ -20,20 +20,12 @@ export const SEARCH_WINDOW: AttemptWindow = { max: 30, windowMs: 60_000 };
 /** Bulk catalog imports create shared rows and deserve a tighter quota. */
 export const IMPORT_WINDOW: AttemptWindow = { max: 5, windowMs: 60_000 };
 
-export type ActionScope = "vote" | "matchup" | "reaction" | "comment" | "export" | "search" | "import";
-
-export type ActionLimitResult =
-  | { allowed: true }
-  | { allowed: false; retryAfterSeconds: number };
-
-export function actionAttemptKey(scope: ActionScope, orgId: string): string {
-  return `${scope}:${orgId}`;
-}
+type ActionScope = "vote" | "matchup" | "reaction" | "comment" | "export" | "search" | "import";
 
 export async function consumeAction(
   scope: ActionScope,
   orgId: string,
   limit: AttemptWindow,
-): Promise<ActionLimitResult> {
-  return consumeAttempt(actionAttemptKey(scope, orgId), limit);
+): Promise<AttemptResult> {
+  return consumeAttempt(`${scope}:${orgId}`, limit);
 }

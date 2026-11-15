@@ -165,3 +165,21 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+
+/* Three-column shell: the rail only fits once the center keeps its 760px
+   reading column. Keep the media query here so the cap and the rail appear
+   together instead of relying on a breakpoint that can be overridden by
+   another max-width utility. */
+.app-rail {
+  display: none;
+}
+
+@media (min-width: 1440px) {
+  .app-shell {
+    max-width: 1320px;
+  }
+  .app-rail {
+    display: flex;
+  }
+}

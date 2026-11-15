@@ -8,7 +8,9 @@ const LINKS = [
   { href: "/app", label: "Home", icon: "home" },
   { href: "/app/browse", label: "Browse", icon: "grid" },
   { href: "/app/search", label: "Search", icon: "search" },
-  { href: "/app/rankings", label: "Rankings", icon: "rank" },
+  { href: "/app/library", label: "Library", icon: "bookmark" },
+  { href: "/app/collections", label: "Collections", icon: "grid" },
+  { href: "/app/activity", label: "Activity", icon: "spark" },
   { href: "/app/taste", label: "Taste", icon: "spark" },
   { href: "/app/profile", label: "You", icon: "person" },
 ] as const;
@@ -82,5 +84,8 @@ export function DesktopNav() {
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/app") return pathname === "/app";
+  if (href === "/app/library") {
+    return pathname === href || pathname === "/app/rankings" || pathname.startsWith("/app/rankings/");
+  }
   return pathname === href || pathname.startsWith(`${href}/`);
 }

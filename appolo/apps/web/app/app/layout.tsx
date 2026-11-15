@@ -24,7 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         }}
         aria-hidden
       />
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[560px] flex-col border-x border-white/[0.05] bg-bg/95 shadow-float lg:max-w-[1000px] min-[1440px]:max-w-[1320px] lg:flex-row">
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[560px] flex-col border-x border-white/[0.05] app-shell bg-bg/95 shadow-float md:max-w-[1000px] lg:flex-row">
         <DesktopNav />
         <div className="flex min-h-screen w-full min-w-0 flex-1 flex-col lg:max-w-[760px]">
           <main id="main" className="flex-1 pb-28 lg:pb-16">{children}</main>

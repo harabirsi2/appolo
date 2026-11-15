@@ -74,7 +74,7 @@ export interface CatalogSearchOptions {
   /** Ask providers even when the local rows look sufficient. */
   live?: boolean;
   /** Acting org, used to rate-limit external provider calls. */
-  orgId?: string;
+  orgId: string;
 }
 
 export interface CatalogSearchResult {
@@ -82,6 +82,8 @@ export interface CatalogSearchResult {
   /** Where the returned rows came from. */
   origin: "local" | "providers";
   providers: MetadataSource[];
+  /** True when the org's provider quota is spent and only local rows ran. */
+  providerQuotaExhausted?: boolean;
 }
 
 function clampLimit(limit: number | undefined): number {
@@ -166,7 +168,7 @@ async function providerSearch(
   limit: number,
 ): Promise<MetadataCandidate[]> {
   const config = metadataConfig();
-  const search = searchMetadata(category, query, config, limit);
+  const search = searchMetadata(category, query, config, limit).catch(() => []);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<MetadataCandidate[]>((resolve) => {
     timer = setTimeout(() => resolve([]), PROVIDER_DEADLINE_MS);
@@ -180,7 +182,7 @@ async function providerSearch(
   }
 }
 
-export async function searchCatalog(options: CatalogSearchOptions = {}): Promise<CatalogSearchResult> {
+export async function searchCatalog(options: CatalogSearchOptions): Promise<CatalogSearchResult> {
   const query = options.q?.trim() ?? "";
   const limit = clampLimit(options.limit);
   const offset = Math.max(0, options.offset ?? 0);
@@ -200,12 +202,10 @@ export async function searchCatalog(options: CatalogSearchOptions = {}): Promise
     return { items: local, origin: "local", providers: [] };
   }
 
-  if (options.orgId) {
-    const limit = await consumeAction("search", options.orgId, SEARCH_WINDOW);
-    if (!limit.allowed) {
-      // Local results are still useful; only the metered provider hop is skipped.
-      return { items: local, origin: "local", providers: [] };
-    }
+  const quota = await consumeAction("search", options.orgId, SEARCH_WINDOW);
+  if (!quota.allowed) {
+    // Local results are still useful; only the metered provider hop is skipped.
+    return { items: local, origin: "local", providers: [], providerQuotaExhausted: true };
   }
 
   // Without a category the query is most likely a movie/TV title, so ask there;

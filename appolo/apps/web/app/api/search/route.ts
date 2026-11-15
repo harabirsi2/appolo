@@ -33,6 +33,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       items: result.items,
       origin: result.origin,
       providers: result.providers,
+      providerQuotaExhausted: result.providerQuotaExhausted ?? false,
       liveSearch: liveSearchEnabled(),
     });
   } catch (error) {

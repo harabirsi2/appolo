@@ -8,9 +8,13 @@
  *
  * BASE_URL overrides http://localhost:3000. The script creates two throwaway
  * accounts per run (unique emails), so it is safe to re-run against a dev DB.
+ * Spotify connect issuance runs when SPOTIFY_CLIENT_ID is configured; the live
+ * provider search quota runs when CATALOG_PROVIDERS names a usable adapter.
+ * Either check is reported as SKIP, never silently passed, when unavailable.
  * It exits non-zero if any check fails.
  */
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 const BASE = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
 const stamp = Date.now().toString(36);
@@ -21,6 +25,7 @@ const clientIp = `198.18.${Math.floor(Math.random() * 254) + 1}.${Math.floor(Mat
 
 let passed = 0;
 const failures = [];
+const skipped = [];
 
 async function check(name, fn) {
   try {
@@ -37,6 +42,7 @@ async function call(path, { method = "GET", body, cookie, redirect = "manual" } 
   const response = await fetch(BASE + path, {
     method,
     redirect,
+    signal: AbortSignal.timeout(20_000),
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
       ...(cookie ? { cookie } : {}),
@@ -85,7 +91,10 @@ async function signup(label) {
   const profile = await call("/api/profile", { cookie: result.cookie });
   assert.equal(profile.status, 200, "profile API failed");
   assert.ok(profile.json?.profile?.username, "profile username missing");
-  return { email, cookie: result.cookie, username: profile.json.profile.username };
+  const me = await call("/api/me", { cookie: result.cookie });
+  assert.equal(me.status, 200, "session API failed");
+  assert.ok(me.json?.org?.id, "session org missing");
+  return { email, cookie: result.cookie, username: profile.json.profile.username, orgId: me.json.org.id };
 }
 
 const health = await call("/api/health");
@@ -298,6 +307,21 @@ await check("following feed shows followed reviews newest-first", () => {
   assert.ok(newerAt < olderAt, "following feed is not newest-first");
 });
 
+await check("library, collections and activity reuse their existing screens", async () => {
+  const [library, collections, activity] = await Promise.all([
+    call("/app/library", { cookie: alpha.cookie }),
+    call("/app/collections", { cookie: alpha.cookie }),
+    call("/app/activity", { cookie: alpha.cookie }),
+  ]);
+  assert.equal(library.status, 200, "library did not render");
+  assert.match(library.text, /<h1[^>]*>Library<\/h1>/);
+  assert.equal(collections.status, 200, "collections did not render");
+  assert.match(collections.text, /<h1[^>]*>E2E alpha[^<]*<\/h1>/);
+  assert.match(collections.text, /<h2[^>]*>Pods<\/h2>/);
+  assert.equal(activity.status, 200, "activity did not render");
+  assert.match(activity.text, /<h2[^>]*>Following<\/h2>/);
+});
+
 const compare = await call(`/app/compare/${alpha.username}`, { cookie: beta.cookie });
 await check("taste comparison renders with evidence and confidence", () => {
   assert.equal(compare.status, 200);
@@ -438,6 +462,142 @@ await check("comments paginate with a total and non-overlapping pages", () => {
   assert.ok(commentPageTwo.json.comments.every((item) => !firstIds.has(item.id)));
 });
 
+/* ------------------------------ Spotify OAuth state ------------------------------ */
+const SPOTIFY_COOKIE = "appolo_spotify_state";
+function spotifyCallback(query, cookie) {
+  return call(`/api/spotify/callback?${query}`, { cookie });
+}
+function redirectParam(result, name) {
+  const location = result.headers.get("location");
+  if (!location) return null;
+  return new URL(location, BASE).searchParams.get(name);
+}
+function stateSetCookie(result) {
+  return (result.headers.getSetCookie?.() ?? []).find((value) => value.startsWith(`${SPOTIFY_COOKIE}=`)) ?? "";
+}
+
+const spotifyState = `${alpha.orgId}.${randomUUID()}`;
+const spotifyCookie = `${alpha.cookie}; ${SPOTIFY_COOKIE}=${spotifyState}`;
+const spotifyAnon = await spotifyCallback(new URLSearchParams({ state: spotifyState, code: "x" }), undefined);
+const spotifyNoCookie = await spotifyCallback(
+  new URLSearchParams({ state: spotifyState, code: "x" }),
+  alpha.cookie,
+);
+const spotifyNoParam = await spotifyCallback(new URLSearchParams({ code: "x" }), spotifyCookie);
+const spotifyMismatch = await spotifyCallback(
+  new URLSearchParams({ state: `${alpha.orgId}.${randomUUID()}`, code: "x" }),
+  spotifyCookie,
+);
+const foreignState = `00000000-0000-4000-8000-000000000000.${randomUUID()}`;
+const spotifyForeignOrg = await spotifyCallback(
+  new URLSearchParams({ state: foreignState, code: "x" }),
+  `${alpha.cookie}; ${SPOTIFY_COOKIE}=${foreignState}`,
+);
+await check("Spotify callback rejects anonymous, missing, mismatched and foreign state", () => {
+  assert.equal(spotifyAnon.status, 401);
+  for (const result of [spotifyNoCookie, spotifyNoParam, spotifyMismatch, spotifyForeignOrg]) {
+    assert.equal(result.status, 307, `expected a redirect, got ${result.status}`);
+    assert.equal(redirectParam(result, "spotify"), "state_error");
+    assert.match(stateSetCookie(result), /Max-Age=0/i, "state cookie was not cleared");
+  }
+});
+
+const spotifyAccepted = await spotifyCallback(
+  new URLSearchParams({ state: spotifyState }),
+  spotifyCookie,
+);
+await check("Spotify callback accepts a browser-bound state and reaches code handling", () => {
+  assert.equal(spotifyAccepted.status, 307);
+  assert.equal(redirectParam(spotifyAccepted, "spotify"), "cancelled");
+  assert.notEqual(redirectParam(spotifyAccepted, "spotify"), "state_error", "valid state was rejected");
+  assert.match(stateSetCookie(spotifyAccepted), /Max-Age=0/i, "state cookie was not cleared");
+});
+
+const spotifyConnect = await call("/api/spotify/connect", { cookie: alpha.cookie });
+if (spotifyConnect.status === 503) {
+  skipped.push("Spotify connect issuance (SPOTIFY_CLIENT_ID is not configured)");
+} else {
+  await check("Spotify connect issues an http-only org-bound state cookie", async () => {
+    assert.equal(spotifyConnect.status, 307, `connect returned ${spotifyConnect.status}`);
+    const location = new URL(spotifyConnect.headers.get("location") ?? "");
+    assert.equal(location.hostname, "accounts.spotify.com");
+    assert.ok(location.searchParams.get("client_id"), "client_id missing from authorize URL");
+    assert.equal(location.searchParams.get("scope"), "user-top-read");
+    assert.ok(location.searchParams.get("state")?.startsWith(`${alpha.orgId}.`), "state is not org-bound");
+    const cookie = stateSetCookie(spotifyConnect);
+    assert.match(cookie, /HttpOnly/i);
+    assert.match(cookie, /SameSite=lax/i);
+    assert.match(cookie, /Path=\/api\/spotify/i);
+    assert.match(cookie, /Max-Age=600/i);
+    const issuedState = cookie.match(/^[^=]+=([^;]+)/)?.[1];
+    assert.equal(issuedState, location.searchParams.get("state"));
+
+    const callback = await spotifyCallback(
+      new URLSearchParams({ state: issuedState }),
+      `${alpha.cookie}; ${SPOTIFY_COOKIE}=${issuedState}`,
+    );
+    assert.equal(callback.status, 307);
+    assert.equal(redirectParam(callback, "spotify"), "cancelled");
+  });
+}
+
+/* ------------------------------ provider quotas ------------------------------ */
+const importTitle = `E2E Import Quota ${stamp}`;
+const goodreadsCsv = `Title,Author,My Rating\n${importTitle},E2E Author,4\n`;
+for (let attempt = 0; attempt < 5; attempt += 1) {
+  const imported = await call("/api/import/goodreads", {
+    method: "POST",
+    body: { csv: goodreadsCsv },
+    cookie: alpha.cookie,
+  });
+  assert.equal(imported.status, 201, `import ${attempt + 1} returned ${imported.status}: ${imported.text.slice(0, 160)}`);
+}
+const blockedImport = await call("/api/import/goodreads", {
+  method: "POST",
+  body: { csv: goodreadsCsv },
+  cookie: alpha.cookie,
+});
+const blockedLetterboxd = await call("/api/import/letterboxd", {
+  method: "POST",
+  body: { csv: `Name,Year,Rating\n${importTitle},2024,4\n` },
+  cookie: alpha.cookie,
+});
+await check("catalog imports share a five-per-minute org quota", () => {
+  assert.equal(blockedImport.status, 429, `sixth import returned ${blockedImport.status}`);
+  assert.equal(blockedImport.json?.code, "RATE_LIMITED");
+  assert.ok(Number(blockedImport.headers.get("retry-after")) >= 1);
+  assert.equal(blockedLetterboxd.status, 429, "Letterboxd bypassed the shared import quota");
+});
+
+const searchProbeQuery = `quota-${stamp}-${randomUUID()}`;
+const searchProbe = await call(`/api/search?q=${encodeURIComponent(searchProbeQuery)}&live=1`, {
+  cookie: alpha.cookie,
+});
+if (!searchProbe.json?.liveSearch) {
+  skipped.push("provider search quota (CATALOG_PROVIDERS has no live adapter)");
+} else {
+  await check("provider search is capped at 30 per minute while local search stays available", async () => {
+    assert.equal(searchProbe.status, 200);
+    assert.equal(searchProbe.json.providerQuotaExhausted, false);
+    for (let attempt = 1; attempt < 30; attempt += 1) {
+      const allowed = await call(`/api/search?q=${encodeURIComponent(`${searchProbeQuery}-${attempt}`)}&live=1`, {
+        cookie: alpha.cookie,
+      });
+      assert.equal(allowed.status, 200, `search ${attempt + 1} returned ${allowed.status}`);
+      assert.equal(allowed.json.providerQuotaExhausted, false, `search ${attempt + 1} was limited early`);
+    }
+    const blocked = await call(`/api/search?q=${encodeURIComponent(`${searchProbeQuery}-blocked`)}&live=1`, {
+      cookie: alpha.cookie,
+    });
+    assert.equal(blocked.status, 200, "quota exhaustion should still return local results");
+    assert.equal(blocked.json.providerQuotaExhausted, true, "the 31st provider search was not limited");
+    assert.ok(Array.isArray(blocked.json.items), "local results missing after quota exhaustion");
+    const localAfter = await call("/api/search?q=Breaking", { cookie: alpha.cookie });
+    assert.equal(localAfter.status, 200, "local search failed after quota exhaustion");
+    assert.ok(localAfter.json.items.length > 0, "local search returned no rows after quota exhaustion");
+  });
+}
+
 const badDelete = await call("/api/account/delete", {
   method: "POST",
   body: { password: "not-the-password", confirm: "DELETE" },
@@ -468,5 +628,6 @@ await check("e2e cleans up its remaining test account", () => {
   assert.equal(alphaDeleted.status, 200, `alpha delete failed: ${alphaDeleted.text.slice(0, 160)}`);
 });
 
-console.log(`\n${passed} passed, ${failures.length} failed`);
+for (const reason of skipped) console.log(`SKIP  ${reason}`);
+console.log(`\n${passed} passed, ${failures.length} failed, ${skipped.length} skipped`);
 if (failures.length > 0) process.exitCode = 1;

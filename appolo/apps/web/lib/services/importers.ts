@@ -217,6 +217,8 @@ export async function importGoodreads(orgId: string, csv: string): Promise<Impor
 export async function importSpotifyTopTracks(orgId: string, accessToken: string): Promise<ImportStats> {
   const stats: ImportStats = { imported: 0, skipped: 0, created: 0, updated: 0 };
   const response = await fetch("https://api.spotify.com/v1/me/top/tracks?limit=50&time_range=medium_term", {
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!response.ok) throw new DomainError("SPOTIFY_FAILED", "Could not load your Spotify top tracks.", 502);
