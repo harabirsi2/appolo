@@ -25,7 +25,7 @@
   --color-gold: #f5c451;
   --color-silver: #c9ccd6;
   --color-bronze: #d08a5a;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-sans: var(--font-inter), var(--font-emoji), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 18px 40px -28px rgba(0, 0, 0, 0.95);
   --shadow-float: 0 24px 60px -24px rgba(0, 0, 0, 0.9);
 }

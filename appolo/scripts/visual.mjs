@@ -7,14 +7,18 @@
  * empty content, a blank screenshot or a screenshot that differs from its
  * committed baseline. Snapshots are written to scripts/visual-output/.
  *
- * Baselines live in scripts/visual-baselines/. Accept intentional visual
- * changes with:
+ * Pixel baselines are Linux-only and live in scripts/visual-baselines/.
+ * Refresh them on Linux with:
  *   VISUAL_UPDATE=1 pnpm visual
  *
  * Usage:
  *   pnpm exec playwright install chromium
  *   pnpm dev       # in one terminal
  *   pnpm visual    # in another
+ *
+ * Other platforms still run the page, title, heading, error and blank-image
+ * checks, but skip pixel comparison: text rasterisation differs and CI is the
+ * only pixel gate. Use a Linux machine or CI to inspect or update baselines.
  *
  * BASE_URL, VISUAL_EMAIL, VISUAL_PASSWORD, VISUAL_OUT_DIR and
  * VISUAL_BASELINE_DIR override the defaults. It exits non-zero if any check fails.
@@ -28,17 +32,14 @@ import path from "node:path";
 const BASE = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
 const OUT = path.resolve(process.env.VISUAL_OUT_DIR ?? "scripts/visual-output");
 const BASELINES = path.resolve(process.env.VISUAL_BASELINE_DIR ?? "scripts/visual-baselines");
+const IS_LINUX = process.platform === "linux";
 const UPDATE_BASELINES = process.env.VISUAL_UPDATE === "1";
 const EMAIL = process.env.VISUAL_EMAIL ?? "owner@appolo.test";
 const PASSWORD = process.env.VISUAL_PASSWORD ?? "appolo-demo-9f3c2a7e";
 const MIN_SCREENSHOT_BYTES = 20_000;
-// Causes the check to fail at 0.1% changed pixels, which tolerates font and
-// anti-aliasing differences on the machine that captured the baselines but
-// catches real layout changes. On a machine whose fonts differ (for example
-// Linux CI comparing against baselines captured on another OS) set
-// VISUAL_MAX_DIFF_RATIO to a looser bound; the structural checks (h1, non-empty
-// main, no console/page/5xx errors, non-blank screenshot) still run regardless.
-const MAX_DIFF_RATIO = Number(process.env.VISUAL_MAX_DIFF_RATIO ?? 0.001);
+// Keep this strict: a real layout regression must not be averaged away by a
+// loose diff.
+const MAX_DIFF_RATIO = 0.001;
 
 const SCREENS = [
   { name: "landing", path: "/", title: "Appolo", heading: "anything", public: true },
@@ -51,8 +52,12 @@ const SCREENS = [
   { name: "taste", path: "/app/taste", title: "Taste DNA", heading: "Taste DNA" },
 ];
 
+function baselinePath(name) {
+  return path.join(BASELINES, `${name}.png`);
+}
+
 async function compareWithBaseline(file, name) {
-  const baselineFile = path.join(BASELINES, `${name}.png`);
+  const baselineFile = baselinePath(name);
 
   if (UPDATE_BASELINES) {
     await mkdir(BASELINES, { recursive: true });
@@ -64,7 +69,9 @@ async function compareWithBaseline(file, name) {
   try {
     baseline = PNG.sync.read(await readFile(baselineFile));
   } catch {
-    return { problem: `no baseline for ${name}; run VISUAL_UPDATE=1 pnpm visual` };
+    return {
+      problem: `no baseline for ${name}; run VISUAL_UPDATE=1 pnpm visual on Linux`,
+    };
   }
 
   const current = PNG.sync.read(await readFile(file));
@@ -85,6 +92,11 @@ async function compareWithBaseline(file, name) {
   const ratio = changed / (current.width * current.height);
   const note = `${changed} px differ (${(ratio * 100).toFixed(2)}%) -> ${path.relative(process.cwd(), diffFile)}`;
   return ratio > MAX_DIFF_RATIO ? { problem: `differs from baseline: ${note}` } : { note };
+}
+
+if (UPDATE_BASELINES && !IS_LINUX) {
+  console.error("Refusing to write visual baselines outside Linux: rendering is platform-specific.");
+  process.exit(1);
 }
 
 await mkdir(OUT, { recursive: true });
@@ -150,14 +162,26 @@ try {
     let pixelNote = "";
     let saved = false;
     try {
-      await activePage.screenshot({ path: file, animations: "disabled" });
+      // Playwright hides the text caret with an inline style. If that lands
+      // while React is hydrating a focused input, React reports a mismatch.
+      // Blur instead and leave the caret alone for a stable capture.
+      await activePage.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      });
+      await activePage.screenshot({
+        path: file,
+        animations: "disabled",
+        caret: "initial",
+        // The weekday label follows the calendar, not the seeded fixture.
+        mask: [activePage.locator("[data-visual-dynamic]")],
+      });
       saved = true;
       const size = (await stat(file)).size;
       if (size < MIN_SCREENSHOT_BYTES) problems.push(`screenshot looks blank (${size} bytes)`);
     } catch (error) {
       problems.push(`screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    if (saved) {
+    if (saved && IS_LINUX) {
       try {
         const comparison = await compareWithBaseline(file, screen.name);
         if (comparison.problem) problems.push(comparison.problem);
@@ -165,6 +189,8 @@ try {
       } catch (error) {
         problems.push(`baseline comparison failed: ${error instanceof Error ? error.message : String(error)}`);
       }
+    } else if (saved) {
+      pixelNote = "pixel comparison skipped (baselines are Linux-only)";
     }
 
     if (!response || !response.ok()) problems.push(`page returned ${response?.status() ?? "no response"}`);

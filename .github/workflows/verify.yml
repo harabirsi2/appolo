@@ -14,7 +14,7 @@ permissions:
 jobs:
   verify:
     name: Full verify suite
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
@@ -44,9 +44,13 @@ jobs:
       MIGRATE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55432/appolo
       SEED_EMAIL: owner@appolo.test
       SEED_PASSWORD: appolo-demo-9f3c2a7e
-      # The pixel baselines were captured on another OS; allow a looser
-      # cross-platform diff here. The strict 0.1% bound is the local default.
-      VISUAL_MAX_DIFF_RATIO: "0.05"
+      # Exercise Spotify connect issuance without a real account. The callback
+      # is tested with a valid state and no code, so no token call is made.
+      SPOTIFY_CLIENT_ID: e2e-client
+      # Keyless adapter so the e2e suite can exercise the provider quota path.
+      CATALOG_PROVIDERS: itunes
+      # Visual baselines are Linux-only. Fonts are committed and loaded
+      # locally, so the renderer does not depend on runner fonts.
 
     steps:
       - uses: actions/checkout@v4
@@ -94,12 +98,6 @@ jobs:
       - name: Seed
         run: pnpm db:seed
 
-      - name: RLS isolation test
-        run: pnpm db:rls-test
-
-      - name: Webhook idempotency test
-        run: pnpm db:idempotency-test
-
       # The visual, e2e and a11y checks drive chromium-headless-shell.
       - name: Install Playwright browser and system dependencies
         run: pnpm exec playwright install --with-deps chromium --only-shell
@@ -124,6 +122,14 @@ jobs:
 
       - name: Verify (preflight, role guard, media-art, typecheck, unit tests, visual, e2e, gap audit)
         run: pnpm verify
+
+      # Run the DB fixture suites after visual: RLS leaves an extra catalog
+      # item, which would otherwise perturb the freshly seeded screenshots.
+      - name: RLS isolation test
+        run: pnpm db:rls-test
+
+      - name: Webhook idempotency test
+        run: pnpm db:idempotency-test
 
       - name: Accessibility audit
         run: pnpm a11y

@@ -81,7 +81,7 @@ export default async function BrowsePage({
               : "border-white/10 bg-white/5 text-muted hover:text-ink"
           }`}
         >
-          All · {Object.values(kindCounts).reduce((a, b) => a + b, 0)}
+          All · <span className="tabular-nums">{Object.values(kindCounts).reduce((a, b) => a + b, 0)}</span>
         </Link>
         {MEDIA_KINDS.map((entry) => (
           <Link
@@ -94,7 +94,7 @@ export default async function BrowsePage({
             }`}
           >
             <KindIcon kind={entry} className="h-3.5 w-3.5" />
-            {MEDIA_KIND_LABELS[entry]} · {kindCounts[entry] ?? 0}
+            {MEDIA_KIND_LABELS[entry]} · <span className="tabular-nums">{kindCounts[entry] ?? 0}</span>
           </Link>
         ))}
       </div>

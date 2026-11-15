@@ -18,23 +18,33 @@ What runs, how to run it, and what is not covered.
 | `pnpm test` | Core logic: ranking model, ranking quality, Elo, taste similarity, feed ranking, community shrinkage, coordinated-vote detection, CSV-injection escaping, delivery-status ordering | **70/70** |
 | `pnpm preflight` | App reachable and database answering (`select 1`) | pass |
 | `pnpm typecheck` | All workspaces | pass |
-| `pnpm e2e` | 29 HTTP checks: health, auth guards, signup, rating, tie, undo, model rebuild, follow, feed explanations, taste comparison, moderation, media export, contact export (formula neutralization + rate limit), deletion | **29/29** |
-| `pnpm visual` | 8 screens, pixel comparison against committed baselines, 0.1% tolerance locally (5% in CI) | **8/8** |
+| `pnpm e2e` | 39 HTTP checks: health, auth guards, signup, rating, tie, undo, model rebuild, follow, feed explanations, library/collections/activity destinations, taste comparison, moderation, media export, contact export (formula neutralization + rate limit), Spotify state acceptance/rejection and connect cookie, shared import quota, provider-search quota, deletion | **39/39** |
+| `pnpm visual` | 8 screens, pixel comparison against Linux baselines, 0.1% tolerance | **8/8** |
 | `pnpm a11y` | axe-core on 8 screens; fails on serious/critical violations | **0 violations** |
 | `pnpm db:role-guard` | Fails if the app's database role is a superuser or has `BYPASSRLS` | pass |
 | `pnpm db:rls-test` | Cross-tenant isolation through `withOrg()` on orgs, locations, contacts, ratings, reviews, notifications and pods; refuses to run under a role that bypasses RLS | **16/16** |
 | `pnpm db:idempotency-test` | Webhook idempotency: `(org_id, provider_sid)` and `(message_id, event)` are unique, so a replayed provider callback is a no-op | **5/5** |
-| `pnpm verify` | preflight → role guard → media-art → typecheck → unit tests → e2e → visual (the gate used before commits and in CI) | pass |
+| `pnpm verify` | preflight → role guard → media-art → typecheck → unit tests → visual → e2e → gap audit (the gate used before commits and in CI) | pass |
 
-`VISUAL_UPDATE=1 pnpm visual` accepts intentional rendering changes and rewrites
-the baselines in `scripts/visual-baselines/`. Review the generated
-`scripts/visual-output/*.diff.png` before committing.
+`pnpm visual` compares against Linux baselines named `<screen>.png`. CI is the
+pixel authority. On Linux, refresh them intentionally with
+`VISUAL_UPDATE=1 pnpm visual`; the app and seeded demo database must be running.
+On macOS or Windows the same command still checks pages, titles, headings,
+console/page/5xx errors and blank screenshots, but skips pixel comparison
+because text rasterisation differs. Use CI or a Linux machine to inspect or
+update the pixel baselines; there are no per-OS baseline sets.
 
-The pixel tolerance is configurable through `VISUAL_MAX_DIFF_RATIO` and defaults
-to `0.001` (0.1%). The committed baselines were captured on Windows, so the CI
-workflow sets `VISUAL_MAX_DIFF_RATIO=0.05` to absorb cross-platform font and
-anti-aliasing differences; the structural checks still run at full strength
-there. Keep the strict default locally so real layout regressions are caught.
+The body and display faces are vendored in `apps/web/app/fonts` and loaded
+through `next/font/local`: Inter 4.001 Latin, Fraunces 1.000 Latin, and a small
+Noto Color Emoji 2.055 subset containing the emoji the UI itself uses. Nothing
+is fetched from Google at build time, and the files are pinned by the commit.
+
+Only the weekday label is masked because it follows the calendar. Counts and
+community content are part of the seeded fixture; CI runs visual immediately
+after seeding, before the RLS and idempotency fixtures. Run or update visual
+against a freshly seeded database rather than one changed by tests. The pixel
+bound is fixed at 0.1%; there is no override, so a real layout regression fails
+CI.
 
 `pnpm a11y` downloads the pinned axe build from a CDN, so it needs network
 access and is deliberately not part of `verify`.
@@ -119,6 +129,16 @@ in `scripts/e2e.mjs`.
 and deletes both at the end. It uses a unique `x-forwarded-for` per run so the
 auth rate limiter does not treat repeated runs as one client. The seed never
 fabricates ratings for catalog entries.
+
+The Spotify callback checks always run: anonymous, missing, mismatched and
+foreign-org state must redirect to `spotify=state_error` and clear the state
+cookie, while a matching browser-bound state must pass validation and reach the
+`cancelled` branch with no code. To exercise connect issuance, start the app with
+`SPOTIFY_CLIENT_ID`; a fake client is sufficient because no token request is
+made. The search-quota check needs a live adapter, for example
+`CATALOG_PROVIDERS=itunes`; the route exposes `providerQuotaExhausted` so the
+31st provider search can be asserted while local results still return. The import check always runs and
+asserts both Goodreads and Letterboxd share the five-per-minute org quota.
 
 ## Visual suite scope
 

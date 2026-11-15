@@ -41,12 +41,13 @@ so the page does not read as flat black. Selection uses a 38% brand mix.
 
 Deliberate pairing:
 
-- **Display:** Fraunces (variable Google font, loaded through `next/font` with a metric
-  fallback) for the wordmark, page titles and the landing masthead. Applied by a base
-  `h1` rule and the `.font-display` utility. The serif carries the editorial, journal
-  identity; it is never used for body copy or controls.
-- **Body/UI:** `--font-sans` system stack (ui-sans-serif, system-ui, Segoe UI, Roboto,
-  Helvetica, Arial). No Inter dependency; the app renders instantly with native UI text.
+- **Display:** Fraunces (variable Latin file vendored in `apps/web/app/fonts` and loaded
+  through `next/font/local` with a metric fallback) for the wordmark, page titles and the
+  landing masthead. Applied by a base `h1` rule and the `.font-display` utility. The serif
+  carries the editorial, journal identity; it is never used for body copy or controls.
+- **Body/UI:** Inter (Latin file vendored alongside a UI emoji subset and loaded through
+  `next/font/local`) with the system stack as fallback. Pinning the files keeps text
+  rasterisation identical across builds; no font is fetched from Google at build time.
 - **Numerics:** `.num` sets tabular, lining figures with tight tracking; used by
   `ScoreText`. Ranking positions keep the sans face at heavy weight so they read as data,
   not headlines.

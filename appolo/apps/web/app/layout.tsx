@@ -1,13 +1,6 @@
 import type { Metadata } from "next";
-import { Fraunces } from "next/font/google";
+import { fontVariables } from "./fonts";
 import "./globals.css";
-
-/** Editorial display face for page titles and the wordmark. */
-const display = Fraunces({
-  subsets: ["latin"],
-  variable: "--font-fraunces",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: {
@@ -26,8 +19,8 @@ export const viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${display.variable} min-h-screen bg-bg text-ink antialiased`} suppressHydrationWarning>
+    <html lang="en" className={fontVariables} suppressHydrationWarning>
+      <body className="min-h-screen bg-bg text-ink antialiased" suppressHydrationWarning>
         {children}
       </body>
     </html>

@@ -92,7 +92,11 @@ export default async function HomePage({
         />
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.16em] text-muted-2" suppressHydrationWarning>
+            <p
+              className="text-[11px] uppercase tracking-[0.16em] text-muted-2"
+              data-visual-dynamic
+              suppressHydrationWarning
+            >
               {new Date().toLocaleDateString("en-US", { weekday: "long" })}
             </p>
             <h1 className="mt-1 text-[24px] font-bold leading-tight tracking-[-0.02em] text-ink">
@@ -122,7 +126,9 @@ export default async function HomePage({
             { label: "Average", value: stats.rated === 0 ? "—" : stats.averageScore.toFixed(1) },
           ].map((stat) => (
             <div key={stat.label} className="rounded-2xl border border-white/[0.06] bg-black/25 px-3 py-2.5">
-              <p className="text-[18px] font-bold leading-none tabular-nums text-ink">{stat.value}</p>
+              <p className="text-[18px] font-bold leading-none tabular-nums text-ink">
+                {stat.value}
+              </p>
               <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-muted-2">{stat.label}</p>
             </div>
           ))}
