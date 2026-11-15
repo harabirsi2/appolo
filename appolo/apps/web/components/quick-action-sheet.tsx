@@ -8,9 +8,9 @@ const ACTIONS = [
   { href: "/app/rate", label: "Rate something", icon: "plus" as const, tone: "brand" },
   { href: "/app/duel", label: "Start a duel", icon: "spark" as const, tone: "neutral" },
   { href: "/app/search", label: "Add media", icon: "search" as const, tone: "neutral" },
-  { href: "/app/collections", label: "Create collection", icon: "grid" as const, tone: "neutral" },
+  { href: "/app/pods/new", label: "Create collection", icon: "grid" as const, tone: "neutral" },
   { href: "/app/reviews", label: "Write a review", icon: "share" as const, tone: "neutral" },
-  { href: "/app/watchlist", label: "View watchlist", icon: "bookmark" as const, tone: "neutral" },
+  { href: "/app/profile?tab=watchlist", label: "View watchlist", icon: "bookmark" as const, tone: "neutral" },
 ];
 
 /**

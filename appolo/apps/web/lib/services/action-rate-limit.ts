@@ -15,8 +15,12 @@ export const REACTION_WINDOW: AttemptWindow = { max: 60, windowMs: 60_000 };
 export const COMMENT_WINDOW: AttemptWindow = { max: 20, windowMs: 60_000 };
 /** Bulk PII exports are legitimate but should not be scriptable in a loop. */
 export const EXPORT_WINDOW: AttemptWindow = { max: 5, windowMs: 60_000 };
+/** External catalog providers cost quota; local search is not limited here. */
+export const SEARCH_WINDOW: AttemptWindow = { max: 30, windowMs: 60_000 };
+/** Bulk catalog imports create shared rows and deserve a tighter quota. */
+export const IMPORT_WINDOW: AttemptWindow = { max: 5, windowMs: 60_000 };
 
-export type ActionScope = "vote" | "matchup" | "reaction" | "comment" | "export";
+export type ActionScope = "vote" | "matchup" | "reaction" | "comment" | "export" | "search" | "import";
 
 export type ActionLimitResult =
   | { allowed: true }

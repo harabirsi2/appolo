@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
-import { apiError, jsonError } from "@/lib/api";
+import { apiError, jsonError, rateLimited } from "@/lib/api";
+import { consumeAction, IMPORT_WINDOW } from "@/lib/services/action-rate-limit";
 import { importLetterboxd } from "@/lib/services/importers";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +12,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const session = await getSession();
     if (!session) return jsonError("Not authenticated", 401, "UNAUTHENTICATED");
+    const limit = await consumeAction("import", session.org.id, IMPORT_WINDOW);
+    if (!limit.allowed) return rateLimited(limit.retryAfterSeconds);
 
     const contentType = request.headers.get("content-type") ?? "";
     let text = "";

@@ -17,7 +17,7 @@ export function BottomNav() {
 
   return (
     <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-40 lg:hidden">
-      <div className="pointer-events-auto mx-auto w-full max-w-[560px] border-t border-white/[0.08] bg-black/75 px-2 pt-1.5 backdrop-blur-2xl safe-bottom">
+      <div className="pointer-events-auto mx-auto w-full max-w-[560px] border-t border-white/[0.08] bg-bg/80 px-2 pt-1.5 backdrop-blur-2xl safe-bottom">
         <div className="grid grid-cols-5 items-center">
           <Tab tab={TABS[0]!} active={isActive(pathname, TABS[0]!.href)} />
           <Tab tab={TABS[1]!} active={isActive(pathname, TABS[1]!.href)} />

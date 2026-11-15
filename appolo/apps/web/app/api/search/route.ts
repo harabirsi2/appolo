@@ -27,7 +27,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.floor(limitParam) : 24;
     const live = params.get("live") === "1";
 
-    const result = await searchCatalog({ category, q, limit, live });
+    const result = await searchCatalog({ category, q, limit, live, orgId: session.org.id });
 
     return NextResponse.json({
       items: result.items,

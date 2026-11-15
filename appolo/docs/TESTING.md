@@ -15,7 +15,7 @@ What runs, how to run it, and what is not covered.
 
 | Command | What it covers | Current result |
 |---|---|---|
-| `pnpm test` | Core logic: ranking model, ranking quality, Elo, taste similarity, feed ranking, community shrinkage, coordinated-vote detection, CSV-injection escaping, delivery-status ordering | **62/62** |
+| `pnpm test` | Core logic: ranking model, ranking quality, Elo, taste similarity, feed ranking, community shrinkage, coordinated-vote detection, CSV-injection escaping, delivery-status ordering | **70/70** |
 | `pnpm preflight` | App reachable and database answering (`select 1`) | pass |
 | `pnpm typecheck` | All workspaces | pass |
 | `pnpm e2e` | 29 HTTP checks: health, auth guards, signup, rating, tie, undo, model rebuild, follow, feed explanations, taste comparison, moderation, media export, contact export (formula neutralization + rate limit), deletion | **29/29** |
@@ -53,12 +53,12 @@ explicit thresholds:
   no ties and 20% of decided outcomes flipped, Spearman with the latent ordering
   stays **≥ 0.85** on four seeds (observed 0.93–0.94);
 - interval coverage under that same probit process is gated at **≥ 0.95
-  pooled over 20 seeds** (observed 0.950 against nominal 0.95, up from 0.825
+  pooled over 20 seeds** (observed 0.969 against nominal 0.95, up from 0.825
   before correction): standard errors carry a capped Pearson overdispersion
   factor, and an overconfident fit extends each interval outward by the
   estimated attenuation. A per-item diagnostic over repeated events at fixed
   strengths prints the lowest items and gates the weakest decile at **≥ 0.90**
-  with a gap to the rest of **≤ 0.05** (observed 0.935 vs 0.955, gap 0.020);
+  with a gap to the rest of **≤ 0.05** (observed 0.960 vs 0.967, gap 0.007);
 - predictive accuracy on held-out comparisons **≥ 0.65** (observed 0.68–0.73);
 - 95% interval coverage of the true strengths: **mean ≥ 0.85 across four
   seeds** (observed mean 0.958) with a per-seed sanity floor of **≥ 0.70**

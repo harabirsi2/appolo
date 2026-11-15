@@ -48,7 +48,7 @@ export default async function SearchPage({
   const [ratings, items, people, suggestions, following, recentSearches] = await Promise.all([
     rankedRatings(session.org.id),
     browsing
-      ? searchCatalog({ category, q: query || undefined, genre: genre || undefined, limit: PAGE_SIZE, offset }).then(
+      ? searchCatalog({ category, q: query || undefined, genre: genre || undefined, limit: PAGE_SIZE, offset, orgId: session.org.id }).then(
           (result) => result.items,
         )
       : Promise.resolve([]),

@@ -4,6 +4,10 @@ Controls implemented in this repository, and the risks that remain.
 
 ## Authentication and sessions
 
+- Spotify import uses an http-only, same-site state cookie bound to the acting
+  org; the callback rejects a missing, mismatched or foreign state before
+  exchanging the authorization code.
+
 - Passwords are hashed with scrypt; no plaintext is stored or logged.
 - Sessions are database rows referenced by an HttpOnly cookie (`appolo_session`),
   with expiry. `getSession` requires an **active** membership, so disabled or
@@ -56,6 +60,9 @@ Controls implemented in this repository, and the risks that remain.
 
 - Interactive endpoints (matchup fetches, votes, reactions, comments) use
   Postgres fixed-window counters and return `429` with `Retry-After`.
+- Live catalog-provider search is capped at 30 requests per minute per org;
+  local search is not metered. Goodreads and Letterboxd imports are capped at
+  5 per minute per org so they cannot flood the shared catalog.
 - Bulk contact export (PII egress) is limited to 5 per minute per org and writes
   an `audit_logs` entry recording the actor.
 - Community scores shrink thin samples toward a prior and down-weight votes

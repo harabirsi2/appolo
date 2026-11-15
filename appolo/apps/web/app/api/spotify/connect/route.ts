@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { apiError, jsonError } from "@/lib/api";
+import { SPOTIFY_STATE_COOKIE, SPOTIFY_STATE_PATH } from "@/lib/spotify-oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +21,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
     const origin = request.nextUrl.origin;
     const redirectUri = process.env.SPOTIFY_REDIRECT_URI ?? `${origin}/api/spotify/callback`;
-    const state = `${session.org.id}:${Math.random().toString(36).slice(2)}`;
+    // Bind the callback to this session and this browser. Without the cookie
+    // check an attacker could complete an OAuth flow on a victim's session.
+    const state = `${session.org.id}.${randomUUID()}`;
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -28,7 +32,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       scope: "user-top-read",
       state,
     });
-    return NextResponse.redirect(`https://accounts.spotify.com/authorize?${params.toString()}`);
+    const response = NextResponse.redirect(`https://accounts.spotify.com/authorize?${params.toString()}`);
+    response.cookies.set(SPOTIFY_STATE_COOKIE, state, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: SPOTIFY_STATE_PATH,
+      maxAge: 10 * 60,
+    });
+    return response;
   } catch (error) {
     return apiError(error);
   }

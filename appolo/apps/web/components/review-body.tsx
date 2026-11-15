@@ -14,7 +14,8 @@ import { useState, type ReactNode } from "react";
 
 function safeHref(href: string): string | null {
   const value = href.trim();
-  if (value.startsWith("https://") || value.startsWith("/")) return value;
+  if (value.startsWith("https://")) return value;
+  if (value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\")) return value;
   return null;
 }
 

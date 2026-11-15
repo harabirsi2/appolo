@@ -3,6 +3,24 @@
 Notable, user-visible or architectural changes. Dates are ISO. Entries describe
 why the change was made, not every commit.
 
+## Obsidian Velvet hardening
+
+- **Spotify OAuth state.** The authorization request now stores a short-lived
+  http-only state cookie bound to the acting org, and the callback rejects a
+  missing, mismatched or foreign state before exchanging the code. This closes
+  the login-CSRF gap in the import flow.
+- **Quotas for metered work.** Live catalog-provider calls are capped per org
+  (30/min) while local search remains unlimited, and Goodreads/Letterboxd imports are
+  capped at 5/min so a script cannot flood the shared catalog.
+- **Safe review links.** Protocol-relative `//host` links are rejected alongside
+  non-HTTPS schemes; only HTTPS and genuine app-relative paths render as links.
+- **Quick actions and duel entry.** The mobile sheet now points at real routes,
+  and `/app/duel` selects a matchup before handing off to the existing
+  comparison screen instead of relying on a 404.
+- **Three-column breakpoint.** The right utility rail now appears at 1440px,
+  where all three columns fit; previously it was enabled at 1280px and clipped
+  off-screen. The app shell uses the canvas token rather than pure black.
+
 ## Tooling: Playwright 1.65.1
 
 - Upgraded `playwright` from 1.50.1 to 1.65.1. The old release hardcoded Linux

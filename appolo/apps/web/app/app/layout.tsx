@@ -9,7 +9,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const profile = await getProfileByOrgId(session.org.id).catch(() => null);
 
   return (
-    <div className="relative min-h-screen bg-black">
+    <div className="relative min-h-screen bg-bg">
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-brand focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-black"
@@ -24,7 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         }}
         aria-hidden
       />
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[560px] flex-col border-x border-white/[0.05] bg-black/95 shadow-float lg:max-w-[1000px] xl:max-w-[1320px] lg:flex-row">
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[560px] flex-col border-x border-white/[0.05] bg-bg/95 shadow-float lg:max-w-[1000px] min-[1440px]:max-w-[1320px] lg:flex-row">
         <DesktopNav />
         <div className="flex min-h-screen w-full min-w-0 flex-1 flex-col lg:max-w-[760px]">
           <main id="main" className="flex-1 pb-28 lg:pb-16">{children}</main>

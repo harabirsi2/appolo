@@ -12,6 +12,7 @@ import {
 import { getDb, schema } from "@/lib/db";
 import { mapCatalogItem, type CatalogItem } from "./catalog-item";
 import { hasGenre } from "./genre-filter";
+import { consumeAction, SEARCH_WINDOW } from "./action-rate-limit";
 
 const { catalogItems } = schema;
 
@@ -72,6 +73,8 @@ export interface CatalogSearchOptions {
   offset?: number;
   /** Ask providers even when the local rows look sufficient. */
   live?: boolean;
+  /** Acting org, used to rate-limit external provider calls. */
+  orgId?: string;
 }
 
 export interface CatalogSearchResult {
@@ -195,6 +198,14 @@ export async function searchCatalog(options: CatalogSearchOptions = {}): Promise
 
   if (!canAskProviders) {
     return { items: local, origin: "local", providers: [] };
+  }
+
+  if (options.orgId) {
+    const limit = await consumeAction("search", options.orgId, SEARCH_WINDOW);
+    if (!limit.allowed) {
+      // Local results are still useful; only the metered provider hop is skipped.
+      return { items: local, origin: "local", providers: [] };
+    }
   }
 
   // Without a category the query is most likely a movie/TV title, so ask there;

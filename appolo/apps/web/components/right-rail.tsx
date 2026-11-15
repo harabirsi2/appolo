@@ -32,7 +32,7 @@ export async function RightRail({ profile }: { profile: ProfileSummary | null })
   }
 
   return (
-    <aside className="sticky top-0 hidden h-screen w-[300px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-white/[0.06] px-5 py-8 xl:flex">
+    <aside className="sticky top-0 hidden h-screen w-[300px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-white/[0.06] px-5 py-8 min-[1440px]:flex">
       <Link
         href="/app/rate"
         className="flex min-h-11 items-center justify-center gap-2 rounded-full bg-gradient-to-b from-brand-soft to-brand text-[13px] font-semibold text-black shadow-[0_10px_30px_-12px_rgba(16,185,129,0.6)] transition-transform active:scale-[0.98]"

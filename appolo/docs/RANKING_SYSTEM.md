@@ -164,7 +164,7 @@ confidence instead of deleting anyone's opinion.
   gradient matches finite differences, and the fitted solution's gradient norm
   is effectively zero.
 
-Run with `pnpm test` (uses `tsx --test`, so Node 20+ works). Including community, coordination and taste tests, the core suite is 56 tests.
+Run with `pnpm test` (uses `tsx --test`, so Node 20+ works). Including community, coordination and taste tests, the core suite is 70 tests.
 
 ## 7. Known limitations
 
