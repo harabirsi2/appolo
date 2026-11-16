@@ -10,6 +10,7 @@ concurrency:
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   verify:
@@ -134,6 +135,19 @@ jobs:
             tail -n 120 /tmp/verify.log 2>/dev/null || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish verify failure reason
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          reason=$(grep -E '^(FAIL|Error|error|.*[Ff]ailed|.*✘|.*✖)' /tmp/verify.log 2>/dev/null | tail -n 3 | tr '\n' ' ' | cut -c1-135 || true)
+          if [ -z "$reason" ]; then reason='pnpm verify failed; inspect the job log'; fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "$(jq -n --arg d "$reason" '{state:"failure",context:"verify-failure",description:$d}')"
 
       # Run the DB fixture suites after visual: RLS leaves an extra catalog
       # item, which would otherwise perturb the freshly seeded screenshots.
