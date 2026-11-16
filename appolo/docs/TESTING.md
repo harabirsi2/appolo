@@ -19,20 +19,21 @@ What runs, how to run it, and what is not covered.
 | `pnpm preflight` | App reachable and database answering (`select 1`) | pass |
 | `pnpm typecheck` | All workspaces | pass |
 | `pnpm e2e` | 40 HTTP checks: health, auth guards, signup, search relevance and unrated labeling, rating, tie, undo, model rebuild, follow, feed explanations, library/collections/activity destinations, taste comparison, moderation, media export, contact export (formula neutralization + rate limit), Spotify state acceptance/rejection and connect cookie, shared import quota, provider-search quota, deletion | **40/40** |
-| `pnpm visual` | 8 screens, pixel comparison against Linux baselines, 0.1% tolerance | **8/8** |
+| `pnpm visual` | 8 screens; CI pixel comparison against CI-runner baselines, 0.1% tolerance | **8/8** |
 | `pnpm a11y` | axe-core on 9 screens; fails on serious/critical violations | **0 violations** |
 | `pnpm db:role-guard` | Fails if the app's database role is a superuser or has `BYPASSRLS` | pass |
 | `pnpm db:rls-test` | Cross-tenant isolation through `withOrg()` on orgs, locations, contacts, ratings, reviews, notifications and pods; refuses to run under a role that bypasses RLS | **16/16** |
 | `pnpm db:idempotency-test` | Webhook idempotency: `(org_id, provider_sid)` and `(message_id, event)` are unique, so a replayed provider callback is a no-op | **5/5** |
 | `pnpm verify` | preflight → role guard → media-art → typecheck → unit tests → visual → e2e → gap audit (the gate used before commits and in CI) | pass |
 
-`pnpm visual` compares against Linux baselines named `<screen>.png`. CI is the
-pixel authority. On Linux, refresh them intentionally with
-`VISUAL_UPDATE=1 pnpm visual`; the app and seeded demo database must be running.
-On macOS or Windows the same command still checks pages, titles, headings,
-console/page/5xx errors and blank screenshots, but skips pixel comparison
-because text rasterisation differs. Use CI or a Linux machine to inspect or
-update the pixel baselines; there are no per-OS baseline sets.
+`pnpm visual` compares against baselines named `<screen>.png` that were
+generated on the GitHub Actions Ubuntu runner. Pixel comparison runs only in
+CI, where the font stack and rasterizer are fixed. Locally, the same command
+still checks pages, titles, headings, console/page/5xx errors and blank
+screenshots, but skips pixel comparison because text rasterisation differs even
+between Linux hosts. Refresh the baselines in CI with
+`VISUAL_UPDATE=1 pnpm visual`, then copy the screenshots from the visual-output
+artifact; the app and seeded demo database must be running.
 
 The body and display faces are vendored in `apps/web/app/fonts` and loaded
 through `next/font/local`: Inter 4.001 Latin, Fraunces 1.000 Latin, and a small
