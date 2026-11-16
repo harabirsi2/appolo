@@ -141,7 +141,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          reason=$(grep -E '^(FAIL|Error|error|.*[Ff]ailed|.*✘|.*✖)' /tmp/verify.log 2>/dev/null | tail -n 3 | tr '\n' ' ' | cut -c1-135 || true)
+          reason=$(grep -E '^FAIL' /tmp/verify.log 2>/dev/null | sed -E 's/^(FAIL +[^ ]+).*/\1/' | tail -n 4 | paste -sd ', ' - | cut -c1-135 || true)
+          if [ -z "$reason" ]; then
+            reason=$(grep -E '^(Error|error|.*[Ff]ailed|.*✘|.*✖)' /tmp/verify.log 2>/dev/null | tail -n 2 | tr '\n' ' ' | cut -c1-135 || true)
+          fi
           if [ -z "$reason" ]; then reason='pnpm verify failed; inspect the job log'; fi
           curl -fsS -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
