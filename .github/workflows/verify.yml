@@ -149,12 +149,11 @@ jobs:
               -d "$(jq -n --arg c "$1" --arg d "$2" '{state:"failure",context:$c,description:$d}')" > /dev/null
           }
           found=0
-          while IFS= read -r line; do
+          while IFS='|' read -r page detail; do
             found=1
-            page=$(printf '%s' "$line" | sed -E 's/^FAIL +([^ ]+).*/\1/')
-            desc=$(printf '%s' "$line" | tr '\n' ' ' | cut -c1-135)
+            desc=$(printf '%s: %s' "$page" "$detail" | cut -c1-135)
             publish "verify-failure-$page" "$desc"
-          done < <(grep -E '^FAIL' /tmp/verify.log 2>/dev/null || true)
+          done < <(awk '/^FAIL/ { page=$2; if (getline > 0) { sub(/^[ \t]+/, ""); print page "|" $0 } }' /tmp/verify.log 2>/dev/null || true)
           if [ "$found" -eq 0 ]; then
             reason=$(grep -E '^(Error|error|.*[Ff]ailed|.*✘|.*✖)' /tmp/verify.log 2>/dev/null | tail -n 2 | tr '\n' ' ' | cut -c1-135 || true)
             if [ -z "$reason" ]; then reason='pnpm verify failed; inspect the job log'; fi
