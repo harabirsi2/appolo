@@ -148,8 +148,9 @@ export async function catalogLeaderboard(options: LeaderboardOptions = {}): Prom
         : sort === "new"
           ? desc(catalogItems.createdAt)
           : desc(sql`coalesce(avg(${itemRatings.elo}), 0)`),
-      // Stable tie-break: equal counts or averages otherwise come back in an
-      // arbitrary order, which makes the page (and visual baselines) jitter.
+      // Stable tie-break across reseeds: UUID primary keys change when the
+      // demo is rebuilt, so order by the visible title first.
+      catalogItems.title,
       catalogItems.id,
     )
     .limit(Math.min(options.limit ?? 24, 60))
@@ -280,7 +281,7 @@ export async function weeklyMovers(orgId: string, limit = 5): Promise<MoverItem[
         ),
       )
       .groupBy(catalogItems.id)
-      .orderBy(desc(delta))
+      .orderBy(desc(delta), catalogItems.title, catalogItems.id)
       .limit(limit);
 
     return rows.map((row) => ({
