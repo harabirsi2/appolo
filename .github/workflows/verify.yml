@@ -141,16 +141,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          reason=$(grep -E '^FAIL' /tmp/verify.log 2>/dev/null | sed -E 's/^(FAIL +[^ ]+).*/\1/' | tail -n 4 | paste -sd ', ' - | cut -c1-135 || true)
-          if [ -z "$reason" ]; then
+          publish() {
+            curl -fsS -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+              -d "$(jq -n --arg c "$1" --arg d "$2" '{state:"failure",context:$c,description:$d}')" > /dev/null
+          }
+          found=0
+          while IFS= read -r line; do
+            found=1
+            page=$(printf '%s' "$line" | sed -E 's/^FAIL +([^ ]+).*/\1/')
+            desc=$(printf '%s' "$line" | tr '\n' ' ' | cut -c1-135)
+            publish "verify-failure-$page" "$desc"
+          done < <(grep -E '^FAIL' /tmp/verify.log 2>/dev/null || true)
+          if [ "$found" -eq 0 ]; then
             reason=$(grep -E '^(Error|error|.*[Ff]ailed|.*✘|.*✖)' /tmp/verify.log 2>/dev/null | tail -n 2 | tr '\n' ' ' | cut -c1-135 || true)
+            if [ -z "$reason" ]; then reason='pnpm verify failed; inspect the job log'; fi
+            publish 'verify-failure' "$reason"
           fi
-          if [ -z "$reason" ]; then reason='pnpm verify failed; inspect the job log'; fi
-          curl -fsS -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H 'Accept: application/vnd.github+json' \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -d "$(jq -n --arg d "$reason" '{state:"failure",context:"verify-failure",description:$d}')"
 
       # Run the DB fixture suites after visual: RLS leaves an extra catalog
       # item, which would otherwise perturb the freshly seeded screenshots.
