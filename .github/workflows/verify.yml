@@ -121,7 +121,19 @@ jobs:
           exit 1
 
       - name: Verify (preflight, role guard, media-art, typecheck, unit tests, visual, e2e, gap audit)
-        run: pnpm verify
+        run: |
+          set -o pipefail
+          pnpm verify 2>&1 | tee /tmp/verify.log
+
+      - name: Publish verify failure log
+        if: failure()
+        run: |
+          {
+            echo '### Verify failure output'
+            echo '```'
+            tail -n 120 /tmp/verify.log 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Run the DB fixture suites after visual: RLS leaves an extra catalog
       # item, which would otherwise perturb the freshly seeded screenshots.
