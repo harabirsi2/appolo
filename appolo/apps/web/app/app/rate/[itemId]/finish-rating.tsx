@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@appolo/ui";
 import { scoreBand, type MediaKind } from "@appolo/core/ranking";
+import { REVIEW_FIELD_COPY } from "@/lib/review-copy";
 import { MediaArt } from "@/components/media-art";
 import { Icon } from "@/components/podiums";
 import { BackButton } from "@/components/back-button";
@@ -81,6 +82,7 @@ export function FinishRating({
   const [highlights, setHighlights] = useState<string[]>(initialItem.highlights ?? []);
   const [highlightInput, setHighlightInput] = useState("");
   const subScoreLabels = SUB_SCORE_LABELS[item.kind] ?? ["Story", "Style", "Impact"];
+  const reviewFields = REVIEW_FIELD_COPY[item.kind] ?? REVIEW_FIELD_COPY.movie;
 
   function toggleTag(tag: string) {
     setTags((current) =>
@@ -378,7 +380,7 @@ export function FinishRating({
           maxLength={10000}
           rows={3}
           aria-label="Your review"
-          placeholder="“One of the greatest movies of the year...”"
+          placeholder={reviewFields.reviewPlaceholder}
           className="mt-4 w-full resize-none rounded-xl border border-white/[0.06] bg-black/40 px-3 py-2.5 text-[13px] italic leading-relaxed text-ink placeholder:text-muted-2 focus:border-white/20 focus:outline-none"
         />
 
@@ -390,24 +392,30 @@ export function FinishRating({
           <input
             value={photoUrl}
             onChange={(e) => setPhotoUrl(e.target.value)}
-            placeholder="Photo URL (optional)"
+            placeholder={reviewFields.photo}
+            aria-label={reviewFields.photo}
             className="h-10 w-full rounded-xl border border-white/[0.06] bg-[#1a1a1d] px-3 text-[13px] text-ink focus:border-white/20 focus:outline-none"
           />
-          <input
-            value={favoriteCharacter}
-            onChange={(e) => setFavoriteCharacter(e.target.value)}
-            placeholder="Favorite character"
-            className="h-10 w-full rounded-xl border border-white/[0.06] bg-[#1a1a1d] px-3 text-[13px] text-ink focus:border-white/20 focus:outline-none"
-          />
+          {reviewFields.character ? (
+            <input
+              value={favoriteCharacter}
+              onChange={(e) => setFavoriteCharacter(e.target.value)}
+              placeholder={reviewFields.character}
+              aria-label={reviewFields.character}
+              className="h-10 w-full rounded-xl border border-white/[0.06] bg-[#1a1a1d] px-3 text-[13px] text-ink focus:border-white/20 focus:outline-none"
+            />
+          ) : null}
           <div className="flex gap-2">
             <input
               value={trackInput}
               onChange={(e) => setTrackInput(e.target.value)}
-              placeholder="Favorite track"
+              placeholder={reviewFields.favorite}
+              aria-label={reviewFields.favorite}
               className="h-10 flex-1 rounded-xl border border-white/[0.06] bg-[#1a1a1d] px-3 text-[13px] text-ink focus:border-white/20 focus:outline-none"
             />
             <button
               type="button"
+              aria-label={`Add ${reviewFields.favorite.toLowerCase()}`}
               onClick={() => {
                 const v = trackInput.trim();
                 if (!v) return;

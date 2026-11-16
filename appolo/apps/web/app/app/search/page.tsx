@@ -205,7 +205,11 @@ export default async function SearchPage({
                           {item.year ? ` · ${item.year}` : ""}
                         </p>
                       </div>
-                      <ScoreText score={scoreById.get(item.id) ?? null} />
+                      {scoreById.has(item.id) ? (
+                        <ScoreText score={scoreById.get(item.id)!} />
+                      ) : (
+                        <span className="shrink-0 text-[11px] text-muted-2">Not rated</span>
+                      )}
                     </Link>
                   </li>
                 ))}

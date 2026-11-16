@@ -155,17 +155,17 @@ export default async function SettingsPage({
           <form action={createSavedReplyAction} className="mt-4 space-y-3 border-t border-border pt-4">
             <div className="grid gap-3 sm:grid-cols-[200px_1fr]">
               <Field label="Title">
-                <Input name="title" placeholder="Pricing question" required />
+                <Input name="title" aria-label="Saved reply title" placeholder="Pricing question" required />
               </Field>
               <Field label="Scope">
-                <Select name="scope" defaultValue="org">
+                <Select name="scope" aria-label="Saved reply scope" defaultValue="org">
                   <option value="org">Everyone</option>
                   <option value="user">Just me</option>
                 </Select>
               </Field>
             </div>
             <Field label="Message" hint="Use {{first_name}} to personalize.">
-              <Textarea name="body" rows={3} placeholder="Thanks {{first_name}}! Our pricing starts at..." required />
+              <Textarea name="body" aria-label="Saved reply message" rows={3} placeholder="Thanks {{first_name}}! Our pricing starts at..." required />
             </Field>
             <Button type="submit" variant="secondary">Add saved reply</Button>
           </form>
@@ -180,7 +180,11 @@ export default async function SettingsPage({
               Paste this on any page to add a live chat bubble. Visitors are matched by a browser id, so a
               returning visitor keeps their thread.
             </p>
-            <pre className="mt-3 overflow-x-auto rounded-lg border border-border bg-surface-2 p-3 text-xs text-muted">
+            <pre
+              tabIndex={0}
+              aria-label="Web chat embed code"
+              className="mt-3 overflow-x-auto rounded-lg border border-border bg-surface-2 p-3 text-xs text-muted"
+            >
               {embedSnippet}
             </pre>
             <a

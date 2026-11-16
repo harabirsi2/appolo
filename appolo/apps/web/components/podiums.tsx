@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cn } from "@appolo/ui";
+import { REVIEW_FIELD_COPY } from "@/lib/review-copy";
 import { videoEmbed } from "@/lib/video-embed";
 import { ReviewEngagement } from "./review-engagement";
 import type { MediaKind } from "@appolo/core/ranking";
@@ -388,7 +389,10 @@ export function ReviewCard({ review, className }: { review: ReviewCardData; clas
         <p className="mt-1.5 text-[11px] text-muted-2">Fav character: <span className="text-ink">{review.favoriteCharacter}</span></p>
       ) : null}
       {review.favoriteTracks && review.favoriteTracks.length > 0 ? (
-        <p className="mt-0.5 text-[11px] text-muted-2">Fav tracks: <span className="text-ink">{review.favoriteTracks.join(", ")}</span></p>
+        <p className="mt-0.5 text-[11px] text-muted-2">
+          {REVIEW_FIELD_COPY[review.kind].favorites}:{" "}
+          <span className="text-ink">{review.favoriteTracks.join(", ")}</span>
+        </p>
       ) : null}
       {review.tags.length > 0 ? (
         <div className="mt-auto flex flex-wrap gap-1 pt-2.5">

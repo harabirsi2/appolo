@@ -245,7 +245,7 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
 | `pnpm e2e` | portable HTTP e2e suite (server must be running) |
 | `pnpm preflight` | health + database check (server must be running) |
 | `pnpm visual` | Playwright visual checks against Linux baselines (server must be running) |
-| `pnpm a11y` | axe accessibility check on 8 screens (server must be running) |
+| `pnpm a11y` | axe accessibility check on 9 screens (server must be running) |
 | `pnpm media-art` | guard that every MediaArt call passes the catalog cover |
 | `pnpm verify` | preflight → role guard → media-art → typecheck → test → visual → e2e → gap audit (server must be running) |
 | `pnpm smoke` | HTTP end-to-end test (server must be running) |

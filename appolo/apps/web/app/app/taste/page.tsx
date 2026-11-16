@@ -13,7 +13,7 @@ export const metadata = { title: "Taste DNA" };
 export default async function TastePage() {
   const session = await requireSession();
   const dna = await tasteDna(session.org.id);
-  const maxKind = Math.max(1, ...dna.kinds.map((entry) => entry.count));
+  const kindTotal = Math.max(1, dna.rated);
 
   return (
     <div className="px-5 pt-4 pb-24">
@@ -68,13 +68,13 @@ export default async function TastePage() {
                   <div className="flex items-center justify-between text-[12px]">
                     <span className="font-medium text-ink">{MEDIA_KIND_LABELS[entry.kind]}</span>
                     <span className="text-muted-2">
-                      {entry.count} · {entry.average.toFixed(1)} avg
+                      {entry.count} of {kindTotal} · {entry.average.toFixed(1)} avg
                     </span>
                   </div>
                   <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
                     <span
                       className="block h-full rounded-full bg-brand/70"
-                      style={{ width: `${Math.max(6, (entry.count / maxKind) * 100)}%` }}
+                      style={{ width: `${(entry.count / kindTotal) * 100}%` }}
                     />
                   </div>
                 </Link>

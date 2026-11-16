@@ -108,11 +108,24 @@ export async function listCatalog(options: {
     filters.push(sql`(${catalogItems.title} ilike ${like} or ${catalogItems.subtitle} ilike ${like})`);
   }
 
+  const query = options.q?.trim();
+  const order = query
+    ? [
+        sql`case
+          when lower(${catalogItems.title}) = lower(${query}) then 3
+          when ${catalogItems.title} ilike ${`${query}%`} then 2
+          when ${catalogItems.subtitle} ilike ${`${query}%`} then 1
+          else 0
+        end desc`,
+        sql`greatest(similarity(${catalogItems.title}, ${query}), coalesce(similarity(${catalogItems.subtitle}, ${query}), 0)) desc`,
+        catalogItems.title,
+      ]
+    : [catalogItems.title];
   const rows = await db
     .select()
     .from(catalogItems)
     .where(filters.length ? and(...filters) : undefined)
-    .orderBy(catalogItems.title)
+    .orderBy(...order)
     .limit(Math.min(options.limit ?? 60, 200));
 
   return rows.map(mapCatalogItem);

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { MEDIA_KIND_LABELS, scoreBand } from "@appolo/core";
 import { videoEmbed } from "@/lib/video-embed";
+import { REVIEW_FIELD_COPY } from "@/lib/review-copy";
 import type { ReviewView } from "@/lib/services/social";
 import { MediaArt } from "./media-art";
 import { Avatar, Icon, ScoreText } from "./podiums";
@@ -91,7 +92,8 @@ export function ReviewScreen({
 
         {review.favoriteTracks.length > 0 ? (
           <p className="mt-1 text-[12px] text-muted-2">
-            Favourite tracks: <span className="text-ink">{review.favoriteTracks.join(", ")}</span>
+            {REVIEW_FIELD_COPY[review.kind].favorites}:{" "}
+            <span className="text-ink">{review.favoriteTracks.join(", ")}</span>
           </p>
         ) : null}
 

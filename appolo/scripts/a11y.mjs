@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Accessibility audit for the screens covered by the visual suite.
+ * Accessibility audit for the visual-suite screens plus settings.
  *
  * Runs axe-core against the running app (same prerequisite as `pnpm visual`),
  * and fails on any serious or critical violation. The axe source is fetched
@@ -25,6 +25,7 @@ const SCREENS = [
   { path: "/app/rankings?kind=movie", auth: true, name: "rankings" },
   { path: "/app/profile", auth: true, name: "profile" },
   { path: "/app/taste", auth: true, name: "taste" },
+  { path: "/app/settings", auth: true, name: "settings" },
 ];
 
 let axeSource;

@@ -57,7 +57,8 @@ export function ProfileScreen({
         <div
           className="absolute inset-0"
           style={{
-            background: `linear-gradient(120deg, hsl(${profile.avatarHue} 55% 26%) 0%, hsl(${(profile.avatarHue + 50) % 360} 45% 14%) 55%, transparent 100%)`,
+            background:
+              "radial-gradient(120% 180% at 10% 0%, rgba(16,185,129,0.32) 0%, rgba(5,150,105,0.14) 46%, transparent 76%), linear-gradient(120deg, rgba(52,211,153,0.10) 0%, transparent 65%)",
           }}
         />
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black" />
@@ -246,7 +247,9 @@ export function ProfileScreen({
                         {champion.year ? ` · ${champion.year}` : ""}
                       </p>
                       <p className="mt-2 text-[11px] text-muted-2">
-                        {champion.wins}W · {champion.losses}L · {champion.matches} matchups
+                        {champion.matches > 0
+                          ? `${champion.wins}W · ${champion.losses}L · ${champion.matches} matchups`
+                          : "No matchups yet"}
                       </p>
                     </div>
                     <ScoreText score={champion.score} className="text-[26px]" />

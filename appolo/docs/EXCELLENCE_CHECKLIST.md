@@ -7,7 +7,7 @@ Legend: **Done** · **Partial** · **Open**
 
 Last verification: `pnpm verify` → preflight OK, typecheck clean, e2e **27/27**,
 visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
-**56/56**; axe **0 violations** on 8 screens. Image measurement: Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
+**56/56**; axe **0 violations** on 9 screens. Image measurement: Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 
 ---
 
@@ -89,7 +89,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 | Touch targets, focus ring, reduced motion | Done | 44 px targets, `:focus-visible`, reduced-motion guard |
 | Icon labelling and keyboard controls | Partial | `aria-label` on icon buttons, keys for tie/undecided; no full keyboard-navigation audit |
 | Visual regression | Done | 8-screen pixel baselines, 0.1% tolerance |
-| Accessibility audit | Done | axe-core on 8 screens: 0 serious/critical violations; `pnpm a11y`; skip link added |
+| Accessibility audit | Done | axe-core on 9 screens: 0 serious/critical violations; `pnpm a11y`; skip link added |
 | Desktop editorial grid, light theme | Open | explicitly deferred in roadmap Phase 1 |
 
 ## 8. Architecture and engineering

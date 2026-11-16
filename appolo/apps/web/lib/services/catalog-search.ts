@@ -118,11 +118,26 @@ async function localSearch(
 ): Promise<CatalogItem[]> {
   const db = getDb();
   const filters = categoryFilters(category, query, genre);
+  // Substring matching decides which rows are eligible; relevance decides
+  // their order. Exact and prefix matches come first, then pg_trgm similarity,
+  // so searching "the" no longer returns an alphabetical dump.
+  const order = query
+    ? [
+        sql`case
+          when lower(${catalogItems.title}) = lower(${query}) then 3
+          when ${catalogItems.title} ilike ${`${query}%`} then 2
+          when ${catalogItems.subtitle} ilike ${`${query}%`} then 1
+          else 0
+        end desc`,
+        sql`greatest(similarity(${catalogItems.title}, ${query}), coalesce(similarity(${catalogItems.subtitle}, ${query}), 0)) desc`,
+        catalogItems.title,
+      ]
+    : [catalogItems.title];
   const rows = await db
     .select()
     .from(catalogItems)
     .where(filters.length ? and(...filters) : undefined)
-    .orderBy(catalogItems.title)
+    .orderBy(...order)
     .limit(limit)
     .offset(offset);
   return rows.map(mapCatalogItem);

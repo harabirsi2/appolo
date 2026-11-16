@@ -147,6 +147,43 @@ await check("catalog returns at least four movie titles", () => {
   assert.ok(items.length >= 4, `only ${items.length} items`);
 });
 
+// Both accounts are still unrated here. "Her" gives the search fixture an
+// exact title, title prefixes (Hero, Heroes), subtitle prefixes (Hermann
+// Hesse) and fuzzy matches (Werner Herzog), so this checks the real ordering
+// returned by the API rather than a unit-test stand-in.
+const searchOrder = await call("/api/search?q=Her&limit=60", { cookie: alpha.cookie });
+const unratedSearch = await call("/app/search?q=Her", { cookie: alpha.cookie });
+await check("search ranks exact and prefix matches before fuzzy matches and labels unrated results", () => {
+  assert.equal(searchOrder.status, 200, `search API returned ${searchOrder.status}`);
+  const results = searchOrder.json?.items ?? [];
+  assert.ok(results.length >= 10, `only ${results.length} search results`);
+
+  const query = "her";
+  const rank = (item) => {
+    const title = item.title.toLowerCase();
+    const subtitle = (item.subtitle ?? "").toLowerCase();
+    if (title === query) return 3;
+    if (title.startsWith(query)) return 2;
+    if (subtitle.startsWith(query)) return 1;
+    return 0;
+  };
+  const ranks = results.map(rank);
+  const firstFuzzy = ranks.indexOf(0);
+
+  assert.equal(ranks[0], 3, "the exact title was not first");
+  assert.ok(ranks.includes(2), "the fixture returned no prefix matches");
+  assert.ok(firstFuzzy > 0, "the fixture returned no fuzzy matches");
+  assert.ok(
+    ranks.slice(0, firstFuzzy).every((value) => value > 0),
+    "a fuzzy match was returned before an exact/prefix match",
+  );
+  assert.deepEqual(ranks, [...ranks].sort((a, b) => b - a), "search categories are not ordered");
+
+  assert.equal(unratedSearch.status, 200, `search page returned ${unratedSearch.status}`);
+  assert.match(unratedSearch.text, /Her/);
+  assert.match(unratedSearch.text, /Not rated/);
+});
+
 const sample = items.slice(0, 6);
 const alphaScores = [9.5, 9, 8.5, 7.5, 7, 6.5];
 

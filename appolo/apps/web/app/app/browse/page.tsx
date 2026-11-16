@@ -134,7 +134,7 @@ export default async function BrowsePage({
         ))}
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-3">
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         {items.map((item) => {
           const mineScore = myScores.get(item.id);
           const band = item.average === null ? null : scoreBand(item.average);
@@ -146,7 +146,7 @@ export default async function BrowsePage({
                   title={item.title}
                   imageUrl={item.imageUrl}
                   genres={item.genres}
-                  className="aspect-square w-full rounded-xl"
+                  className="aspect-[2/3] w-full rounded-xl"
                 />
                 {item.average !== null ? (
                   <span className="absolute bottom-2 right-2 rounded-md bg-black/75 px-1.5 py-0.5 text-[11px] font-bold text-brand backdrop-blur">
