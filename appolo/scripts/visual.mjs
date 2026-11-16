@@ -165,8 +165,13 @@ try {
       // Playwright hides the text caret with an inline style. If that lands
       // while React is hydrating a focused input, React reports a mismatch.
       // Blur instead and leave the caret alone for a stable capture.
-      await activePage.evaluate(() => {
+      await activePage.evaluate(async () => {
         if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        // A slow runner can reach networkidle before the local emoji face is
+        // ready and capture monochrome fallback glyphs. Wait for the font set
+        // and one paint before taking the screenshot.
+        await document.fonts.ready;
+        await new Promise((resolve) => requestAnimationFrame(() => resolve()));
       });
       await activePage.screenshot({
         path: file,
