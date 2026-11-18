@@ -3,6 +3,19 @@
 Notable, user-visible or architectural changes. Dates are ISO. Entries describe
 why the change was made, not every commit.
 
+## Local visual pixel gate
+
+- **`pnpm visual:local`.** Pixel comparison used to run only in CI because the
+  committed baselines are rendered on the Ubuntu runner and text rasterisation
+  differs across operating systems, so a Windows or macOS run could not see a
+  layout regression at all. The script now accepts `--local`, which compares
+  against a git-ignored `scripts/visual-baselines-local/` set accepted on this
+  machine (`pnpm visual:local:accept`). Later runs report the same pixel diff CI
+  does and write `<screen>.diff.png`; `--update` still refuses to touch the
+  committed CI baselines outside the runner. Verified by accepting the set
+  (8/8, 0 px), re-running (8/8, 0 px) and swapping one baseline, which failed
+  that screen at 8.14% with a diff image.
+
 ## Search relevance, settings accessibility, honest counters
 
 - **Search relevance.** Both `/api/search` and `/api/catalog` matched with a bare

@@ -19,3 +19,5 @@ coverage/
 Thumbs.db
 # screenshots from scripts/visual.mjs
 scripts/visual-output/
+# this machine's accepted visual baselines (CI baselines are committed)
+scripts/visual-baselines-local/

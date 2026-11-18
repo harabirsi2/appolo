@@ -27,6 +27,8 @@
     "preflight": "node scripts/preflight.mjs",
     "db:role-guard": "pnpm --filter @appolo/db role-guard",
     "visual": "node scripts/visual.mjs",
+    "visual:local": "node scripts/visual.mjs --local",
+    "visual:local:accept": "node scripts/visual.mjs --local --update",
     "media-art": "node scripts/media-art.mjs",
     "verify": "pnpm preflight && pnpm db:role-guard && pnpm media-art && pnpm typecheck && pnpm test && pnpm visual && pnpm e2e && pnpm gap-audit",
     "ci": "powershell -ExecutionPolicy Bypass -File scripts/ci.ps1",

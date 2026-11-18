@@ -89,7 +89,7 @@ Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 | Responsive behaviour verified | Done | 320/390/768/1280 px checked, no horizontal overflow |
 | Touch targets, focus ring, reduced motion | Done | 44 px targets, `:focus-visible`, reduced-motion guard |
 | Icon labelling and keyboard controls | Partial | `aria-label` on icon buttons, keys for tie/undecided; no full keyboard-navigation audit |
-| Visual regression | Done | 8-screen pixel baselines, 0.1% tolerance |
+| Visual regression | Done | 8-screen pixel baselines, 0.1% tolerance in CI; `pnpm visual:local` adds the same diff against this machine's accepted baselines |
 | Accessibility audit | Done | axe-core on 9 screens: 0 serious/critical violations; `pnpm a11y`; skip link added; settings fields labelled and the embed snippet is keyboard-scrollable |
 | Desktop editorial grid, light theme | Open | explicitly deferred in roadmap Phase 1 |
 

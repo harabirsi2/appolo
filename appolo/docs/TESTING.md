@@ -19,7 +19,8 @@ What runs, how to run it, and what is not covered.
 | `pnpm preflight` | App reachable and database answering (`select 1`) | pass |
 | `pnpm typecheck` | All workspaces | pass |
 | `pnpm e2e` | 40 HTTP checks: health, auth guards, signup, search relevance, literal wildcards and unrated labeling, rating, tie, undo, model rebuild, matchup-count consistency, follow, feed explanations, library/collections/activity destinations, taste comparison, moderation, media export, contact export (formula neutralization + rate limit), Spotify state acceptance/rejection and connect cookie, shared import quota, provider-search quota, deletion | **40/40** |
-| `pnpm visual` | 8 screens; CI pixel comparison against CI-runner baselines, 0.1% tolerance | **8/8** |
+| `pnpm visual` | 8 screens; structural checks everywhere, pixel comparison against CI-runner baselines in CI (0.1% tolerance) | **8/8** |
+| `pnpm visual:local` | 8 screens; structural checks plus pixel comparison against this machine's accepted baselines | **8/8, 0 px** |
 | `pnpm a11y` | axe-core on 9 screens (including account settings); fails on serious/critical violations, a non-200 status or an unexpected redirect | **0 violations** |
 | `pnpm db:role-guard` | Fails if the app's database role is a superuser or has `BYPASSRLS` | pass |
 | `pnpm db:rls-test` | Cross-tenant isolation through `withOrg()` on orgs, locations, contacts, ratings, reviews, notifications and pods; refuses to run under a role that bypasses RLS | **16/16** |
@@ -27,13 +28,22 @@ What runs, how to run it, and what is not covered.
 | `pnpm verify` | preflight → role guard → media-art → typecheck → unit tests → visual → e2e → gap audit (the gate used before commits and in CI) | pass |
 
 `pnpm visual` compares against baselines named `<screen>.png` that were
-generated on the GitHub Actions Ubuntu runner. Pixel comparison runs only in
-CI, where the font stack and rasterizer are fixed. Locally, the same command
-still checks pages, titles, headings, console/page/5xx errors and blank
-screenshots, but skips pixel comparison because text rasterisation differs even
-between Linux hosts. Refresh the baselines in CI with
-`VISUAL_UPDATE=1 pnpm visual`, then copy the screenshots from the visual-output
-artifact; the app and seeded demo database must be running.
+generated on the GitHub Actions Ubuntu runner. Pixel comparison runs in CI,
+where the font stack and rasterizer are fixed. Elsewhere the same command still
+checks pages, titles, headings, console/page/5xx errors and blank screenshots,
+but skips pixel comparison because text rasterisation differs between operating
+systems. Refresh the committed baselines in CI with `VISUAL_UPDATE=1 pnpm visual`,
+then copy the screenshots from the visual-output artifact; the app and seeded
+demo database must be running.
+
+To catch layout regressions locally, `pnpm visual:local` compares against
+`scripts/visual-baselines-local/`, a git-ignored set accepted on this machine
+with `pnpm visual:local:accept`. The first run writes the set; later runs report
+a pixel diff exactly like CI and write `<screen>.diff.png` next to the
+screenshots. This proves a screen has not changed since you accepted it on this
+machine. It does not prove the render matches the committed Ubuntu baselines —
+only CI does that — so re-accept only when a change is intentional, and let CI
+be the authority before merging.
 
 The body and display faces are vendored in `apps/web/app/fonts` and loaded
 through `next/font/local`: Inter 4.001 Latin, Fraunces 1.000 Latin, and a small
