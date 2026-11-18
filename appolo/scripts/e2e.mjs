@@ -275,12 +275,37 @@ await check("model rebuilds from comparison history and records the tie", () => 
 });
 
 const allRankings = await call("/app/rankings", { cookie: alpha.cookie });
+const allRankingsData = await call("/api/rankings", { cookie: alpha.cookie });
 await check("all rankings view sorts by score and lets the model break ties", () => {
   assert.equal(allRankings.status, 200);
-  // The visible number is the score, so the list must be ordered by it; the
-  // fitted model only settles equal scores. Ordering by the model first used
-  // to put a 4.5 above a 9.5.
+  assert.equal(allRankingsData.status, 200);
   assert.match(allRankings.text, /Highest score first · model breaks ties from \d+ comparisons across/);
+  const rows = allRankingsData.json.rankings.map(({ id, score }) => ({
+    score,
+    offset: allRankings.text.indexOf(`href="/app/item/${id}"`),
+  }));
+  assert.ok(rows.length >= 4 && rows.every(({ offset }) => offset >= 0), "ranked titles missing from the page");
+  rows.sort((a, b) => a.offset - b.offset);
+  assert.ok(rows.every(({ score }, i) => i === 0 || rows[i - 1].score >= score), "rendered scores are not descending");
+});
+
+await check("catalog and search prioritize exact titles and treat wildcards literally", async () => {
+  for (const route of ["/api/catalog", "/api/search"]) {
+    const exact = await call(`${route}?kind=movie&q=Alien&limit=6`, { cookie: alpha.cookie });
+    const literal = await call(`${route}?kind=movie&q=%25&limit=6`, { cookie: alpha.cookie });
+    assert.equal(exact.status, 200, route);
+    assert.equal(exact.json.items[0]?.title, "Alien", route);
+    assert.equal(literal.status, 200, route);
+    assert.ok(literal.json.items.every(({ title, subtitle }) => title.includes("%") || subtitle?.includes("%")), route);
+  }
+});
+
+const tasteAfterVote = await call("/app/taste", { cookie: alpha.cookie });
+await check("one logged vote counts as one matchup across rankings and Taste DNA", () => {
+  assert.equal(tasteAfterVote.status, 200);
+  assert.equal(allRankingsData.json.stats.matchups, 1);
+  assert.ok(allRankings.text.replaceAll("<!-- -->", "").includes("ranked · 1 matchup · "), "rankings did not show one matchup");
+  assert.ok(tasteAfterVote.text.replaceAll("<!-- -->", "").includes(">1 matchup</p>"), "Taste DNA did not show one matchup");
 });
 
 const undo = await call(`/api/rankings/${first.id}/undo`, { method: "POST", cookie: alpha.cookie });

@@ -18,9 +18,9 @@ What runs, how to run it, and what is not covered.
 | `pnpm test` | Core logic: ranking model, ranking quality, Elo, taste similarity, feed ranking, community shrinkage, coordinated-vote detection, CSV-injection escaping, delivery-status ordering | **70/70** |
 | `pnpm preflight` | App reachable and database answering (`select 1`) | pass |
 | `pnpm typecheck` | All workspaces | pass |
-| `pnpm e2e` | 40 HTTP checks: health, auth guards, signup, search relevance and unrated labeling, rating, tie, undo, model rebuild, follow, feed explanations, library/collections/activity destinations, taste comparison, moderation, media export, contact export (formula neutralization + rate limit), Spotify state acceptance/rejection and connect cookie, shared import quota, provider-search quota, deletion | **40/40** |
+| `pnpm e2e` | 40 HTTP checks: health, auth guards, signup, search relevance, literal wildcards and unrated labeling, rating, tie, undo, model rebuild, matchup-count consistency, follow, feed explanations, library/collections/activity destinations, taste comparison, moderation, media export, contact export (formula neutralization + rate limit), Spotify state acceptance/rejection and connect cookie, shared import quota, provider-search quota, deletion | **40/40** |
 | `pnpm visual` | 8 screens; CI pixel comparison against CI-runner baselines, 0.1% tolerance | **8/8** |
-| `pnpm a11y` | axe-core on 9 screens; fails on serious/critical violations | **0 violations** |
+| `pnpm a11y` | axe-core on 9 screens (including account settings); fails on serious/critical violations, a non-200 status or an unexpected redirect | **0 violations** |
 | `pnpm db:role-guard` | Fails if the app's database role is a superuser or has `BYPASSRLS` | pass |
 | `pnpm db:rls-test` | Cross-tenant isolation through `withOrg()` on orgs, locations, contacts, ratings, reviews, notifications and pods; refuses to run under a role that bypasses RLS | **16/16** |
 | `pnpm db:idempotency-test` | Webhook idempotency: `(org_id, provider_sid)` and `(message_id, event)` are unique, so a replayed provider callback is a no-op | **5/5** |

@@ -66,11 +66,12 @@ export default async function SearchPage({
     <div className="px-5 pt-6">
       <h1 className="text-[34px] font-extrabold tracking-tight text-ink">Search</h1>
 
-      <form action="/app/search" className="relative mt-4">
+      <form action="/app/search" role="search" className="relative mt-4">
         <Icon name="search" className="pointer-events-none absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-muted-2" />
         <input
           name="q"
           defaultValue={query}
+          aria-label="Search titles and people"
           placeholder="Search songs, movies, users..."
           className="h-11 w-full rounded-xl border border-white/[0.06] bg-[#1a1a1d] pl-10 pr-3 text-[14px] text-ink placeholder:text-muted-2 focus:border-white/20 focus:outline-none"
         />

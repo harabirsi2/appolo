@@ -3,6 +3,33 @@
 Notable, user-visible or architectural changes. Dates are ISO. Entries describe
 why the change was made, not every commit.
 
+## Search relevance, settings accessibility, honest counters
+
+- **Search relevance.** Both `/api/search` and `/api/catalog` matched with a bare
+  `ilike '%q%'` and then ordered alphabetically, so a query like "alien" could
+  list "Aliens" or an unrelated title before the exact match. Matching is now
+  ranked: exact title, then prefix, then contains, then subtitle, with title and
+  id as deterministic tie-breaks. The same helper escapes `%`, `_` and `\`, so a
+  wildcard typed by the user is matched literally instead of scanning the
+  catalog. Covered by an e2e check on both routes.
+- **Settings accessibility.** The saved-reply form now associates each `Field`
+  label with its input (`htmlFor`/`id`, plus `aria-describedby` for the
+  template hint), and the web-chat embed `<pre>` is focusable so its horizontal
+  overflow can be scrolled from the keyboard. `Field` gained optional
+  `htmlFor`/`hintId` props; existing call sites are unchanged.
+- **Settings in the a11y gate.** `pnpm a11y` now audits `/app/settings` and runs
+  public screens in a signed-out context, so `/login` is checked as a visitor
+  instead of being redirected to `/app`. It also fails when a screen returns a
+  non-200 status or lands on an unexpected URL, which is how the login redirect
+  hid a real screen from the audit.
+- **Counters read the comparison log.** The header and Taste DNA count
+  `item_matchups` rows rather than summing the denormalised per-item counter,
+  which double-counted every vote. Pluralisation is correct at one matchup.
+- **Rankings order.** The list is sorted by the score it displays, with the
+  fitted model only breaking ties; equal scores keep model-backed rows adjacent
+  so the comparator stays transitive. The "saved order overrides the default"
+  copy no longer claims the model drives the order.
+
 ## Obsidian Velvet hardening
 
 - **Spotify OAuth state.** The authorization request now stores a short-lived

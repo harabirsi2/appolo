@@ -251,7 +251,10 @@ export function RatingCurve({
 
 export function ScoreText({ score, className }: { score: number | null; className?: string }) {
   return (
-    <span className={cn("num font-semibold", score === null ? "text-muted-2" : "text-brand", className)}>
+    <span
+      className={cn("num font-semibold", score === null ? "text-muted-2" : "text-brand", className)}
+      aria-label={score === null ? "Not rated" : `${score.toFixed(1)} out of 10`}
+    >
       {score === null ? "—" : score.toFixed(1)}
     </span>
   );
