@@ -11,9 +11,11 @@
   },
   "dependencies": {
     "@appolo/config": "workspace:*",
+    "@appolo/core": "workspace:*",
     "@appolo/db": "workspace:*",
     "bullmq": "^5.34.0",
-    "ioredis": "^5.4.2"
+    "ioredis": "^5.4.2",
+    "postgres": "^3.4.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

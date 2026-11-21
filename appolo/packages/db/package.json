@@ -15,6 +15,7 @@
     "rls-test": "tsx src/rls-test.ts",
     "idempotency-test": "tsx src/idempotency-test.ts",
     "role-guard": "tsx src/role-guard.ts",
+    "merge-test": "tsx src/catalog-merge-test.ts",
     "reset": "tsx src/reset.ts",
     "typecheck": "tsc --noEmit"
   },

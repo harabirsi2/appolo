@@ -18,3 +18,4 @@ export * from "./coordination";
 export * from "./feed-rank";
 export * from "./coalesce";
 export * from "./metadata";
+export * from "./catalog/normalize";

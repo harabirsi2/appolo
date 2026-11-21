@@ -2,23 +2,33 @@ import { after } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import type { MediaKind } from "@appolo/core";
 import { getDb, schema } from "@/lib/db";
+import { likeContains } from "./like-pattern";
+import { enqueueEnrichment } from "./catalog-enrichment";
 
 const { catalogItems } = schema;
 
 /**
  * Optional live catalog search. Off unless CATALOG_PROVIDERS is set, e.g.
  *
- *   CATALOG_PROVIDERS=itunes,openlibrary,tmdb
+ *   CATALOG_PROVIDERS=itunes,openlibrary,tmdb,rawg
  *   TMDB_API_KEY=...            (only for the tmdb provider)
+ *   RAWG_API_KEY=...            (only for the rawg provider)
  *
- * When someone searches the catalog and few local titles match, this fetches
- * matching titles from the enabled providers and stores them in catalog_items
- * so they can be ranked like any other title. Best effort: failures, timeouts
- * and rate limits never break the search itself.
+ * Provider-first flow, in order:
+ *
+ *  1. search returns local rows immediately (never waits on a third party);
+ *  2. matching provider hits are inserted as `enrichment_status = 'pending'`
+ *     with a provider cover, so they are rankable right away;
+ *  3. one durable row per hit lands in catalog_enrichment_queue;
+ *  4. the BullMQ worker (apps/worker) upgrades them: details, trailer, genres,
+ *     cached cover, then flips them to 'ready'.
+ *
+ * Failures, timeouts and rate limits never break the search itself.
  *
  *   itunes       movies, music albums, podcasts (no key)
  *   openlibrary  books (no key)
  *   tmdb         movies and TV (needs TMDB_API_KEY; show TMDB attribution in the UI)
+ *   rawg         video games (needs RAWG_API_KEY; attribution: "Powered by RAWG")
  *
  * Check each provider's terms and attribution rules before enabling it in production.
  */
@@ -32,15 +42,27 @@ interface Candidate {
   description: string | null;
   genres: string[];
   externalRef: string;
+  externalId: string;
+  source: string;
 }
 
 type Json = Record<string, unknown>;
 
 const TIMEOUT_MS = 4_000;
 const CACHE_TTL_MS = 10 * 60_000;
-const MAX_REQUESTS_PER_MINUTE = 15;
 const LOCAL_MATCHES_ENOUGH = 5;
 const KINDS: readonly MediaKind[] = ["movie", "tv", "music", "podcast", "book", "game"];
+
+/**
+ * Per-minute ceiling for the *request path*. Serverless web instances share a
+ * provider quota with the worker, so this stays well under each provider's
+ * limit; the worker has its own limiter (CATALOG_WORKER_REQ_PER_MIN). Raise it
+ * per install with CATALOG_PROVIDER_REQ_PER_MIN once you know your plan.
+ */
+function maxRequestsPerMinute(): number {
+  const raw = Number(process.env.CATALOG_PROVIDER_REQ_PER_MIN ?? "");
+  return Number.isFinite(raw) && raw >= 1 && raw <= 600 ? Math.floor(raw) : 60;
+}
 
 const searched = new Map<string, number>();
 let windowStart = 0;
@@ -65,7 +87,7 @@ function allowRequest(): boolean {
     windowStart = now;
     windowCount = 0;
   }
-  if (windowCount >= MAX_REQUESTS_PER_MINUTE) return false;
+  if (windowCount >= maxRequestsPerMinute()) return false;
   windowCount += 1;
   return true;
 }
@@ -122,6 +144,8 @@ async function searchItunes(kind: MediaKind, query: string): Promise<Candidate[]
       description: text(row.longDescription, 1500) || text(row.shortDescription, 1500) || null,
       genres: genre ? [genre] : [],
       externalRef: `itunes:${kind}:${String(id)}`,
+      externalId: String(id),
+      source: "itunes",
     });
   }
   return out;
@@ -147,6 +171,8 @@ async function searchOpenLibrary(query: string): Promise<Candidate[]> {
       description: null,
       genres: [],
       externalRef: `openlibrary:${key}`,
+      externalId: key,
+      source: "openlibrary",
     });
   }
   return out;
@@ -175,6 +201,46 @@ async function searchTmdb(kind: "movie" | "tv", query: string): Promise<Candidat
       description: text(row.overview, 1500) || null,
       genres: [],
       externalRef: `tmdb:${kind}:${String(row.id)}`,
+      externalId: String(row.id),
+      source: "tmdb",
+    });
+  }
+  return out;
+}
+
+/**
+ * Games. RAWG is the provider we ship (see docs/CATALOG.md): a free key by
+ * email, 20 000 requests/month, no OAuth dance, and cover art on the search
+ * response, which is exactly what the pending-first flow needs. IGDB needs a
+ * Twitch developer app plus a client-credentials token exchange and its ToS
+ * requires a data-source credit; it is the better catalogue eventually, but not
+ * for a solo dev running one instance.
+ */
+async function searchRawg(query: string): Promise<Candidate[]> {
+  const key = process.env.RAWG_API_KEY?.trim();
+  if (!key) return [];
+  const data = await getJson(
+    `https://api.rawg.io/api/games?key=${encodeURIComponent(key)}&search=${encodeURIComponent(query)}&page_size=8`,
+  );
+  const out: Candidate[] = [];
+  for (const row of list(data?.results)) {
+    const title = text(row.name, 200);
+    if (!row.id || !title) continue;
+    const platforms = list(row.platforms)
+      .map((entry) => text((entry.platform as Json | undefined)?.name, 60))
+      .filter(Boolean);
+    const genres = list(row.genres).map((genre) => text(genre.name, 60)).filter(Boolean);
+    out.push({
+      kind: "game",
+      title,
+      subtitle: platforms[0] ?? "",
+      year: yearOf(row.released),
+      imageUrl: httpsOnly(text(row.background_image, 500)),
+      description: text(row.description_raw, 1500) || null,
+      genres,
+      externalRef: `rawg:${String(row.id)}`,
+      externalId: String(row.id),
+      source: "rawg",
     });
   }
   return out;
@@ -182,6 +248,7 @@ async function searchTmdb(kind: "movie" | "tv", query: string): Promise<Candidat
 
 async function searchForKind(kind: MediaKind, query: string, on: Set<string>): Promise<Candidate[]> {
   const tmdb = on.has("tmdb") && Boolean(process.env.TMDB_API_KEY?.trim());
+  const rawg = on.has("rawg") && Boolean(process.env.RAWG_API_KEY?.trim());
   switch (kind) {
     case "movie":
       return tmdb ? searchTmdb("movie", query) : on.has("itunes") ? searchItunes("movie", query) : [];
@@ -192,6 +259,8 @@ async function searchForKind(kind: MediaKind, query: string, on: Set<string>): P
       return on.has("itunes") ? searchItunes(kind, query) : [];
     case "book":
       return on.has("openlibrary") ? searchOpenLibrary(query) : [];
+    case "game":
+      return rawg ? searchRawg(query) : [];
     default:
       return [];
   }
@@ -228,6 +297,59 @@ export function scheduleCatalogEnrichment(kind: string | undefined, query: strin
   }
 }
 
+/**
+ * Store provider hits as pending rows and hand the upgrade work to the queue.
+ * Returns the number of newly inserted rows.
+ */
+export async function storePendingCandidates(found: Candidate[]): Promise<number> {
+  if (found.length === 0) return 0;
+  const db = getDb();
+  const inserted = await db
+    .insert(catalogItems)
+    .values(
+      found.map((item) => ({
+        kind: item.kind,
+        title: item.title,
+        subtitle: item.subtitle,
+        year: item.year,
+        imageUrl: item.imageUrl,
+        description: item.description,
+        genres: item.genres,
+        externalRef: item.externalRef,
+        externalId: item.externalId,
+        source: item.source,
+        links: {},
+        tags: [],
+        // Rankable now, upgraded by the worker.
+        enrichmentStatus: "pending",
+        entityType: "item",
+      })),
+    )
+    .onConflictDoNothing()
+    .returning({ externalRef: catalogItems.externalRef });
+
+  const fresh = new Set(inserted.map((row) => row.externalRef ?? ""));
+  const requests = found
+    .filter((item) => fresh.has(item.externalRef))
+    .map((item) => ({
+      externalRef: item.externalRef,
+      source: item.source,
+      kind: item.kind,
+      payload: {
+        title: item.title,
+        subtitle: item.subtitle,
+        year: item.year,
+        imageUrl: item.imageUrl,
+        externalId: item.externalId,
+        source: item.source,
+        kind: item.kind,
+      },
+    }));
+  // Durable even if the queue is unavailable right now.
+  await enqueueEnrichment(requests).catch(() => 0);
+  return inserted.length;
+}
+
 /** Fetch titles for a search from the enabled providers and store them in the shared catalog. */
 export async function enrichCatalogFromProviders(kind: string | undefined, rawQuery: string): Promise<void> {
   const on = enabledProviders();
@@ -246,7 +368,7 @@ export async function enrichCatalogFromProviders(kind: string | undefined, rawQu
 
   try {
     const db = getDb();
-    const like = `%${query}%`;
+    const like = likeContains(query);
     const [local] = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(catalogItems)
@@ -259,24 +381,7 @@ export async function enrichCatalogFromProviders(kind: string | undefined, rawQu
     if ((local?.n ?? 0) >= LOCAL_MATCHES_ENOUGH) return;
 
     const found = (await Promise.all(kinds.map((k) => searchForKind(k, query, on)))).flat();
-    if (found.length === 0) return;
-    await db
-      .insert(catalogItems)
-      .values(
-        found.map((item) => ({
-          kind: item.kind,
-          title: item.title,
-          subtitle: item.subtitle,
-          year: item.year,
-          imageUrl: item.imageUrl,
-          description: item.description,
-          genres: item.genres,
-          externalRef: item.externalRef,
-          links: {},
-          tags: [],
-        })),
-      )
-      .onConflictDoNothing();
+    await storePendingCandidates(found);
   } catch {
     // Catalog enrichment is best effort; the local search still works.
   }

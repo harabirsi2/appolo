@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -115,6 +116,8 @@ export const users = pgTable(
     totpSecret: text("totp_secret"),
     emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    /** Platform moderators can review abuse reports across every workspace. */
+    isModerator: boolean("is_moderator").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -422,7 +425,7 @@ export const messages = pgTable(
     conversationId: uuid("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
     direction: messageDirectionEnum("direction").notNull(),
     senderType: messageSenderEnum("sender_type").notNull(),
-    senderId: uuid("sender_id"),
+    senderId: uuid("sender_id").references(() => users.id, { onDelete: "set null" }),
     body: text("body").notNull().default(""),
     media: jsonb("media").notNull().default(sql`'[]'::jsonb`),
     providerSid: text("provider_sid"),
@@ -544,7 +547,7 @@ export const reviewRequests = pgTable(
     followUpCount: integer("follow_up_count").notNull().default(0),
     lastFollowUpAt: timestamp("last_follow_up_at", { withTimezone: true }),
     platformKind: reviewPlatformKindEnum("platform_kind"),
-    campaignId: uuid("campaign_id"),
+    campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => ({
@@ -1032,7 +1035,11 @@ export const featureFlags = pgTable(
   "feature_flags",
   {
     id: pk(),
-    orgId: uuid("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+    /**
+     * Required: the tenant policy compares this to `app.org_id`, so a NULL row
+     * would be invisible to every tenant. Migration 0024 removed them.
+     */
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
     key: text("key").notNull(),
     value: jsonb("value").notNull().default(sql`'true'::jsonb`),
     createdAt: createdAt(),
@@ -1086,6 +1093,14 @@ export const catalogItems = pgTable(
     bayesianScore: numeric("bayesian_score", { precision: 3, scale: 1 }),
     totalReviews: integer("total_reviews").notNull().default(0),
     tags: text("tags").array().notNull().default(emptyTextArray()),
+    /** item | artist | season | episode — the kind of rateable entity. */
+    entityType: text("entity_type").notNull().default("item"),
+    /** pending | ready | failed — provider rows start pending and are upgraded. */
+    enrichmentStatus: text("enrichment_status").notNull().default("ready"),
+    /** Set on a row that was merged into another one. */
+    canonicalItemId: uuid("canonical_item_id"),
+    /** Lowercased, punctuation-free title, used for duplicate clustering. */
+    normalizedTitle: text("normalized_title"),
     createdAt: createdAt(),
   },
   (t) => ({
@@ -1093,11 +1108,133 @@ export const catalogItems = pgTable(
     externalRefUq: uniqueIndex("catalog_items_external_ref_uq").on(t.externalRef),
     sourceExternalUq: uniqueIndex("catalog_items_source_external_uq").on(t.source, t.externalId),
     kindIdx: index("catalog_items_kind_idx").on(t.kind, t.title),
+    normalizedTitleIdx: index("catalog_items_normalized_title_idx").on(t.kind, t.normalizedTitle, t.year),
     titleTrgmIdx: index("catalog_items_title_trgm_idx").using("gin", sql`${t.title} gin_trgm_ops`),
     subtitleTrgmIdx: index("catalog_items_subtitle_trgm_idx").using("gin", sql`${t.subtitle} gin_trgm_ops`),
     genresIdx: index("catalog_items_genres_gin_idx").using("gin", t.genres),
   }),
 );
+
+/**
+ * Durable enrichment outbox. One row per provider object; the BullMQ job is a
+ * hint and this table is the source of truth, so lost jobs are re-swept.
+ */
+export const catalogEnrichmentQueue = pgTable(
+  "catalog_enrichment_queue",
+  {
+    id: pk(),
+    externalRef: text("external_ref").notNull(),
+    source: text("source").notNull(),
+    kind: mediaKindEnum("kind").notNull(),
+    payload: jsonb("payload").notNull().default(emptyJson()),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    externalUq: uniqueIndex("catalog_enrichment_external_uq").on(t.source, t.externalRef),
+    dueIdx: index("catalog_enrichment_due_idx").on(t.status, t.nextAttemptAt),
+  }),
+);
+
+/**
+ * Artists are first-class rating targets: each has a `catalog_items` row of
+ * entity type 'artist', which is what item_ratings points at.
+ */
+export const artists = pgTable(
+  "artists",
+  {
+    id: pk(),
+    catalogItemId: uuid("catalog_item_id")
+      .notNull()
+      .unique()
+      .references(() => catalogItems.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    externalRef: text("external_ref").unique(),
+    imageUrl: text("image_url"),
+    metadata: jsonb("metadata").notNull().default(emptyJson()),
+    createdAt: createdAt(),
+  },
+);
+
+export const seasons = pgTable(
+  "seasons",
+  {
+    id: pk(),
+    catalogItemId: uuid("catalog_item_id")
+      .notNull()
+      .unique()
+      .references(() => catalogItems.id, { onDelete: "cascade" }),
+    parentItemId: uuid("parent_item_id")
+      .notNull()
+      .references(() => catalogItems.id, { onDelete: "cascade" }),
+    seasonNumber: integer("season_number").notNull(),
+    title: text("title"),
+    year: integer("year"),
+    imageUrl: text("image_url"),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    parentSeasonUq: uniqueIndex("seasons_parent_season_uq").on(t.parentItemId, t.seasonNumber),
+  }),
+);
+
+export const episodes = pgTable(
+  "episodes",
+  {
+    id: pk(),
+    catalogItemId: uuid("catalog_item_id")
+      .notNull()
+      .unique()
+      .references(() => catalogItems.id, { onDelete: "cascade" }),
+    seasonId: uuid("season_id")
+      .notNull()
+      .references(() => seasons.id, { onDelete: "cascade" }),
+    episodeNumber: integer("episode_number").notNull(),
+    title: text("title"),
+    airDate: date("air_date"),
+    runtime: integer("runtime"),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    seasonEpisodeUq: uniqueIndex("episodes_season_episode_uq").on(t.seasonId, t.episodeNumber),
+  }),
+);
+
+export const itemArtists = pgTable(
+  "item_artists",
+  {
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => catalogItems.id, { onDelete: "cascade" }),
+    artistId: uuid("artist_id")
+      .notNull()
+      .references(() => artists.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("primary"),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.itemId, t.artistId, t.role] }),
+  }),
+);
+
+/** Audit trail of duplicate merges; the source row no longer exists. */
+export const catalogItemMerges = pgTable("catalog_item_merges", {
+  id: pk(),
+  sourceItemId: uuid("source_item_id").notNull(),
+  targetItemId: uuid("target_item_id")
+    .notNull()
+    .references(() => catalogItems.id, { onDelete: "cascade" }),
+  movedRatings: integer("moved_ratings").notNull().default(0),
+  mergedRatings: integer("merged_ratings").notNull().default(0),
+  movedMatchups: integer("moved_matchups").notNull().default(0),
+  droppedMatchups: integer("dropped_matchups").notNull().default(0),
+  mergedAt: timestamp("merged_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** One taste-profile ranking per org per catalog item. */
 export const itemRatings = pgTable(
@@ -1121,10 +1258,20 @@ export const itemRatings = pgTable(
     favoriteTracks: text("favorite_tracks").array().notNull().default(emptyTextArray()),
     /** Exact score typed by the user, kept alongside the Elo projection. */
     manualScore: numeric("manual_score", { precision: 3, scale: 1 }),
+    /**
+     * Where this score came from: `user`, `letterboxd` or `goodreads`.
+     * Null means the row predates provenance and must be treated carefully:
+     * an old Spotify import is indistinguishable from an old manual score.
+     */
+    source: text("source"),
     /** Optional per-aspect scores, e.g. { story: 9, visuals: 8 }. */
     subScores: jsonb("sub_scores").notNull().default(emptyJson()),
     /** Micro-picks beyond favorite character/tracks, e.g. { scene, aspect }. */
     highlights: jsonb("highlights").notNull().default(emptyJson()),
+    /** visible | hidden | removed. Public queries only read visible rows. */
+    moderationStatus: text("moderation_status").notNull().default("visible"),
+    moderatedAt: timestamp("moderated_at", { withTimezone: true }),
+    moderatedBy: uuid("moderated_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1230,12 +1377,21 @@ export const profiles = pgTable(
     avatarHue: integer("avatar_hue").notNull().default(245),
     pinnedRatingId: uuid("pinned_rating_id"),
     manualMode: boolean("manual_mode").notNull().default(false),
+    /** Legacy editable flag, no longer read by the app. */
     spotifyConnected: boolean("spotify_connected").notNull().default(false),
+    /** Set only after a successful Spotify OAuth import. */
+    spotifyConnectedAt: timestamp("spotify_connected_at", { withTimezone: true }),
+    /** No Apple Music integration exists yet; kept for a future migration. */
     appleMusicConnected: boolean("apple_music_connected").notNull().default(false),
+    /** No UI or localisation reads this yet; kept for a future migration. */
     language: text("language").notNull().default("en"),
     profileLayout: text("profile_layout").notNull().default("list"),
     /** Hand-curated top-five order per media kind: { movie: [itemId, ...] }. */
     podiumOrder: jsonb("podium_order").notNull().default(emptyJson()),
+    /** visible | hidden | removed. Hidden profiles are absent from public reads. */
+    moderationStatus: text("moderation_status").notNull().default("visible"),
+    moderatedAt: timestamp("moderated_at", { withTimezone: true }),
+    moderatedBy: uuid("moderated_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1390,10 +1546,50 @@ export const ratingComments = pgTable(
     ratingId: uuid("rating_id").notNull().references(() => itemRatings.id, { onDelete: "cascade" }),
     orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
     body: text("body").notNull(),
+    /** visible | hidden | removed. Public reads exclude non-visible comments. */
+    moderationStatus: text("moderation_status").notNull().default("visible"),
+    moderatedAt: timestamp("moderated_at", { withTimezone: true }),
+    moderatedBy: uuid("moderated_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => ({
     ratingIdx: index("rating_comments_rating_idx").on(t.ratingId, t.createdAt),
+    moderationIdx: index("rating_comments_moderation_idx").on(t.moderationStatus),
+  }),
+);
+
+/**
+ * Abuse reports for public social content. Reports are intentionally
+ * polymorphic (review/profile/comment) because the three targets live in
+ * different tables. The unique key makes a repeat report from the same
+ * workspace idempotent instead of creating queue noise.
+ */
+export const abuseReports = pgTable(
+  "abuse_reports",
+  {
+    id: pk(),
+    reporterOrgId: uuid("reporter_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    contentOrgId: uuid("content_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    contentType: text("content_type").notNull(),
+    contentId: uuid("content_id").notNull(),
+    reason: text("reason").notNull(),
+    details: text("details"),
+    /** open | dismissed | actioned */
+    status: text("status").notNull().default("open"),
+    /** hide | remove | dismiss, set when the report is resolved. */
+    action: text("action"),
+    moderatedBy: uuid("moderated_by").references(() => users.id, { onDelete: "set null" }),
+    moderatedAt: timestamp("moderated_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    reporterContentUq: uniqueIndex("abuse_reports_reporter_content_uq").on(
+      t.reporterOrgId,
+      t.contentType,
+      t.contentId,
+    ),
+    queueIdx: index("abuse_reports_status_created_idx").on(t.status, t.createdAt),
+    contentIdx: index("abuse_reports_content_idx").on(t.contentType, t.contentId, t.status),
   }),
 );
 

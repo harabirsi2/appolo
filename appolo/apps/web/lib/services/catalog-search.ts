@@ -13,6 +13,8 @@ import { getDb, schema } from "@/lib/db";
 import { mapCatalogItem, type CatalogItem } from "./catalog-item";
 import { hasGenre } from "./genre-filter";
 import { consumeAction, SEARCH_WINDOW } from "./action-rate-limit";
+import { likeContains, likePrefix } from "./like-pattern";
+import { enqueueEnrichment, enrichmentPayload } from "./catalog-enrichment";
 
 const { catalogItems } = schema;
 
@@ -103,7 +105,7 @@ function categoryFilters(
   }
   if (genre) filters.push(hasGenre(catalogItems.genres, genre));
   if (query) {
-    const like = `%${query}%`;
+    const like = likeContains(query);
     filters.push(sql`(${catalogItems.title} ilike ${like} or ${catalogItems.subtitle} ilike ${like})`);
   }
   return filters;
@@ -125,8 +127,8 @@ async function localSearch(
     ? [
         sql`case
           when lower(${catalogItems.title}) = lower(${query}) then 3
-          when ${catalogItems.title} ilike ${`${query}%`} then 2
-          when ${catalogItems.subtitle} ilike ${`${query}%`} then 1
+          when ${catalogItems.title} ilike ${likePrefix(query)} then 2
+          when ${catalogItems.subtitle} ilike ${likePrefix(query)} then 1
           else 0
         end desc`,
         sql`greatest(similarity(${catalogItems.title}, ${query}), coalesce(similarity(${catalogItems.subtitle}, ${query}), 0)) desc`,
@@ -167,12 +169,25 @@ async function upsertCandidates(candidates: MetadataCandidate[]): Promise<Catalo
         metadata: candidate.metadata,
         links: {},
         tags: [],
+        // Provider rows are rankable immediately and upgraded by the worker.
+        enrichmentStatus: "pending",
+        entityType: "item",
       })),
     )
     .onConflictDoNothing();
 
   const refs = [...new Set(candidates.map((candidate) => candidate.externalRef))];
   const rows = await db.select().from(catalogItems).where(inArray(catalogItems.externalRef, refs));
+  // Record durable enrichment work for the ones we just inserted; the upsert
+  // above cannot tell us which those were, so enqueue is idempotent and cheap.
+  await enqueueEnrichment(
+    candidates.map((candidate) => ({
+      externalRef: candidate.externalRef,
+      source: candidate.source,
+      kind: candidate.kind,
+      payload: enrichmentPayload(candidate),
+    })),
+  ).catch(() => 0);
   return rows.map(mapCatalogItem);
 }
 
