@@ -11,6 +11,52 @@ import {
   selectInformativeOpponent,
   type ComparisonEvent,
 } from "./ranking-model.ts";
+import { createSyntheticStrengths, sampleComparisons } from "./ranking-quality.ts";
+
+test("sparse covariance matches the exact inversion and takes over above the dense limit", () => {
+  // 100 items is inside the dense limit, so both paths are valid here and must
+  // agree. The approximation drops everything past the diagonal and the
+  // compared-pair terms of the Neumann expansion.
+  const small = createSyntheticStrengths(7, 100);
+  const smallEvents = sampleComparisons(small, 1_200, { seed: 7 });
+  const dense = fitBradleyTerry(smallEvents, { covarianceMode: "dense" });
+  const sparse = fitBradleyTerry(smallEvents, { covarianceMode: "sparse" });
+
+  assert.equal(dense.diagnostics.covariance, "dense");
+  assert.equal(sparse.diagnostics.covariance, "sparse");
+
+  let worstRelativeError = 0;
+  for (const item of dense.items) {
+    const approximated = sparse.byId.get(item.id)!;
+    assert.ok(
+      Math.abs(approximated.theta - item.theta) < 1e-9,
+      "the covariance strategy must not change the fit itself",
+    );
+    const relative =
+      Math.abs(approximated.standardError - item.standardError) / Math.max(item.standardError, 1e-9);
+    worstRelativeError = Math.max(worstRelativeError, relative);
+    assert.ok(
+      relative < 0.05,
+      `${item.id}: sparse SE ${approximated.standardError.toFixed(4)} vs exact ${item.standardError.toFixed(4)}`,
+    );
+  }
+  assert.ok(worstRelativeError > 0, "identical numbers would mean the approximation was never exercised");
+
+  // Auto keeps the exact inversion at or below the limit...
+  assert.equal(fitBradleyTerry(smallEvents).diagnostics.covariance, "dense");
+
+  // ...and switches to the sparse path above it, still producing usable intervals.
+  const large = createSyntheticStrengths(9, 240);
+  const auto = fitBradleyTerry(sampleComparisons(large, 2_400, { seed: 9 }));
+  assert.equal(auto.diagnostics.covariance, "sparse");
+  for (const item of auto.items) {
+    assert.ok(
+      Number.isFinite(item.standardError) && item.standardError > 0,
+      `${item.id} has no usable standard error from the sparse path`,
+    );
+    assert.ok(item.lower < item.theta && item.upper > item.theta, `${item.id} has an inverted interval`);
+  }
+});
 
 function repeat(aId: string, bId: string, outcome: ComparisonEvent["outcome"], n: number): ComparisonEvent[] {
   return Array.from({ length: n }, () => ({ aId, bId, outcome }));

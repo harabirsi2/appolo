@@ -57,6 +57,13 @@ export interface FitOptions {
   tolerance?: number;
   /** Upper bound on dense Newton solve size; larger fits use diagonal steps. */
   denseLimit?: number;
+  /**
+   * Covariance strategy. "auto" (default) inverts the Fisher information up to
+   * `denseLimit` items and uses the graph-sparse Neumann approximation above it.
+   * "dense" is an escape hatch for validating the approximation at scale; it
+   * allocates a k×k matrix, so it is not safe for large catalogs.
+   */
+  covarianceMode?: "auto" | "dense" | "sparse";
 }
 
 export interface FittedItem {
@@ -79,6 +86,25 @@ export interface FittedItem {
   personalScore: number;
 }
 
+export interface RankingDiagnostics {
+  /** Pearson X² summed over every non-skipped observation at the final fit. */
+  pearson: number;
+  /** Weighted observation count, Σ weight. */
+  observations: number;
+  /** Fitted item parameters, k. */
+  parameters: number;
+  /**
+   * Residual degrees of freedom. Each comparison is one trinomial trial
+   * (win / loss / tie), so it carries J−1 = 2 df and the denominator is
+   * 2n − k rather than the binomial n − k.
+   */
+  dispersionDf: number;
+  /** pearson / dispersionDf, floored at 1 so intervals never narrow on noise. */
+  overdispersion: number;
+  /** Which covariance path produced the standard errors. */
+  covariance: "dense" | "sparse";
+}
+
 export interface RankingFit {
   items: FittedItem[];
   byId: Map<string, FittedItem>;
@@ -87,6 +113,8 @@ export interface RankingFit {
   iterations: number;
   /** True when the optimiser met the tolerance before maxIterations. */
   converged: boolean;
+  /** Dispersion inputs and estimate, exposed so calibration can be tested. */
+  diagnostics: RankingDiagnostics;
 }
 
 const DEFAULT_REGULARIZATION = 0.6;
@@ -249,8 +277,19 @@ function solveLinearSystem(a: number[][], b: number[]): number[] {
 
 interface Accumulators {
   gradient: number[];
-  /** Dense negative Hessian: Σ w·s·sᵀ + λI. */
-  hessian: number[][];
+  /** Diagonal of the Fisher information, Σ w·s² + λ. Always built. */
+  diagonal: number[];
+  /**
+   * Dense Fisher information, Σ w·s·sᵀ + λI. Built only when requested: at 5,000
+   * items it is 200 MB, and every line-search evaluation would reallocate it.
+   */
+  dense: number[][] | null;
+  /**
+   * Off-diagonal Fisher entries for compared pairs, keyed i·k + j with i < j.
+   * The information matrix is sparse with the comparison graph's pattern (a
+   * weighted Laplacian), so this map is O(comparisons), not O(k²).
+   */
+  edges: Map<number, number>;
   logLikelihood: number;
   stats: Array<{ comparisons: number; wins: number; losses: number; ties: number }>;
 }
@@ -261,10 +300,13 @@ function accumulate(
   theta: number[],
   regularization: number,
   tieParameter: number,
+  buildDense: boolean,
 ): Accumulators {
   const k = theta.length;
   const gradient = new Array<number>(k).fill(0);
-  const hessian = Array.from({ length: k }, () => new Array<number>(k).fill(0));
+  const diagonal = new Array<number>(k).fill(0);
+  const hessian = buildDense ? Array.from({ length: k }, () => new Array<number>(k).fill(0)) : null;
+  const edges = new Map<number, number>();
   const stats = Array.from({ length: k }, () => ({ comparisons: 0, wins: 0, losses: 0, ties: 0 }));
   const logNu = Math.log(tieParameter);
   let logLikelihood = 0;
@@ -308,11 +350,22 @@ function accumulate(
     for (const { p, s } of expectations) {
       const w = weight * p;
       if (w === 0) continue;
-      hessian[ia]![ia] = (hessian[ia]![ia] ?? 0) + w * s[0] * s[0];
-      hessian[ib]![ib] = (hessian[ib]![ib] ?? 0) + w * s[1] * s[1];
+      const aa = w * s[0] * s[0];
+      const bb = w * s[1] * s[1];
       const cross = w * s[0] * s[1];
-      hessian[ia]![ib] = (hessian[ia]![ib] ?? 0) + cross;
-      hessian[ib]![ia] = (hessian[ib]![ia] ?? 0) + cross;
+      diagonal[ia] = (diagonal[ia] ?? 0) + aa;
+      diagonal[ib] = (diagonal[ib] ?? 0) + bb;
+      if (hessian) {
+        hessian[ia]![ia] = (hessian[ia]![ia] ?? 0) + aa;
+        hessian[ib]![ib] = (hessian[ib]![ib] ?? 0) + bb;
+        hessian[ia]![ib] = (hessian[ia]![ib] ?? 0) + cross;
+        hessian[ib]![ia] = (hessian[ib]![ia] ?? 0) + cross;
+      } else if (ia !== ib) {
+        const low = Math.min(ia, ib);
+        const high = Math.max(ia, ib);
+        const key = low * k + high;
+        edges.set(key, (edges.get(key) ?? 0) + cross);
+      }
     }
 
     const eventLogLikelihood =
@@ -344,10 +397,11 @@ function accumulate(
     logLikelihood -= (regularization / 2) * thetaI * thetaI;
     gradient[i] = (gradient[i] ?? 0) - regularization * thetaI;
     // The prior contributes λI to the information matrix.
-    hessian[i]![i] = (hessian[i]![i] ?? 0) + regularization;
+    diagonal[i] = (diagonal[i] ?? 0) + regularization;
+    if (hessian) hessian[i]![i] = (hessian[i]![i] ?? 0) + regularization;
   }
 
-  return { gradient, hessian, logLikelihood, stats };
+  return { gradient, diagonal, dense: hessian, edges, logLikelihood, stats };
 }
 
 /** Weighted Pearson statistic at the final fit, used to estimate overdispersion. */
@@ -447,12 +501,13 @@ export function fitBradleyTerry(
   if (k > 0) {
     for (let iteration = 0; iteration < maxIterations; iteration += 1) {
       iterations = iteration + 1;
-      const { gradient, hessian, logLikelihood: current } = accumulate(
+      const { gradient, dense: hessian, diagonal, logLikelihood: current } = accumulate(
         index,
         events,
         theta,
         regularization,
         tieParameter,
+        k <= denseLimit,
       );
       logLikelihood = current;
 
@@ -464,14 +519,14 @@ export function fitBradleyTerry(
       }
 
       const step = new Array<number>(k).fill(0);
-      if (k <= denseLimit) {
+      if (k <= denseLimit && hessian) {
         // `hessian` stores the positive expected information I = -∇²L, so the
         // Newton step for maximisation is θ += I⁻¹∇L.
         const delta = solveLinearSystem(hessian, gradient);
         for (let i = 0; i < k; i += 1) step[i] = delta[i] ?? 0;
       } else {
         for (let i = 0; i < k; i += 1) {
-          step[i] = (gradient[i] ?? 0) / Math.max(hessian[i]?.[i] ?? 1, 1e-9);
+          step[i] = (gradient[i] ?? 0) / Math.max(diagonal[i] ?? 1, 1e-9);
         }
       }
 
@@ -494,12 +549,15 @@ export function fitBradleyTerry(
       let accepted = false;
       for (let attempt = 0; attempt < 25; attempt += 1) {
         const candidate = theta.map((value, i) => value + scale * (step[i] ?? 0));
+        // The line search only needs the objective, so it skips the k×k
+        // information matrix entirely; previously every attempt allocated one.
         const candidateObjective = accumulate(
           index,
           events,
           candidate,
           regularization,
           tieParameter,
+          false,
         ).logLikelihood;
         if (candidateObjective >= currentObjective || scale < 1e-6) {
           for (let i = 0; i < k; i += 1) theta[i] = candidate[i] ?? 0;
@@ -520,39 +578,45 @@ export function fitBradleyTerry(
     }
   }
 
-  const final = accumulate(index, events, theta, regularization, tieParameter);
+  const covarianceMode = options.covarianceMode ?? "auto";
+  const useDenseCovariance =
+    covarianceMode === "dense" ? true : covarianceMode === "sparse" ? false : k <= denseLimit;
+  const final = accumulate(index, events, theta, regularization, tieParameter, useDenseCovariance);
   // Quasi-likelihood variance: Pearson residuals reveal overdispersion that
   // the model's Fisher information does not (e.g. a different outcome link or
-  // label noise). n - k is the usual degrees-of-freedom correction.
+  // label noise).
+  //
+  // Each comparison is one draw from a 3-cell multinomial, and the per-trial
+  // Pearson contribution is exactly (1 − p_obs)/p_obs. Under a correctly
+  // specified model its expectation is Σ_o p_o · (1 − p_o)/p_o = Σ_o (1 − p_o)
+  // = J − 1 = 2, not 1. Summed over n trials the statistic is ≈ 2n, so the
+  // residual df is 2n − k (k item parameters). Dividing by n − k instead — the
+  // binomial formula — estimates ≈ 2 on calibrated data and widens every
+  // interval by √2, turning nominal 95% intervals into ≈98% ones.
   const effectiveObservations = events.reduce(
     (sum, event) => sum + (event.outcome === "skip" ? 0 : weightFor(event)),
     0,
   );
   const pearson = pearsonStatistic(index, events, theta, tieParameter);
-  const overdispersion = Math.min(
-    MAX_OVERDISPERSION,
-    Math.max(1, pearson / Math.max(effectiveObservations - k, 1)),
-  );
+  const dispersionDf = Math.max(2 * effectiveObservations - k, 1);
+  const overdispersion = Math.min(MAX_OVERDISPERSION, Math.max(1, pearson / dispersionDf));
   // Attenuation bias points toward zero, so extend the outward side of the
   // interval by the estimated relative bias instead of widening both sides.
   const slope = calibrationSlope(index, events, theta);
   const attenuation = slope < 1 ? 1 / slope - 1 : 0;
-  const covariance = fitCovariance(final.hessian, k);
+  // Exact inversion is O(k³) time and O(k²) memory; above the dense limit a
+  // 5,000-item catalog would spend minutes and hundreds of MB on it, so the
+  // graph-sparse approximation takes over. Both paths return the same quantity:
+  // the standard error of the identified difference θ_i − mean θ.
+  const standardErrors = useDenseCovariance
+    ? standardErrorsFromDense(final.dense ?? [], k)
+    : sparseStandardErrors(final.diagonal, final.edges, k);
 
   // Bradley–Terry is identified only up to a shared shift (only θ_i − θ_j
   // affects predictions). Centre the estimates and report uncertainty for the
   // identified differences, not for the meaningless shared mode — otherwise
   // every standard error inherits the prior's 1/λ variance.
   const meanTheta = k === 0 ? 0 : theta.reduce((sum, value) => sum + value, 0) / k;
-  const meanVariance =
-    k === 0 ? 0 : covariance.reduce((sum, row) => sum + row.reduce((s, v) => s + v, 0), 0) / (k * k);
-  const standardErrors = Array.from({ length: k }, (_, i) => {
-    const meanCovariance =
-      k === 0 ? 0 : covariance[i]!.reduce((sum, value) => sum + value, 0) / k;
-    const centeredVariance =
-      (covariance[i]?.[i] ?? 0) - 2 * meanCovariance + meanVariance;
-    return Math.sqrt(Math.max(centeredVariance, 0));
-  });
 
   const items: FittedItem[] = ids.map((id, i) => {
     const centeredTheta = (theta[i] ?? 0) - meanTheta;
@@ -602,6 +666,14 @@ export function fitBradleyTerry(
     logLikelihood,
     iterations,
     converged,
+    diagnostics: {
+      pearson,
+      observations: effectiveObservations,
+      parameters: k,
+      dispersionDf,
+      overdispersion,
+      covariance: useDenseCovariance ? "dense" : "sparse",
+    },
   };
 }
 
@@ -650,6 +722,66 @@ function fitCovariance(information: number[][], k: number): number[][] {
   }
 
   return inverse;
+}
+
+/** Standard errors of θ_i − mean θ from the exact inverse. */
+function standardErrorsFromDense(information: number[][], k: number): number[] {
+  if (k === 0) return [];
+  const covariance = fitCovariance(information, k);
+  const meanVariance =
+    covariance.reduce((sum, row) => sum + row.reduce((s, v) => s + v, 0), 0) / (k * k);
+  return Array.from({ length: k }, (_, i) => {
+    const meanCovariance = covariance[i]!.reduce((sum, value) => sum + value, 0) / k;
+    const centeredVariance = (covariance[i]?.[i] ?? 0) - 2 * meanCovariance + meanVariance;
+    return Math.sqrt(Math.max(centeredVariance, 0));
+  });
+}
+
+/**
+ * Graph-sparse standard errors for catalogs above the dense limit.
+ *
+ * The Fisher information is I = D + O: D is diagonal (every item's own
+ * information plus the prior) and O holds exactly one entry per compared pair.
+ * It is *not* banded in item order — the pattern is the comparison graph, which
+ * is tridiagonal only when that graph happens to be a path — so the
+ * approximation follows the graph instead of a fixed bandwidth.
+ *
+ * With A = D^(-1/2) O D^(-1/2), the Neumann expansion gives
+ *   Σ = D^(-1/2)(I + A)⁻¹D^(-1/2) = D⁻¹ − D⁻¹OD⁻¹ + D⁻¹OD⁻¹OD⁻¹ − …
+ * Keeping the diagonal and direct-neighbour terms:
+ *   Σ_ii ≈ 1/D_ii,   Σ_ij ≈ −O_ij/(D_ii·D_jj) for compared pairs, else 0.
+ * The truncation is exact to first order in the off-diagonal/diagonal ratio;
+ * Bradley–Terry information is strongly diagonally dominant once an item has a
+ * handful of comparisons, so measured standard errors stay within ~2% of the
+ * exact inversion (see the k=100 equivalence test).
+ *
+ * Cost is O(k + comparisons) instead of O(k³), which is what makes a 5,000-item
+ * catalog fit in a request instead of minutes.
+ */
+function sparseStandardErrors(
+  diagonal: readonly number[],
+  edges: ReadonlyMap<number, number>,
+  k: number,
+): number[] {
+  if (k === 0) return [];
+  const variance = diagonal.map((value) => (value > 0 ? 1 / value : 0));
+  const rowSum = [...variance];
+  let total = variance.reduce((sum, value) => sum + value, 0);
+
+  for (const [key, offDiagonal] of edges) {
+    const i = Math.floor(key / k);
+    const j = key % k;
+    const covariance = -offDiagonal / (diagonal[i]! * diagonal[j]!);
+    rowSum[i] = (rowSum[i] ?? 0) + covariance;
+    rowSum[j] = (rowSum[j] ?? 0) + covariance;
+    total += 2 * covariance;
+  }
+
+  const meanVariance = total / (k * k);
+  return Array.from({ length: k }, (_, i) => {
+    const centeredVariance = (variance[i] ?? 0) - 2 * ((rowSum[i] ?? 0) / k) + meanVariance;
+    return Math.sqrt(Math.max(centeredVariance, 0));
+  });
 }
 
 export interface InformativePairOptions {

@@ -17,7 +17,7 @@ import {
 /**
  * Thresholds are deliberately below the observed values on this machine
  * (Spearman 0.90–0.96, held-out accuracy 0.68–0.73, interval coverage mean
- * 0.958 over four seeds at 24 items / ~1,300 comparisons, per-seed minimum
+ * 0.917 over four seeds at 24 items / ~1,300 comparisons, per-seed minimum
  * 0.875). They are chosen to fail on a real regression — a broken prior, a
  * mis-centred fit, ignored ties — not on run-to-run noise, since every stage is
  * seeded and deterministic.
@@ -31,11 +31,16 @@ const COVERAGE_SEEDS = [1, 7, 42, 99];
  * assume, so the check is about surviving misspecification, not mirroring the
  * optimiser. */
 const MIN_MISSPECIFIED_SPEARMAN = 0.85;
-/** Nominal coverage is 0.95, and the corrected intervals reach it over 20 seeds. */
-const MIN_MISSPECIFIED_COVERAGE = 0.95;
+/**
+ * A scalar Pearson factor cannot fully correct a link misspecification, so the
+ * probit process settles near 0.90 once the trinomial denominator stops doubling
+ * the factor. Gate just below the measured 0.905; 0.95 was only reachable while
+ * the (n − k) denominator inflated every interval by √2.
+ */
+const MIN_MISSPECIFIED_COVERAGE = 0.88;
 const MIN_MEAN_INTERVAL_COVERAGE = 0.85;
 /** A single seed this far below nominal is a calibration bug, not luck. */
-const MIN_PER_SEED_INTERVAL_COVERAGE = 0.7;
+const MIN_PER_SEED_INTERVAL_COVERAGE = 0.8;
 const RUNTIME_BUDGET_MS = 5_000;
 
 test("generator produces ties, sparse users and full coverage", () => {
@@ -167,6 +172,76 @@ test("keeps 95% intervals close to nominal coverage under the probit process", (
   assert.ok(
     pooled >= MIN_MISSPECIFIED_COVERAGE,
     `misspecified coverage ${pooled.toFixed(3)} below ${MIN_MISSPECIFIED_COVERAGE}`,
+  );
+});
+
+test("measures overdispersion against trinomial degrees of freedom", (t) => {
+  // Every comparison is one draw from a 3-cell multinomial, so the per-trial
+  // Pearson contribution (1 − p_obs)/p_obs has expectation J − 1 = 2 and the
+  // denominator is 2n − k. The first block pins that algebra with k/n small
+  // (40 items, so the statistic per trial converges to 2 rather than to 2 − k/n);
+  // the second measures coverage over 600 item intervals, which is enough to
+  // separate 95% from the ≈99.8% the doubled factor produced.
+  const CALIBRATED_SEEDS = [3, 11, 29];
+  const ALGEBRA_ITEMS = 40;
+  const COVERAGE_ITEMS = 200;
+  const COMPARISONS = 2_000;
+
+  let pearsonPerObservation = 0;
+  let binomialDenominator = 0;
+
+  for (const seed of CALIBRATED_SEEDS) {
+    const strengths = createSyntheticStrengths(seed, ALGEBRA_ITEMS);
+    const fit = fitBradleyTerry(sampleComparisons(strengths, COMPARISONS, { seed: seed + 900 }));
+    assert.ok(fit.converged, `calibrated fit did not converge for seed ${seed}`);
+
+    const diagnostics = fit.diagnostics;
+    assert.equal(diagnostics.observations, COMPARISONS);
+    assert.ok(diagnostics.parameters >= ALGEBRA_ITEMS - 2, "a 2,000-draw sample should see nearly every item");
+    assert.equal(diagnostics.dispersionDf, 2 * diagnostics.observations - diagnostics.parameters);
+    assert.ok(
+      diagnostics.overdispersion >= 1 && diagnostics.overdispersion <= 1.1,
+      `seed ${seed}: calibrated data estimated dispersion ${diagnostics.overdispersion.toFixed(3)}; ` +
+        "a correctly specified sample must not inflate the intervals",
+    );
+
+    pearsonPerObservation += diagnostics.pearson / diagnostics.observations;
+    binomialDenominator += diagnostics.pearson / (diagnostics.observations - diagnostics.parameters);
+  }
+
+  const meanPearson = pearsonPerObservation / CALIBRATED_SEEDS.length;
+  const meanBinomial = binomialDenominator / CALIBRATED_SEEDS.length;
+
+  let covered = 0;
+  let total = 0;
+  for (const seed of CALIBRATED_SEEDS) {
+    const strengths = createSyntheticStrengths(seed, COVERAGE_ITEMS);
+    const fit = fitBradleyTerry(sampleComparisons(strengths, COMPARISONS, { seed: seed + 900 }));
+    assert.ok(fit.converged, `coverage fit did not converge for seed ${seed}`);
+    const coverage = intervalCoverage(fit, strengths);
+    covered += coverage.covered;
+    total += coverage.total;
+  }
+  const rate = covered / total;
+
+  t.diagnostic(
+    `calibrated trinomial: pearson/n ${meanPearson.toFixed(3)}, pearson/(n−k) ${meanBinomial.toFixed(3)}, ` +
+      `coverage ${rate.toFixed(3)} (${covered}/${total})`,
+  );
+
+  assert.ok(
+    meanPearson >= 1.9 && meanPearson <= 2.1,
+    `Pearson per observation ${meanPearson.toFixed(3)} is not the trinomial J−1 = 2 the denominator assumes`,
+  );
+  // What the removed (n − k) denominator reported: ≈2 is the inflation, not noise.
+  assert.ok(
+    meanBinomial >= 1.9 && meanBinomial <= 2.1,
+    `pearson/(n−k) ${meanBinomial.toFixed(3)} should reproduce the doubled estimate the fix removes`,
+  );
+  assert.ok(
+    rate >= 0.93 && rate <= 0.975,
+    `calibrated 95% coverage ${rate.toFixed(3)} (${covered}/${total}) is outside 0.93–0.975; ` +
+      "the upper bound is what the doubled denominator used to produce",
   );
 });
 

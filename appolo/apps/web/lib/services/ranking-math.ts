@@ -71,7 +71,10 @@ export async function refreshRankingModel(
   orgId: string,
   kind: MediaKind,
 ): Promise<RankingModelView> {
-  return withOrg(orgId, async (tx) => {
+  // Phase 1 — read the durable log inside the tenant's RLS context, then release
+  // the connection. Keeping the transaction open through the fit pinned a pool
+  // connection for the whole CPU-bound solve (seconds at a few thousand items).
+  const events = await withOrg(orgId, async (tx) => {
     const rows = await tx
       .select({
         itemId: itemMatchups.itemId,
@@ -83,22 +86,30 @@ export async function refreshRankingModel(
       .innerJoin(catalogItems, eq(catalogItems.id, itemMatchups.itemId))
       .where(and(eq(itemMatchups.orgId, orgId), eq(catalogItems.kind, kind)));
 
-    const events: ComparisonEvent[] = rows.map((row) => ({
-      aId: row.itemId,
-      bId: row.opponentId,
-      outcome: outcomeForResult(row.result, row.outcome),
-    }));
+    return rows.map(
+      (row): ComparisonEvent => ({
+        aId: row.itemId,
+        bId: row.opponentId,
+        outcome: outcomeForResult(row.result, row.outcome),
+      }),
+    );
+  });
 
-    const fit = fitBradleyTerry(events);
-    const state = {
-      items: fit.items,
-      tieParameter: fit.tieParameter,
-      logLikelihood: fit.logLikelihood,
-      converged: fit.converged,
-      iterations: fit.iterations,
-    };
+  // Phase 2 — pure fit, no connection held and no transaction open.
+  const fit = fitBradleyTerry(events);
+  const state = {
+    items: fit.items,
+    tieParameter: fit.tieParameter,
+    logLikelihood: fit.logLikelihood,
+    converged: fit.converged,
+    iterations: fit.iterations,
+  };
 
-    const updated = (
+  // Phase 3 — short write. A vote that lands during the fit leaves the stored
+  // count behind the log on purpose: getRankingModel compares the two and
+  // rebuilds, so the snapshot heals rather than silently serving stale scores.
+  const updated = await withOrg(orgId, async (tx) =>
+    (
       await tx
         .insert(rankingModels)
         .values({ orgId, kind, state, comparisons: events.length })
@@ -107,10 +118,10 @@ export async function refreshRankingModel(
           set: { state, comparisons: events.length, updatedAt: new Date() },
         })
         .returning()
-    )[0]!;
+    )[0]!,
+  );
 
-    return modelFromRow(updated);
-  });
+  return modelFromRow(updated);
 }
 
 /**

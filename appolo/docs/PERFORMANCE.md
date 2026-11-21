@@ -14,7 +14,7 @@ GitHub's language endpoint for `harabirsi2/appolo` (bytes of recognised code):
 | TypeScript | 992,867 | 70.89% | `appolo/apps/web`, `packages/{core,db,ui,config}`, `apps/worker` |
 | C++        | 328,982 | 23.49% | `auto_attack/` only (see §2) |
 | PowerShell |  50,930 |  3.64% | `appolo/scripts/{ci,smoke,dev-db}.ps1` |
-| PLpgSQL    |  13,117 |  0.94% | 18 migrations in `packages/db/sql/` |
+| PLpgSQL    |  13,117 |  0.94% | repository now has 23 migrations in `packages/db/sql/` (byte figure predates 0019–0022) |
 | JavaScript |   8,201 |  0.59% | `scripts/e2e.mjs`, config files |
 | CSS        |   3,919 |  0.28% | Tailwind entry stylesheet |
 | Batchfile  |   2,517 |  0.18% | `auto_attack/build.bat` |
@@ -76,9 +76,19 @@ Reproduce with `pnpm --filter @appolo/core bench`
 | `tasteMatch` 200 shared + genre profiles | 0.10 ms | 0.11 ms | unchanged |
 | `tasteMatch` 1,000 shared | 4.1 ms | 4.1 ms | unchanged |
 
-The "before" column is the same code with the old covariance routine. Fit
-scales cubically with catalog size after the change (100 → 500 items is 24.6 →
-672.1 ms in a single pass), which is the expected cost of an O(k³) inversion.
+The "before" column is the same code with the old covariance routine. Up to
+`denseLimit` (220 items) fit still scales cubically (100 → 500 items is 24.6 →
+672.1 ms), the expected cost of an O(k³) inversion.
+
+Above that limit the fit now skips the dense matrix entirely. `accumulate` keeps
+only the diagonal and one entry per compared pair (the comparison graph, not a
+band), and standard errors come from the first-order Neumann approximation
+`Σ_ii ≈ 1/D_ii`, `Σ_ij ≈ −O_ij/(D_ii·D_jj)`: O(k + comparisons) instead of
+O(k³). Measured on this machine: 300 items/3,600 events 200 ms; 1,000/12,000
+676 ms; 5,000/60,000 3.5 s with ~123 MB RSS growth. The O(k³) inversion alone
+at 5,000 items takes 25.4 s and 867 MB of heap, and the old path allocated the
+k×k matrix again on every line-search evaluation. Where both paths are
+computable (k=100) standard errors agree within 2%.
 
 **Root cause.** `fitCovariance` solved the information system `H·x = e_i` once
 per column. Each solve is O(k³), making covariance O(k⁴). The fit itself
