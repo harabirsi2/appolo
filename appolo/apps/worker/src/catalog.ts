@@ -2,9 +2,12 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
 import { Queue, Worker, type Job } from "bullmq";
 import type IORedis from "ioredis";
+import { schema, type Db } from "@appolo/db";
 import { loadMetadataDetails, type MetadataCandidate, type MetadataSource } from "@appolo/core";
+import { materializeEntities } from "../../web/lib/services/catalog-entities";
 
 /**
  * Catalog enrichment pipeline.
@@ -125,7 +128,7 @@ async function settle(sql: postgres.Sql, row: QueueRow, error?: unknown): Promis
   }
 }
 
-async function processOne(sql: postgres.Sql, queueId: string): Promise<"done" | "skipped"> {
+async function processOne(sql: postgres.Sql, db: Db, queueId: string): Promise<"done" | "skipped"> {
   // Claim atomically: only one worker wins, and only if the backoff has passed.
   const claimed = await sql<QueueRow[]>`
     update public.catalog_enrichment_queue
@@ -183,6 +186,26 @@ async function processOne(sql: postgres.Sql, queueId: string): Promise<"done" | 
              enrichment_status = 'ready'
        where id = ${item.id}`;
 
+    // Artists, seasons and episodes are rateable rows, created in one
+    // transaction. A failure here must not lose the metadata we just wrote, so
+    // it is logged and the queue row still completes.
+    const entities = await materializeEntities(db, {
+      itemId: item.id,
+      kind: row.kind as MetadataCandidate["kind"],
+      title: item.title,
+      year: item.year,
+      source: row.source,
+      details,
+    }).catch((error: unknown) => {
+      console.error(`[worker] entity sync failed for ${row.external_ref}:`, (error as Error).message);
+      return null;
+    });
+    if (entities && (entities.artists || entities.seasons || entities.episodes)) {
+      console.log(
+        `[worker] ${row.external_ref}: +${entities.artists} artists, +${entities.seasons} seasons, +${entities.episodes} episodes`,
+      );
+    }
+
     await settle(sql, row);
     return "done";
   } catch (error) {
@@ -219,10 +242,11 @@ export interface CatalogPipeline {
 
 export function startCatalogPipeline(connection: IORedis, databaseUrl: string): CatalogPipeline {
   const sql = postgres(databaseUrl, { max: 4, idle_timeout: 30 });
+  const db = drizzle(sql, { schema });
   const queue = new Queue(CATALOG_QUEUE, { connection });
   const worker = new Worker<{ queueId: string }>(
     CATALOG_QUEUE,
-    async (job: Job<{ queueId: string }>) => processOne(sql, job.data.queueId),
+    async (job: Job<{ queueId: string }>) => processOne(sql, db, job.data.queueId),
     {
       connection,
       concurrency: 3,

@@ -176,6 +176,20 @@ async function details(candidate: MetadataCandidate, config: MetadataConfig): Pr
 
   const runtime = typeof data.runtime === "number" ? data.runtime : null;
   const seasons = typeof data.number_of_seasons === "number" ? data.number_of_seasons : null;
+  // `/tv/{id}` already embeds the season list, so season entities cost no extra
+  // request. Episode lists need a per-season call and are not fetched here.
+  const seasonList =
+    kind === "tv"
+      ? list(data.seasons)
+          .map((season) => ({
+            seasonNumber: typeof season.season_number === "number" ? season.season_number : null,
+            name: text(season.name, 120) || null,
+            year: yearOf(season.air_date),
+            episodeCount: typeof season.episode_count === "number" ? season.episode_count : null,
+            imageUrl: poster(season.poster_path, "w342"),
+          }))
+          .filter((season) => season.seasonNumber !== null && season.seasonNumber > 0)
+      : [];
   const director = credits.find((credit) => credit.role === "director")?.name ?? null;
 
   return {
@@ -186,6 +200,7 @@ async function details(candidate: MetadataCandidate, config: MetadataConfig): Pr
       ...candidate.metadata,
       runtime,
       seasons,
+      seasonList,
       status: text(data.status, 40) || null,
       tagline: text(data.tagline, 300) || null,
       director,
