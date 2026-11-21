@@ -1,4 +1,5 @@
 import { and, desc, eq, gte, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
+import { likeContains } from "./like-pattern";
 import {
   DEFAULT_QUIET_HOURS,
   DEFAULT_REVIEW_TEMPLATES,
@@ -876,7 +877,7 @@ export async function listReviews(orgId: string, filters: ReviewListFilters = {}
     if (filters.locationId) conditions.push(eq(reviews.locationId, filters.locationId));
     if (filters.flagged) conditions.push(eq(reviews.flagged, true));
     if (filters.search) {
-      const like = `%${filters.search.replace(/[%_]/g, "")}%`;
+      const like = likeContains(filters.search);
       conditions.push(sql`(${reviews.body} ilike ${like} or ${reviews.authorName} ilike ${like})`);
     }
 

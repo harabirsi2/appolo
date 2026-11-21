@@ -27,6 +27,14 @@ const { orgs, locations, users, memberships, sessions, channels } = schema;
 
 const SESSION_DAYS = 30;
 
+/**
+ * One message for every failed signup. Returning "that email is taken" turned
+ * the endpoint into an account-existence oracle; the wording must not change
+ * between "already registered" and any other rejection.
+ */
+const SIGNUP_REJECTED =
+  "We could not create an account with those details. If you already have one, sign in instead.";
+
 export type AuthResult =
   | { ok: true }
   | { ok: false; error: string; retryAfterSeconds?: number };
@@ -82,11 +90,15 @@ export async function signUp(input: SignupInput): Promise<AuthResult> {
 
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
   if (existing.length > 0) {
-    return { ok: false, error: "An account with that email already exists." };
+    // Same text as every other rejection, and the same key-derivation work as
+    // the create path so response time does not answer the question either.
+    // The per-IP signup window is what actually bounds guessing.
+    await hashPassword(input.password);
+    return { ok: false, error: SIGNUP_REJECTED };
   }
 
   const orgId = randomUUID();
-  const passwordHash = hashPassword(input.password);
+  const passwordHash = await hashPassword(input.password);
   const baseSlug = slugify(input.orgName);
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -135,7 +147,7 @@ export async function signUp(input: SignupInput): Promise<AuthResult> {
         continue;
       }
       console.error("signup failed", err);
-      return { ok: false, error: "Could not create the account. Please try again." };
+      return { ok: false, error: SIGNUP_REJECTED };
     }
   }
 
@@ -158,7 +170,7 @@ export async function signIn(input: LoginInput): Promise<AuthResult> {
 
   const rows = await db.select().from(users).where(eq(users.email, email)).limit(1);
   const user = rows[0];
-  if (!user || !verifyPassword(input.password, user.passwordHash)) {
+  if (!user || !(await verifyPassword(input.password, user.passwordHash))) {
     return { ok: false, error: "Invalid email or password." };
   }
 

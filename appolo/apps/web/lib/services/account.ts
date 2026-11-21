@@ -112,6 +112,7 @@ export async function exportMediaData(orgId: string): Promise<MediaExport> {
       externalRef: item.externalRef ?? null,
       year: item.year ?? null,
       score: scoreForElo(rating.elo),
+      source: rating.source ?? null,
       elo: rating.elo,
       matches: rating.matches,
       wins: rating.wins,
@@ -207,7 +208,7 @@ export async function deleteAccount(input: {
   const db = getDb();
   const [user] = await db.select().from(users).where(eq(users.id, input.userId)).limit(1);
   if (!user) throw new DomainError("ACCOUNT_NOT_FOUND", "That account no longer exists.", 404);
-  if (!verifyPassword(input.password, user.passwordHash)) {
+  if (!(await verifyPassword(input.password, user.passwordHash))) {
     throw new DomainError("INVALID_PASSWORD", "That password does not match.", 400);
   }
 

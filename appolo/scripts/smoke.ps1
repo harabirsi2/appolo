@@ -197,14 +197,20 @@ $blocked2 = Json-Post "$Base/api/conversations/$smsConvoId/messages" @{ body = "
 T "send after STOP is blocked (409)" ($blocked2.code -eq 409)
 
 # 6. web chat creates a contact + conversation and polls back
-$visitor = "smoke-visitor-$p1stamp"
-$wcSend = Json-Post "$Base/api/webchat/demo-webchat/messages" @{ visitorId = $visitor; body = "Hello from the widget" }
+$wcSend = Json-Post "$Base/api/webchat/demo-webchat/messages" @{ body = "Hello from the widget" }
 T "webchat inbound accepted" ($wcSend.code -eq 201)
 $wcContactId = $wcSend.json.contactId
+# The visitor id is server-issued; only the signed token it returns can read
+# that transcript.
+$wcToken = $wcSend.json.visitorToken
+T "webchat issues a signed visitor token" (-not [string]::IsNullOrWhiteSpace($wcToken))
 
-$wcPoll = Json-Get "$Base/api/webchat/demo-webchat/messages?visitorId=$visitor"
+$wcPoll = Json-Get "$Base/api/webchat/demo-webchat/messages?token=$wcToken"
 $hasInbound = @($wcPoll.json.messages) | Where-Object { $_.body -eq "Hello from the widget" }
-T "webchat message polls back" ($null -ne $hasInbound)
+T "webchat message polls back with the token" ($null -ne $hasInbound)
+
+$wcBare = Json-Get "$Base/api/webchat/demo-webchat/messages?visitorId=$($wcSend.json.visitorId)"
+T "webchat transcript rejects a bare visitor id (401)" ($wcBare.code -eq 401)
 
 $wcConvos = Json-Get "$Base/api/conversations?channel=webchat"
 T "webchat conversation appears in the list" (@($wcConvos.json.conversations).Count -ge 1)
@@ -674,8 +680,7 @@ $aiEnable = P3-Patch "$Base/api/ai/agent" @{ enabled = $true }
 T "ai agent can be enabled" ($aiEnable.code -eq 200 -and $aiEnable.json.agent.config.enabled -eq $true)
 
 # A confident knowledge match gets a grounded reply from the AI.
-$p4visitor = "smoke-ai-$p3stamp"
-$p4ask = P3-Post "$Base/api/webchat/demo-webchat/messages" @{ visitorId = $p4visitor; body = "What time do you close on Saturday?"; name = "AI Smoke" }
+$p4ask = P3-Post "$Base/api/webchat/demo-webchat/messages" @{ body = "What time do you close on Saturday?"; name = "AI Smoke" }
 T "ai webchat inbound accepted" ($p4ask.code -eq 201)
 $p4contactId = $p4ask.json.contactId
 $p4detail = P3-Get "$Base/api/conversations/$($p4ask.json.conversationId)"
@@ -683,8 +688,7 @@ $p4reply = @(@($p4detail.json.messages) | Where-Object { $_.direction -eq "outbo
 T "ai answers from the knowledge base" ($null -ne $p4reply -and $p4reply.body -match "Saturday")
 
 # An escalation keyword hands off to a human with an internal note.
-$p4escVisitor = "smoke-ai-esc-$p3stamp"
-$p4esc = P3-Post "$Base/api/webchat/demo-webchat/messages" @{ visitorId = $p4escVisitor; body = "I want to speak to a human"; name = "AI Smoke" }
+$p4esc = P3-Post "$Base/api/webchat/demo-webchat/messages" @{ body = "I want to speak to a human"; name = "AI Smoke" }
 $p4escContactId = $p4esc.json.contactId
 $p4escDetail = P3-Get "$Base/api/conversations/$($p4esc.json.conversationId)"
 $p4note = @(@($p4escDetail.json.notes) | Where-Object { $_.body -match "AI escalated" })[0]

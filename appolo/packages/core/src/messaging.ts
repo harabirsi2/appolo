@@ -35,8 +35,12 @@ export const savedReplySchema = z.object({
 
 export const webchatCustomerSchema = z.object({
   body: messageBodySchema.max(2000),
-  visitorId: z.string().trim().min(8, "Missing visitor id.").max(80),
   name: z.string().trim().max(120).optional(),
+  /**
+   * Server-issued session token. The visitor id is minted and signed by the
+   * server; a client-chosen id used to be enough to read any transcript.
+   */
+  token: z.string().trim().max(400).optional(),
 });
 
 export const conversationQuerySchema = z.object({

@@ -10,6 +10,7 @@ import {
 import { withOrg, schema, type Tx } from "@/lib/db";
 import { parseCsv, splitTags, toCsv } from "@/lib/csv";
 import { DomainError } from "./errors";
+import { likeContains } from "./like-pattern";
 
 const {
   contacts,
@@ -131,8 +132,8 @@ export async function listContacts(
         .from(contactChannels)
         .where(
           or(
-            ilike(contactChannels.value, `%${search}%`),
-            ilike(contactChannels.normalizedValue, `%${search}%`),
+            ilike(contactChannels.value, likeContains(search)),
+            ilike(contactChannels.normalizedValue, likeContains(search)),
           ),
         )
         .limit(200);
@@ -141,8 +142,8 @@ export async function listContacts(
 
     const conditions = [];
     if (search) {
-      conditions.push(ilike(contacts.name, `%${search}%`));
-      conditions.push(ilike(contacts.company, `%${search}%`));
+      conditions.push(ilike(contacts.name, likeContains(search)));
+      conditions.push(ilike(contacts.company, likeContains(search)));
       if (channelMatches.length > 0) conditions.push(inArray(contacts.id, channelMatches));
     }
 

@@ -10,26 +10,31 @@ interface ChatMessage {
   createdAt: string;
 }
 
-const VISITOR_PREFIX = "appolo_webchat_visitor_";
+const TOKEN_PREFIX = "appolo_webchat_token_";
 
-function readVisitorId(key: string): string {
-  const storageKey = `${VISITOR_PREFIX}${key}`;
+/**
+ * The visitor token is issued by the server on the first message and signed
+ * with a server secret. The widget only stores and presents it; it no longer
+ * invents an id, so a guessed id cannot read someone else's transcript.
+ */
+function readToken(key: string): string | null {
   try {
-    const existing = window.localStorage.getItem(storageKey);
-    if (existing) return existing;
-    const generated =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `v-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    window.localStorage.setItem(storageKey, generated);
-    return generated;
+    return window.localStorage.getItem(`${TOKEN_PREFIX}${key}`);
   } catch {
-    return `v-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return null;
+  }
+}
+
+function saveToken(key: string, token: string): void {
+  try {
+    window.localStorage.setItem(`${TOKEN_PREFIX}${key}`, token);
+  } catch {
+    // A visitor with storage disabled simply loses history on reload.
   }
 }
 
 export function ChatWidget({ publicKey, orgName }: { publicKey: string; orgName: string }) {
-  const [visitorId, setVisitorId] = useState<string | null>(null);
+  const [visitorToken, setVisitorToken] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -37,14 +42,14 @@ export function ChatWidget({ publicKey, orgName }: { publicKey: string; orgName:
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setVisitorId(readVisitorId(publicKey));
+    setVisitorToken(readToken(publicKey));
   }, [publicKey]);
 
   const load = useCallback(async () => {
-    if (!visitorId) return;
+    if (!visitorToken) return;
     try {
       const response = await fetch(
-        `/api/webchat/${encodeURIComponent(publicKey)}/messages?visitorId=${encodeURIComponent(visitorId)}`,
+        `/api/webchat/${encodeURIComponent(publicKey)}/messages?token=${encodeURIComponent(visitorToken)}`,
         { cache: "no-store" },
       );
       if (!response.ok) return;
@@ -53,14 +58,14 @@ export function ChatWidget({ publicKey, orgName }: { publicKey: string; orgName:
     } catch {
       // Transient network failures should not surface to the visitor.
     }
-  }, [publicKey, visitorId]);
+  }, [publicKey, visitorToken]);
 
   useEffect(() => {
-    if (!visitorId) return;
+    if (!visitorToken) return;
     void load();
     const id = window.setInterval(() => void load(), 3000);
     return () => window.clearInterval(id);
-  }, [visitorId, load]);
+  }, [visitorToken, load]);
 
   useEffect(() => {
     const node = listRef.current;
@@ -69,7 +74,7 @@ export function ChatWidget({ publicKey, orgName }: { publicKey: string; orgName:
 
   async function send(event: React.FormEvent) {
     event.preventDefault();
-    if (!visitorId || !draft.trim() || sending) return;
+    if (!draft.trim() || sending) return;
     setSending(true);
     setError(null);
     const body = draft.trim();
@@ -78,14 +83,20 @@ export function ChatWidget({ publicKey, orgName }: { publicKey: string; orgName:
       const response = await fetch(`/api/webchat/${encodeURIComponent(publicKey)}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ visitorId, body }),
+        body: JSON.stringify({ body, token: visitorToken ?? undefined }),
       });
       if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as { error?: string };
         setError(payload.error ?? "Message could not be sent.");
         setDraft(body);
       } else {
-        await load();
+        // The first reply carries the signed visitor token; keep it so the
+        // poll below can read this visitor's own transcript.
+        const payload = (await response.json().catch(() => ({}))) as { visitorToken?: string };
+        if (payload.visitorToken) {
+          saveToken(publicKey, payload.visitorToken);
+          setVisitorToken(payload.visitorToken);
+        }
       }
     } catch {
       setError("Message could not be sent.");

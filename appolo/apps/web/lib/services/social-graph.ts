@@ -8,6 +8,7 @@ import { sharedFavorites, tasteClashes, categoryRadar, genreRadar, distributionS
 import { listInterests } from "./interests";
 import { z } from "zod";
 import { DomainError } from "./errors";
+import { likeContains } from "./like-pattern";
 import { getDb, withOrg, schema } from "@/lib/db";
 const { profiles, follows, catalogItems, itemRatings, searchHistory, socialNotifications: notifications } = schema;
 
@@ -21,9 +22,8 @@ export interface ProfileSummary {
   following: number;
   pinnedRatingId: string | null;
   manualMode: boolean;
+  /** Derived from the OAuth-written timestamp, not an editable flag. */
   spotifyConnected: boolean;
-  appleMusicConnected: boolean;
-  language: string;
   profileLayout: "list" | "grid";
   /** Hand-curated top-five order per medium, when the profile set one. */
   podiumOrder: Partial<Record<MediaKind, string[]>>;
@@ -53,9 +53,7 @@ function toProfileSummary(
     following: counts.following,
     pinnedRatingId: row.pinnedRatingId ?? null,
     manualMode: row.manualMode,
-    spotifyConnected: row.spotifyConnected,
-    appleMusicConnected: row.appleMusicConnected,
-    language: row.language,
+    spotifyConnected: Boolean(row.spotifyConnectedAt),
     profileLayout: row.profileLayout === "grid" ? "grid" : "list",
     podiumOrder: parsePodiumOrder(row.podiumOrder),
   };
@@ -107,20 +105,41 @@ async function followCountsFor(
   }
   return counts;
 }
-export async function getProfileByUsername(username: string): Promise<ProfileSummary | null> {
+export async function getProfileByUsername(
+  username: string,
+  options: { includeModerated?: boolean } = {},
+): Promise<ProfileSummary | null> {
   const db = getDb();
   const rows = await db
     .select()
     .from(profiles)
-    .where(sql`lower(${profiles.username}) = ${username.trim().toLowerCase()}`)
+    .where(
+      options.includeModerated
+        ? sql`lower(${profiles.username}) = ${username.trim().toLowerCase()}`
+        : and(
+            sql`lower(${profiles.username}) = ${username.trim().toLowerCase()}`,
+            eq(profiles.moderationStatus, "visible"),
+          ),
+    )
     .limit(1);
   const row = rows[0];
   if (!row) return null;
   return toProfileSummary(row, await followCounts(row.orgId));
 }
-export async function getProfileByOrgId(orgId: string): Promise<ProfileSummary | null> {
+export async function getProfileByOrgId(
+  orgId: string,
+  options: { publicOnly?: boolean } = {},
+): Promise<ProfileSummary | null> {
   const db = getDb();
-  const rows = await db.select().from(profiles).where(eq(profiles.orgId, orgId)).limit(1);
+  const rows = await db
+    .select()
+    .from(profiles)
+    .where(
+      options.publicOnly
+        ? and(eq(profiles.orgId, orgId), eq(profiles.moderationStatus, "visible"))
+        : eq(profiles.orgId, orgId),
+    )
+    .limit(1);
   const row = rows[0];
   if (!row) return null;
   return toProfileSummary(row, await followCounts(row.orgId));
@@ -132,7 +151,7 @@ export async function ensureProfile(orgId: string, displayName: string, username
   if (existing) return existing;
   const hue = Math.abs([...username].reduce((acc, ch) => acc * 31 + ch.charCodeAt(0), 7)) % 360;
   let handle = username.trim().toLowerCase() || "you";
-  const taken = await getProfileByUsername(handle);
+  const taken = await getProfileByUsername(handle, { includeModerated: true });
   if (taken) handle = `${handle}-${Math.random().toString(36).slice(2, 6)}`;
   await withOrg(orgId, async (tx) => {
     await tx
@@ -162,7 +181,7 @@ export async function setFollow(
   if (orgId === targetOrgId) {
     throw new DomainError("SELF_FOLLOW", "You cannot follow yourself.");
   }
-  const target = await getProfileByOrgId(targetOrgId);
+  const target = await getProfileByOrgId(targetOrgId, { publicOnly: true });
   if (!target) throw new DomainError("PROFILE_NOT_FOUND", "That profile does not exist.", 404);
 
   await withOrg(orgId, async (tx) => {
@@ -201,12 +220,16 @@ export async function searchProfiles(query: string, limit = 8): Promise<ProfileS
   const db = getDb();
   // Escape LIKE metacharacters so a query of "%" matches nothing rather than
   // every profile.
-  const escaped = query.trim().replace(/[\\%_]/g, (char) => `\\${char}`);
-  const like = `%${escaped}%`;
+  const like = likeContains(query.trim());
   const rows = await db
     .select()
     .from(profiles)
-    .where(sql`(${profiles.username} ilike ${like} or ${profiles.displayName} ilike ${like})`)
+    .where(
+      and(
+        sql`(${profiles.username} ilike ${like} or ${profiles.displayName} ilike ${like})`,
+        eq(profiles.moderationStatus, "visible"),
+      ),
+    )
     .orderBy(profiles.displayName)
     .limit(limit);
   if (rows.length === 0) return [];
@@ -250,6 +273,8 @@ export async function suggestedProfiles(orgId: string, limit = 8): Promise<Profi
       .where(
         and(
           notInArray(profiles.orgId, excluded),
+          eq(profiles.moderationStatus, "visible"),
+          eq(itemRatings.moderationStatus, "visible"),
           hasAnyGenre(catalogItems.genres, genres),
         ),
       )
@@ -261,7 +286,12 @@ export async function suggestedProfiles(orgId: string, limit = 8): Promise<Profi
     rows = await db
       .select()
       .from(profiles)
-      .where(notInArray(profiles.orgId, excluded))
+      .where(
+        and(
+          notInArray(profiles.orgId, excluded),
+          eq(profiles.moderationStatus, "visible"),
+        ),
+      )
       .orderBy(profiles.displayName)
       .limit(limit);
   }
@@ -292,7 +322,7 @@ export interface ProfileBundle {
 }
 export async function profileBundle(profile: ProfileSummary): Promise<ProfileBundle> {
   const [ratings, podCards, watchlist] = await Promise.all([
-    rankedRatings(profile.orgId),
+    rankedRatings(profile.orgId, { publicOnly: true }),
     podsForProfile(profile.orgId, profile.username, profile.displayName),
     watchlistFor(profile.orgId),
   ]);
@@ -453,9 +483,6 @@ export const profileUpdateSchema = z.object({
   bio: z.string().trim().max(300).optional().nullable(),
   avatarHue: z.number().int().min(0).max(360).optional(),
   manualMode: z.boolean().optional(),
-  spotifyConnected: z.boolean().optional(),
-  appleMusicConnected: z.boolean().optional(),
-  language: z.enum(["en", "es", "pt"]).optional(),
   profileLayout: z.enum(["list", "grid"]).optional(),
 });
 export type ProfileUpdate = z.infer<typeof profileUpdateSchema>;
@@ -464,7 +491,7 @@ export async function updateProfile(orgId: string, input: ProfileUpdate): Promis
   if (!current) throw new DomainError("PROFILE_MISSING", "Create a profile first.", 400);
 
   if (input.username && input.username.toLowerCase() !== current.username.toLowerCase()) {
-    const taken = await getProfileByUsername(input.username);
+    const taken = await getProfileByUsername(input.username, { includeModerated: true });
     if (taken && taken.orgId !== orgId) {
       throw new DomainError("USERNAME_TAKEN", "That username is already taken.", 409);
     }
@@ -479,9 +506,6 @@ export async function updateProfile(orgId: string, input: ProfileUpdate): Promis
         bio: input.bio === undefined ? current.bio : input.bio?.trim() || null,
         avatarHue: input.avatarHue ?? current.avatarHue,
         manualMode: input.manualMode ?? current.manualMode,
-        spotifyConnected: input.spotifyConnected ?? current.spotifyConnected,
-        appleMusicConnected: input.appleMusicConnected ?? current.appleMusicConnected,
-        language: input.language ?? current.language,
         profileLayout: input.profileLayout ?? current.profileLayout,
       })
       .where(eq(profiles.orgId, orgId));
@@ -491,6 +515,15 @@ export async function updateProfile(orgId: string, input: ProfileUpdate): Promis
   if (!updated) throw new DomainError("PROFILE_MISSING", "Could not update that profile.", 500);
   return updated;
 }
+export async function recordSpotifyConnection(orgId: string): Promise<void> {
+  await withOrg(orgId, async (tx) => {
+    await tx
+      .update(profiles)
+      .set({ spotifyConnectedAt: new Date(), updatedAt: new Date() })
+      .where(eq(profiles.orgId, orgId));
+  });
+}
+
 export async function pinReview(orgId: string, ratingId: string | null): Promise<ProfileSummary> {
   if (ratingId) {
     const owned = await withOrg(orgId, (tx) =>
@@ -516,7 +549,10 @@ export async function pinReview(orgId: string, ratingId: string | null): Promise
  */
 export async function matchPercent(orgId: string, otherOrgId: string): Promise<number | null> {
   if (orgId === otherOrgId) return 100;
-  const [mine, theirs] = await Promise.all([rankedRatings(orgId), rankedRatings(otherOrgId)]);
+  const [mine, theirs] = await Promise.all([
+    rankedRatings(orgId, { publicOnly: true }),
+    rankedRatings(otherOrgId, { publicOnly: true }),
+  ]);
   const theirScores = new Map(theirs.map((item) => [item.id, item.score]));
   const shared = mine
     .filter((item) => theirScores.has(item.id))
@@ -548,7 +584,7 @@ export interface TasteTwin {
  * and keeps the viewer's own scores private on the server.
  */
 export async function tasteTwins(orgId: string, limit = 6): Promise<TasteTwin[]> {
-  const mine = await rankedRatings(orgId);
+  const mine = await rankedRatings(orgId, { publicOnly: true });
   if (mine.length === 0) return [];
   const mineScores = new Map(mine.map((item) => [item.id, item.score]));
   const db = getDb();
@@ -556,7 +592,14 @@ export async function tasteTwins(orgId: string, limit = 6): Promise<TasteTwin[]>
   const rows = await db
     .select({ orgId: itemRatings.orgId, itemId: itemRatings.itemId, elo: itemRatings.elo })
     .from(itemRatings)
-    .where(ne(itemRatings.orgId, orgId))
+    .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
+    .where(
+      and(
+        ne(itemRatings.orgId, orgId),
+        eq(itemRatings.moderationStatus, "visible"),
+        eq(profiles.moderationStatus, "visible"),
+      ),
+    )
     .limit(5000);
 
   const diffs = new Map<string, { total: number; shared: number }>();
@@ -583,7 +626,12 @@ export async function tasteTwins(orgId: string, limit = 6): Promise<TasteTwin[]>
   const profileRows = await db
     .select()
     .from(profiles)
-    .where(inArray(profiles.orgId, ranked.map((entry) => entry.otherOrgId)));
+    .where(
+      and(
+        inArray(profiles.orgId, ranked.map((entry) => entry.otherOrgId)),
+        eq(profiles.moderationStatus, "visible"),
+      ),
+    );
   const byOrg = new Map(profileRows.map((row) => [row.orgId, row]));
 
   const twins: TasteTwin[] = [];
@@ -689,9 +737,9 @@ export interface TasteComparison {
 export async function compareTaste(orgId: string, otherOrgId: string): Promise<TasteComparison | null> {
   if (orgId === otherOrgId) return null;
   const [other, mine, theirs] = await Promise.all([
-    getProfileByOrgId(otherOrgId),
-    rankedRatings(orgId),
-    rankedRatings(otherOrgId),
+    getProfileByOrgId(otherOrgId, { publicOnly: true }),
+    rankedRatings(orgId, { publicOnly: true }),
+    rankedRatings(otherOrgId, { publicOnly: true }),
   ]);
   if (!other) return null;
 

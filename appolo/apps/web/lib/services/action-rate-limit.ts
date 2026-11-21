@@ -19,8 +19,16 @@ export const EXPORT_WINDOW: AttemptWindow = { max: 5, windowMs: 60_000 };
 export const SEARCH_WINDOW: AttemptWindow = { max: 30, windowMs: 60_000 };
 /** Bulk catalog imports create shared rows and deserve a tighter quota. */
 export const IMPORT_WINDOW: AttemptWindow = { max: 5, windowMs: 60_000 };
+/** Reports are cheap but should not become a scripted harassment channel. */
+export const REPORT_WINDOW: AttemptWindow = { max: 20, windowMs: 60_000 };
+/**
+ * One browser visitor is well under this. The webchat POST is unauthenticated,
+ * and every accepted message can create a contact, run keyword automations (a
+ * real SMS) and spend an AI reply, so it is metered per widget key and IP.
+ */
+export const WEBCHAT_WINDOW: AttemptWindow = { max: 12, windowMs: 60_000 };
 
-type ActionScope = "vote" | "matchup" | "reaction" | "comment" | "export" | "search" | "import";
+type ActionScope = "vote" | "matchup" | "reaction" | "comment" | "export" | "search" | "import" | "report";
 
 export async function consumeAction(
   scope: ActionScope,
@@ -28,4 +36,17 @@ export async function consumeAction(
   limit: AttemptWindow,
 ): Promise<AttemptResult> {
   return consumeAttempt(`${scope}:${orgId}`, limit);
+}
+
+/**
+ * Meter a public widget request. Keyed by widget key *and* client IP so one
+ * abusive visitor cannot exhaust a site's allowance for everyone else, and a
+ * single IP cannot flood every widget it can find.
+ */
+export async function consumeWebchat(
+  publicKey: string,
+  ip: string | null | undefined,
+  limit: AttemptWindow = WEBCHAT_WINDOW,
+): Promise<AttemptResult> {
+  return consumeAttempt(`webchat:${publicKey}:${ip ?? "unknown"}`, limit);
 }

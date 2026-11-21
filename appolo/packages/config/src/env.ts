@@ -7,6 +7,11 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   MIGRATE_DATABASE_URL: z.string().optional(),
   REDIS_URL: z.string().optional().transform((v) => (v ? v : undefined)),
+  /**
+   * HMAC key for web chat visitor tokens. Required in production: without it
+   * the widget routes fail closed rather than sign with a known secret.
+   */
+  WEBCHAT_TOKEN_SECRET: z.string().min(32).optional(),
   SEED_EMAIL: z.string().email().optional(),
   SEED_PASSWORD: z.string().min(8).optional(),
 });

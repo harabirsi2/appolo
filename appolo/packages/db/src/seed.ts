@@ -1284,10 +1284,19 @@ async function main(): Promise<void> {
   if (!userRows[0]) {
     userRows = await db
       .insert(users)
-      .values({ email, name: "Demo Owner", passwordHash: hashPassword(password), emailVerifiedAt: new Date() })
+      .values({
+        email,
+        name: "Demo Owner",
+        passwordHash: await hashPassword(password),
+        emailVerifiedAt: new Date(),
+        isModerator: true,
+      })
       .returning();
   } else {
-    await db.update(users).set({ passwordHash: hashPassword(password) }).where(eq(users.id, userRows[0].id));
+    await db
+      .update(users)
+      .set({ passwordHash: await hashPassword(password), isModerator: true })
+      .where(eq(users.id, userRows[0].id));
   }
   const userId = userRows[0]!.id;
 
