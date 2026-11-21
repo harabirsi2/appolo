@@ -1,17 +1,31 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { getProfileByUsername, podByOwnerAndSlug } from "@/lib/services/social";
 import { PodScreen } from "@/components/pod-screen";
+import { pageMetadata } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ username: string; slug: string }> };
 
-export async function generateMetadata({ params }: Params) {
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { username, slug } = await params;
-  const pod = await podByOwnerAndSlug(decodeURIComponent(username), decodeURIComponent(slug));
-  return { title: pod ? `${pod.title} — @${pod.ownerUsername}` : "Pod" };
+  const handle = decodeURIComponent(username);
+  const podSlug = decodeURIComponent(slug);
+  const pod = await podByOwnerAndSlug(handle, podSlug);
+  if (!pod) {
+    return pageMetadata({ title: "Pod not found", path: `/${handle}/${podSlug}`, noindex: true });
+  }
+
+  return pageMetadata({
+    title: `${pod.title} — @${pod.ownerUsername}`,
+    description: `A shared list of favourites curated by @${pod.ownerUsername} on Appolo.`,
+    path: `/${pod.ownerUsername}/${pod.slug}`,
+    image: `/api/og/podium/${encodeURIComponent(pod.ownerUsername)}`,
+    imageAlt: `${pod.title} — a pod by @${pod.ownerUsername}`,
+  });
 }
 
 export default async function PodPage({ params }: Params) {

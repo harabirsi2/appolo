@@ -1,17 +1,33 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { getProfileByUsername, podById } from "@/lib/services/social";
 import { PodScreen } from "@/components/pod-screen";
+import { pageMetadata } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function generateMetadata({ params }: Params) {
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { id } = await params;
   const pod = await podById(id);
-  return { title: pod ? `${pod.title} — @${pod.ownerUsername}` : "Pod" };
+  if (!pod) {
+    return pageMetadata({ title: "Pod not found", path: `/pods/${id}`, noindex: true });
+  }
+
+  // The id route and the owner/slug route show the same pod; the readable
+  // owner/slug URL is the canonical one.
+  const canonicalPath = `/${encodeURIComponent(pod.ownerUsername)}/${encodeURIComponent(pod.slug)}`;
+
+  return pageMetadata({
+    title: `${pod.title} — @${pod.ownerUsername}`,
+    description: `A shared list of favourites curated by @${pod.ownerUsername} on Appolo.`,
+    path: canonicalPath,
+    image: `/api/og/podium/${encodeURIComponent(pod.ownerUsername)}`,
+    imageAlt: `${pod.title} — a pod by @${pod.ownerUsername}`,
+  });
 }
 
 export default async function PodByIdPage({ params }: Params) {

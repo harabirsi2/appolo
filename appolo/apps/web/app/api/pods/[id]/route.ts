@@ -3,6 +3,7 @@ import { firstIssue } from "@appolo/core";
 import { apiError, jsonError } from "@/lib/api";
 import { getSession } from "@/lib/session";
 import { podUpdateSchema, updatePod, deletePod } from "@/lib/services/social";
+import { revalidatePublicPods, revalidatePublicSitemap } from "@/lib/revalidate-public";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
     const parsed = podUpdateSchema.safeParse(body);
     if (!parsed.success) return jsonError(firstIssue(parsed.error), 400, "INVALID_POD");
     const pod = await updatePod(session.org.id, id, parsed.data);
+    revalidatePublicPods();
     return NextResponse.json({ pod });
   } catch (error) {
     return apiError(error);
@@ -34,6 +36,8 @@ export async function DELETE(_request: NextRequest, { params }: Params): Promise
     if (!session) return jsonError("Not authenticated", 401, "UNAUTHENTICATED");
     const { id } = await params;
     await deletePod(session.org.id, id);
+    revalidatePublicPods();
+    revalidatePublicSitemap();
     return NextResponse.json({ ok: true });
   } catch (error) {
     return apiError(error);

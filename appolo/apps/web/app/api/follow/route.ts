@@ -4,6 +4,7 @@ import { firstIssue } from "@appolo/core";
 import { apiError, jsonError } from "@/lib/api";
 import { getSession } from "@/lib/session";
 import { getProfileByUsername, setFollow } from "@/lib/services/social";
+import { revalidatePublicProfile } from "@/lib/revalidate-public";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!targetOrgId) return jsonError("Provide a username or org id.", 400, "INVALID_FOLLOW");
 
     const outcome = await setFollow(session.org.id, targetOrgId, parsed.data.follow);
+    // Follower counts render on the public profile.
+    revalidatePublicProfile();
     return NextResponse.json(outcome);
   } catch (error) {
     return apiError(error);

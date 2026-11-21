@@ -3,6 +3,7 @@ import { firstIssue } from "@appolo/core";
 import { apiError, jsonError } from "@/lib/api";
 import { getSession } from "@/lib/session";
 import { createPod, podInputSchema, podsForProfile, getProfileByOrgId } from "@/lib/services/social";
+import { revalidatePublicPods, revalidatePublicSitemap } from "@/lib/revalidate-public";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!parsed.success) return jsonError(firstIssue(parsed.error), 400, "INVALID_POD");
 
     const pod = await createPod(session.org.id, parsed.data);
+    revalidatePublicPods();
+    revalidatePublicSitemap();
     return NextResponse.json({ pod }, { status: 201 });
   } catch (error) {
     return apiError(error);

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { apiError, jsonError } from "@/lib/api";
 import { getSession } from "@/lib/session";
 import { setManualRating } from "@/lib/services/rankings";
+import { revalidatePublicPodiumCard, revalidatePublicProfile } from "@/lib/revalidate-public";
 
 const schema = z.object({ score: z.number().min(0).max(10) });
 
@@ -26,6 +27,8 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     if (!parsed.success) return jsonError("Score must be between 0 and 10.", 400, "INVALID_SCORE");
     const rating = await setManualRating(session.org.id, itemId, parsed.data.score);
     invalidateCommunity();
+    revalidatePublicPodiumCard();
+    revalidatePublicProfile();
     return NextResponse.json({ rating });
   } catch (error) {
     return apiError(error);

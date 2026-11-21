@@ -1,16 +1,21 @@
 import type { Metadata } from "next";
 import { fontVariables } from "./fonts";
 import "./globals.css";
+import { DEFAULT_DESCRIPTION, SITE_NAME, SITE_TAGLINE, SITE_URL } from "@/lib/seo";
 
 export const metadata: Metadata = {
+  // Canonicals, OG images and the sitemap all need absolute URLs, and every
+  // page supplies relative paths; this is the base they resolve against.
+  metadataBase: new URL(SITE_URL),
   title: {
     default: "Appolo — Rate and rank what you love",
     template: "%s · Appolo",
   },
-  description:
-    "Rate movies, TV, music, podcasts, and books through quick head-to-head matchups, get a personalised score, and build your ranked top five.",
-  applicationName: "Appolo",
-  appleWebApp: { capable: true, title: "Appolo", statusBarStyle: "black-translucent" },
+  description: DEFAULT_DESCRIPTION,
+  applicationName: SITE_NAME,
+  openGraph: { siteName: SITE_NAME, type: "website", title: SITE_NAME, description: SITE_TAGLINE },
+  twitter: { card: "summary_large_image" },
+  appleWebApp: { capable: true, title: SITE_NAME, statusBarStyle: "black-translucent" },
 };
 
 export const viewport = {

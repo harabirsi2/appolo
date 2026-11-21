@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
@@ -8,15 +9,32 @@ import {
   profileBundle,
 } from "@/lib/services/social";
 import { ProfileScreen } from "@/components/profile-screen";
+import { pageMetadata } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ username: string }> };
 
-export async function generateMetadata({ params }: Params) {
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { username } = await params;
-  const profile = await getProfileByUsername(decodeURIComponent(username));
-  return { title: profile ? `${profile.displayName} (@${profile.username})` : "Profile" };
+  const handle = decodeURIComponent(username);
+  const profile = await getProfileByUsername(handle);
+  if (!profile) {
+    return pageMetadata({
+      title: "Profile not found",
+      path: `/${handle}`,
+      noindex: true,
+    });
+  }
+
+  return pageMetadata({
+    title: `${profile.displayName} (@${profile.username})`,
+    description: `@${profile.username} ranks films, shows, music, podcasts and books on Appolo. See their podium and what they rate highest.`,
+    path: `/${profile.username}`,
+    image: `/api/og/podium/${encodeURIComponent(profile.username)}`,
+    imageAlt: `${profile.displayName}'s podium on Appolo`,
+    type: "profile",
+  });
 }
 
 export default async function PublicProfilePage({

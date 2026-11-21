@@ -3,6 +3,7 @@ import { invalidateCommunity } from "@/lib/cache";
 import { getSession } from "@/lib/session";
 import { apiError, jsonError } from "@/lib/api";
 import { undoLastComparison } from "@/lib/services/rankings";
+import { revalidatePublicPodiumCard, revalidatePublicProfile } from "@/lib/revalidate-public";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,11 @@ export async function POST(_request: NextRequest, { params }: Params): Promise<N
 
     const { itemId } = await params;
     const result = await undoLastComparison(session.org.id, itemId);
-    if (result.undone) invalidateCommunity();
+    if (result.undone) {
+      invalidateCommunity();
+      revalidatePublicPodiumCard();
+      revalidatePublicProfile();
+    }
     return NextResponse.json(result);
   } catch (error) {
     return apiError(error);

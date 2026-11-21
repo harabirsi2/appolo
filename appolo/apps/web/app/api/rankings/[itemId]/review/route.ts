@@ -4,6 +4,7 @@ import { firstIssue } from "@appolo/core";
 import { apiError, jsonError } from "@/lib/api";
 import { getSession } from "@/lib/session";
 import { reviewInputSchema, saveReview } from "@/lib/services/social";
+import { revalidatePublicProfile, revalidatePublicReview, revalidatePublicSitemap } from "@/lib/revalidate-public";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,11 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     // community count, the seven-day popular rail and the review text shown
     // beside the score.
     invalidateCommunity();
+    // The review page is public and may be new, so its path and the sitemap
+    // need to pick up the change; the author's profile shows it too.
+    revalidatePublicReview(rating.ratingId);
+    revalidatePublicProfile();
+    revalidatePublicSitemap();
     return NextResponse.json({ rating });
   } catch (error) {
     return apiError(error);

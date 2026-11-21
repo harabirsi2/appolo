@@ -5,6 +5,7 @@ import { getSession } from "@/lib/session";
 import { apiError, jsonError, rateLimited } from "@/lib/api";
 import { consumeAction, VOTE_WINDOW } from "@/lib/services/action-rate-limit";
 import { submitVote } from "@/lib/services/rankings";
+import { revalidatePublicPodiumCard, revalidatePublicProfile } from "@/lib/revalidate-public";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,9 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
 
     const outcome = await submitVote(session.org.id, itemId, parsed.data.opponentId, parsed.data.result);
     invalidateCommunity();
+    // A vote moves the podium, which is what the share card renders.
+    revalidatePublicPodiumCard();
+    revalidatePublicProfile();
     return NextResponse.json(outcome);
   } catch (error) {
     return apiError(error);

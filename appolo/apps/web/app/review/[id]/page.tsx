@@ -1,20 +1,37 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { reviewById } from "@/lib/services/social";
 import { ReviewScreen } from "@/components/review-screen";
+import { pageMetadata, truncateText } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function generateMetadata({ params }: Params) {
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { id } = await params;
   const review = await reviewById(id);
-  return {
-    title: review ? `${review.displayName} on ${review.itemTitle}` : "Review",
-    description: review?.text?.slice(0, 150) ?? undefined,
-  };
+  if (!review) {
+    return pageMetadata({ title: "Review not found", path: `/review/${id}`, noindex: true });
+  }
+
+  const score = review.score.toFixed(1);
+  // A spoiler review must not put its text (or the surprise) in a link preview.
+  const description = review.spoiler
+    ? `${review.displayName} rated ${review.itemTitle} ${score}/10 on Appolo. This review is marked as a spoiler.`
+    : truncateText(review.text) ??
+      `${review.displayName} rated ${review.itemTitle} ${score}/10 on Appolo.`;
+
+  return pageMetadata({
+    title: `${review.displayName} on ${review.itemTitle}`,
+    description,
+    path: `/review/${id}`,
+    image: `/api/og/review/${encodeURIComponent(id)}`,
+    imageAlt: `${review.displayName} rated ${review.itemTitle} ${score}/10`,
+    type: "article",
+  });
 }
 
 export default async function PublicReviewPage({ params }: Params) {
@@ -33,7 +50,7 @@ export default async function PublicReviewPage({ params }: Params) {
           {session ? "Open app" : "Sign in"}
         </Link>
       </div>
-      <ReviewScreen review={review} />
+      <ReviewScreen review={review} viewerOrgId={session?.org.id ?? null} />
     </div>
   );
 }

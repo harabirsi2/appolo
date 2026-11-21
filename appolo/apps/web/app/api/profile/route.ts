@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { apiError, jsonError } from "@/lib/api";
 import { getSession } from "@/lib/session";
 import { getProfileByOrgId, profileUpdateSchema, updateProfile } from "@/lib/services/social";
+import { revalidatePublicProfile, revalidatePublicSitemap } from "@/lib/revalidate-public";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,9 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const parsed = profileUpdateSchema.safeParse(body);
     if (!parsed.success) return jsonError("Invalid profile data.", 400, "INVALID_PROFILE");
     const profile = await updateProfile(session.org.id, parsed.data);
+    // Public profile, its podium card and the sitemap all show this row.
+    revalidatePublicProfile(profile.username);
+    revalidatePublicSitemap();
     return NextResponse.json({ profile });
   } catch (error) {
     return apiError(error);
