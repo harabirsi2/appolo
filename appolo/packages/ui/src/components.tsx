@@ -87,12 +87,18 @@ export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: st
   );
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+export function Field({ label, htmlFor, hint, hintId, children }: {
+  label: string;
+  htmlFor?: string;
+  hint?: string;
+  hintId?: string;
+  children: ReactNode;
+}) {
   return (
     <div>
-      <Label>{label}</Label>
+      <Label htmlFor={htmlFor}>{label}</Label>
       {children}
-      {hint ? <p className="mt-1 text-xs text-muted-2">{hint}</p> : null}
+      {hint ? <p id={hintId} className="mt-1 text-xs text-muted-2">{hint}</p> : null}
     </div>
   );
 }

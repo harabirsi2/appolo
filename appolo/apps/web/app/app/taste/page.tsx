@@ -33,7 +33,7 @@ export default async function TastePage() {
           </div>
           <div className="text-right text-[11px] text-muted-2">
             <p>{dna.rated} ranked</p>
-            <p>{dna.matchups} matchups</p>
+            <p>{dna.matchups} {dna.matchups === 1 ? "matchup" : "matchups"}</p>
             {dna.streak.current > 0 ? <p className="text-brand">🔥 {dna.streak.current}-day streak</p> : null}
           </div>
         </div>

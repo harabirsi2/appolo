@@ -91,7 +91,7 @@ export function RankingsList({ kind, items }: { kind: MediaKind | null; items: R
       {canReorder ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[11px] text-muted-2">
-            {editing ? "Drag a title, or use the arrows, then done." : "Your saved order overrides the model order."}
+            {editing ? "Drag a title or use the arrows. Changes save as you go." : "A saved order overrides the default score order."}
           </p>
           <button
             type="button"

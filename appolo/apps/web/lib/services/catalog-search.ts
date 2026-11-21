@@ -12,8 +12,8 @@ import {
 import { getDb, schema } from "@/lib/db";
 import { mapCatalogItem, type CatalogItem } from "./catalog-item";
 import { hasGenre } from "./genre-filter";
+import { catalogQueryClauses } from "./catalog-search-order";
 import { consumeAction, SEARCH_WINDOW } from "./action-rate-limit";
-import { likeContains, likePrefix } from "./like-pattern";
 import { enqueueEnrichment, enrichmentPayload } from "./catalog-enrichment";
 
 const { catalogItems } = schema;
@@ -95,7 +95,6 @@ function clampLimit(limit: number | undefined): number {
 
 function categoryFilters(
   category: SearchCategory | null | undefined,
-  query: string,
   genre?: string,
 ) {
   const filters = [];
@@ -104,10 +103,6 @@ function categoryFilters(
     if (category === "anime") filters.push(hasGenre(catalogItems.genres, "Anime"));
   }
   if (genre) filters.push(hasGenre(catalogItems.genres, genre));
-  if (query) {
-    const like = likeContains(query);
-    filters.push(sql`(${catalogItems.title} ilike ${like} or ${catalogItems.subtitle} ilike ${like})`);
-  }
   return filters;
 }
 
@@ -119,22 +114,9 @@ async function localSearch(
   genre?: string,
 ): Promise<CatalogItem[]> {
   const db = getDb();
-  const filters = categoryFilters(category, query, genre);
-  // Substring matching decides which rows are eligible; relevance decides
-  // their order. Exact and prefix matches come first, then pg_trgm similarity,
-  // so searching "the" no longer returns an alphabetical dump.
-  const order = query
-    ? [
-        sql`case
-          when lower(${catalogItems.title}) = lower(${query}) then 3
-          when ${catalogItems.title} ilike ${likePrefix(query)} then 2
-          when ${catalogItems.subtitle} ilike ${likePrefix(query)} then 1
-          else 0
-        end desc`,
-        sql`greatest(similarity(${catalogItems.title}, ${query}), coalesce(similarity(${catalogItems.subtitle}, ${query}), 0)) desc`,
-        catalogItems.title,
-      ]
-    : [catalogItems.title];
+  const filters = categoryFilters(category, genre);
+  const { filter, order } = catalogQueryClauses(query);
+  if (filter) filters.push(filter);
   const rows = await db
     .select()
     .from(catalogItems)

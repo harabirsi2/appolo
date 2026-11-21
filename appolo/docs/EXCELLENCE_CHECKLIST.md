@@ -5,9 +5,10 @@ actually in this repository. Status is evidence-based, not aspirational.
 
 Legend: **Done** · **Partial** · **Open**
 
-Last verification: `pnpm verify` → preflight OK, typecheck clean, e2e **27/27**,
-visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
-**56/56**; axe **0 violations** on 9 screens. Image measurement: Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
+Last verification: `pnpm verify` → preflight OK, typecheck clean, e2e **40/40**
+(2 skipped without provider keys), visual **8/8**; core unit tests **70/70**;
+`pnpm a11y` **0 violations on 9 screens** (including settings). Image measurement:
+Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 
 ---
 
@@ -17,7 +18,7 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 |---|---|---|
 | Repository audited (architecture, schema, services, components) | Done | `docs/PRODUCT_AUDIT.md`, `docs/TECHNICAL_ARCHITECTURE.md`, `docs/CODE_REVIEW.md` |
 | Existing behaviour run before edits | Done | `scripts/preflight.mjs`, `scripts/e2e.mjs`, `scripts/visual.mjs` |
-| Baseline established (perf, reliability, tests) | Done | page timings and `EXPLAIN ANALYZE` in `docs/PERFORMANCE.md`; 27 e2e + 8 visual checks |
+| Baseline established (perf, reliability, tests) | Done | page timings and `EXPLAIN ANALYZE` in `docs/PERFORMANCE.md`; 39 e2e + 8 visual checks |
 | No wholesale rewrite; stack preserved | Done | Next 15 App Router, Postgres + Drizzle, `packages/core` kept |
 
 ## 2. Product and competitive analysis
@@ -88,8 +89,8 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 | Responsive behaviour verified | Done | 320/390/768/1280 px checked, no horizontal overflow |
 | Touch targets, focus ring, reduced motion | Done | 44 px targets, `:focus-visible`, reduced-motion guard |
 | Icon labelling and keyboard controls | Partial | `aria-label` on icon buttons, keys for tie/undecided; no full keyboard-navigation audit |
-| Visual regression | Done | 8-screen pixel baselines, 0.1% tolerance |
-| Accessibility audit | Done | axe-core on 9 screens: 0 serious/critical violations; `pnpm a11y`; skip link added |
+| Visual regression | Done | 8-screen pixel baselines, 0.1% tolerance in CI; `pnpm visual:local` adds the same diff against this machine's accepted baselines |
+| Accessibility audit | Done | axe-core on 9 screens: 0 serious/critical violations; `pnpm a11y`; skip link added; settings fields labelled and the embed snippet is keyboard-scrollable |
 | Desktop editorial grid, light theme | Open | explicitly deferred in roadmap Phase 1 |
 
 ## 8. Architecture and engineering
@@ -132,13 +133,13 @@ visual **8/8**; `pnpm --filter @appolo/web build` clean; core unit tests
 
 | Check | Status | Evidence |
 |---|---|---|
-| Unit tests (ranking, taste, community) | Done | 56 tests, `pnpm test` |
-| End-to-end workflows over HTTP | Done | `scripts/e2e.mjs`, 27 checks, cleans up its accounts |
+| Unit tests (ranking, taste, community) | Done | 70 tests, `pnpm test` |
+| End-to-end workflows over HTTP | Done | `scripts/e2e.mjs`, 39 checks, cleans up its accounts |
 | Visual regression | Done | `scripts/visual.mjs`, 8 screens |
 | Readiness / health check | Done | `scripts/preflight.mjs` (queries the DB) |
 | Aggregated gate | Done | `pnpm verify` |
 | API contract tests, load tests | Open | no dedicated API-contract or load suite |
-| Accessibility tests | Open | no axe checks |
+| Accessibility tests | Done | `pnpm a11y` runs axe-core on 9 screens and fails on serious/critical violations |
 
 ## 12. Performance
 

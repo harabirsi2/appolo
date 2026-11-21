@@ -55,6 +55,9 @@ export async function RankingsScreen({
         if (fitA && fitB && fitB.personalScore !== fitA.personalScore) {
           return fitB.personalScore - fitA.personalScore;
         }
+        // Keep equal-score items with model evidence together. Comparing Elo
+        // across fitted and unfitted rows would make the sort non-transitive.
+        if (Boolean(fitA) !== Boolean(fitB)) return fitA ? -1 : 1;
         if (b.elo !== a.elo) return b.elo - a.elo;
         return a.title.localeCompare(b.title);
       });
@@ -70,9 +73,9 @@ export async function RankingsScreen({
 
       <h1 className="mt-4 text-[30px] font-extrabold tracking-tight text-ink">{heading}</h1>
       <p className="mt-1 text-[13px] text-muted">
-        {stats.rated} ranked · {stats.matchups} matchups · {stats.averageScore.toFixed(1)} avg
+        {stats.rated} ranked · {stats.matchups} {stats.matchups === 1 ? "matchup" : "matchups"} · {stats.averageScore.toFixed(1)} avg
       </p>
-      {hasModel ? (
+      {hasModel && !manual ? (
         <p className="mt-1 text-[11px] text-muted-2">
           {activeKind && model
             ? `Highest score first · model breaks ties from ${model.comparisons} comparisons · ν ${model.tieParameter.toFixed(2)} · ${model.converged ? "converged" : "approximate"}`

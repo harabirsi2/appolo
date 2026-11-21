@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Accessibility audit for the visual-suite screens plus settings.
+ * Accessibility audit for the visual-suite screens plus account settings.
  *
  * Runs axe-core against the running app (same prerequisite as `pnpm visual`),
  * and fails on any serious or critical violation. The axe source is fetched
@@ -40,7 +40,9 @@ try {
 }
 
 const browser = await chromium.launch({ channel: "chromium-headless-shell" });
-const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+const viewport = { width: 1280, height: 900 };
+const context = await browser.newContext({ viewport });
+const publicContext = await browser.newContext({ viewport });
 
 const login = await context.request.post(`${BASE_URL}/api/auth/login`, {
   data: { email: EMAIL, password: PASSWORD },
@@ -53,8 +55,14 @@ if (!login.ok()) {
 
 let failures = 0;
 for (const screen of SCREENS) {
-  const page = await context.newPage();
-  await page.goto(`${BASE_URL}${screen.path}`, { waitUntil: "networkidle" });
+  const page = await (screen.auth ? context : publicContext).newPage();
+  const response = await page.goto(`${BASE_URL}${screen.path}`, { waitUntil: "networkidle" });
+  if (!response?.ok() || new URL(page.url()).pathname !== new URL(screen.path, BASE_URL).pathname) {
+    failures++;
+    console.log(`FAIL  ${screen.name}: expected ${screen.path}, got ${page.url()} (${response?.status() ?? "no response"})`);
+    await page.close();
+    continue;
+  }
   await page.addScriptTag({ content: axeSource });
   const violations = await page.evaluate(async () => {
     const result = await window.axe.run(document, { resultTypes: ["violations"] });
@@ -80,6 +88,7 @@ for (const screen of SCREENS) {
   await page.close();
 }
 
+await publicContext.close();
 await browser.close();
-console.log(`\n${SCREENS.length - failures >= 0 ? "" : ""}${failures === 0 ? "All screens passed" : `${failures} blocking violation(s)`}`);
+console.log(`\n${failures === 0 ? `All ${SCREENS.length} screens passed` : `${failures} blocking failure(s)`}`);
 process.exit(failures === 0 ? 0 : 1);

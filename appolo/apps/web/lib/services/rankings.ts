@@ -6,8 +6,8 @@ import { hasGenre } from "./genre-filter";
 import { DomainError } from "./errors";
 import { scheduleCatalogEnrichment } from "./catalog-providers";
 import { nextEloAdaptive } from "@appolo/core/ranking";
+import { catalogQueryClauses } from "./catalog-search-order";
 import { getDb, withOrg, schema, type Tx } from "@/lib/db";
-import { likeContains, likePrefix } from "./like-pattern";
 const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, rankingOrder } = schema;
 
 export interface RankedItem extends CatalogItem {
@@ -96,32 +96,18 @@ export async function listCatalog(options: {
   limit?: number;
 } = {}): Promise<CatalogItem[]> {
   const db = getDb();
-  if (options.q && options.q.trim().length >= 3) {
+  const query = options.q?.trim() ?? "";
+  if (query.length >= 3) {
     // Never block the local result set on a third-party lookup; hits are stored
     // in the background and picked up by the next search.
-    scheduleCatalogEnrichment(options.kind, options.q.trim());
+    scheduleCatalogEnrichment(options.kind, query);
   }
   const filters = [];
   if (options.kind) filters.push(eq(catalogItems.kind, options.kind as MediaKind));
   if (options.genre) filters.push(hasGenre(catalogItems.genres, options.genre));
-  if (options.q) {
-    const like = likeContains(options.q);
-    filters.push(sql`(${catalogItems.title} ilike ${like} or ${catalogItems.subtitle} ilike ${like})`);
-  }
+  const { filter, order } = catalogQueryClauses(query);
+  if (filter) filters.push(filter);
 
-  const query = options.q?.trim();
-  const order = query
-    ? [
-        sql`case
-          when lower(${catalogItems.title}) = lower(${query}) then 3
-          when ${catalogItems.title} ilike ${likePrefix(query)} then 2
-          when ${catalogItems.subtitle} ilike ${likePrefix(query)} then 1
-          else 0
-        end desc`,
-        sql`greatest(similarity(${catalogItems.title}, ${query}), coalesce(similarity(${catalogItems.subtitle}, ${query}), 0)) desc`,
-        catalogItems.title,
-      ]
-    : [catalogItems.title];
   const rows = await db
     .select()
     .from(catalogItems)

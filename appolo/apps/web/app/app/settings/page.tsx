@@ -154,18 +154,30 @@ export default async function SettingsPage({
         {canWrite ? (
           <form action={createSavedReplyAction} className="mt-4 space-y-3 border-t border-border pt-4">
             <div className="grid gap-3 sm:grid-cols-[200px_1fr]">
-              <Field label="Title">
-                <Input name="title" aria-label="Saved reply title" placeholder="Pricing question" required />
+              <Field label="Title" htmlFor="saved-reply-title">
+                <Input id="saved-reply-title" name="title" placeholder="Pricing question" required />
               </Field>
-              <Field label="Scope">
-                <Select name="scope" aria-label="Saved reply scope" defaultValue="org">
+              <Field label="Scope" htmlFor="saved-reply-scope">
+                <Select id="saved-reply-scope" name="scope" defaultValue="org">
                   <option value="org">Everyone</option>
                   <option value="user">Just me</option>
                 </Select>
               </Field>
             </div>
-            <Field label="Message" hint="Use {{first_name}} to personalize.">
-              <Textarea name="body" aria-label="Saved reply message" rows={3} placeholder="Thanks {{first_name}}! Our pricing starts at..." required />
+            <Field
+              label="Message"
+              htmlFor="saved-reply-message"
+              hint="Use {{first_name}} to personalize."
+              hintId="saved-reply-message-hint"
+            >
+              <Textarea
+                id="saved-reply-message"
+                name="body"
+                rows={3}
+                aria-describedby="saved-reply-message-hint"
+                placeholder="Thanks {{first_name}}! Our pricing starts at..."
+                required
+              />
             </Field>
             <Button type="submit" variant="secondary">Add saved reply</Button>
           </form>
@@ -225,7 +237,7 @@ export default async function SettingsPage({
         <ul className="space-y-2 text-sm text-muted">
           <li>Every tenant table is protected by row-level security keyed to the active org.</li>
           <li>Consent records are append-only and checked before any outbound message.</li>
-          <li>Exports and account deletion are self-serve and require your password.</li>
+           <li>Export is available while signed in. Account deletion also requires your password.</li>
           <li>No payment data is collected or stored — payments are out of scope.</li>
         </ul>
       </Card>
