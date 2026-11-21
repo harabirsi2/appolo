@@ -75,6 +75,50 @@ test("one vote per reviewer and title is counted, even with several partners", (
   assert.equal(report.suspiciousVotesByReviewer.get("ring-a"), 6);
 });
 
+test("a reviewer ring counts each vote once even when two partners share a title", () => {
+  // A→B→C→A: every reviewer has exactly two partners and the pair windows
+  // slide, so B's and C's votes on the overlap are reachable from two flagged
+  // pairs. Each (reviewer, title) may still only be counted once.
+  const range = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, index) => `ring-${from + index}`);
+  const plan: Record<string, string[]> = {
+    ringA: [...range(0, 5), ...range(6, 11)],
+    ringB: range(0, 8),
+    ringC: range(3, 11),
+  };
+  const votes: CoordinationVote[] = Object.entries(plan).flatMap(([reviewerId, items]) =>
+    items.map((itemId) => ({ reviewerId, itemId, score: 9 })),
+  );
+
+  const report = detectCoordinatedVoting(votes);
+
+  assert.equal(report.pairs.length, 3);
+  for (const pair of report.pairs) assert.equal(pair.agreement, 1);
+
+  // ring-0..2 are rated by A and B, ring-3..8 by all three, ring-9..11 by A and C.
+  const expectedByItem = [
+    ...Array.from({ length: 3 }, () => 2),
+    ...Array.from({ length: 6 }, () => 3),
+    ...Array.from({ length: 3 }, () => 2),
+  ];
+  assert.deepEqual(
+    Array.from({ length: 12 }, (_, index) => report.suspiciousVotesByItem.get(`ring-${index}`)),
+    expectedByItem,
+  );
+  assert.deepEqual(Object.fromEntries(report.suspiciousVotesByReviewer), {
+    ringA: 12,
+    ringB: 9,
+    ringC: 9,
+  });
+
+  // Every flagged pair covers every vote here, so the counted total must equal
+  // the number of distinct (reviewer, title) pairs — 12 + 9 + 9.
+  const counted = [...report.suspiciousVotesByItem.values()].reduce((sum, n) => sum + n, 0);
+  const uniqueVotes = new Set(votes.map((vote) => `${vote.reviewerId}\u0000${vote.itemId}`)).size;
+  assert.equal(counted, uniqueVotes, "a vote reachable from two pairs was counted twice");
+  assert.equal(counted, 30);
+});
+
 test("suspicion rises with more shared titles at full agreement", () => {
   const make = (shared: number) =>
     detectCoordinatedVoting(

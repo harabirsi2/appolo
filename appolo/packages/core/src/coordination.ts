@@ -120,6 +120,9 @@ export function detectCoordinatedVoting(
   const suspiciousReviewers = new Set<string>();
   const suspiciousVotesByItem = new Map<string, number>();
   const suspiciousVotesByReviewer = new Map<string, number>();
+  // Each flagged vote counts once even if a reviewer has several partners, so
+  // the dedup key set spans every flagged pair in this call, not one pair.
+  const countedVotes = new Set<string>();
 
   for (const pair of pairs.values()) {
     if (pair.shared < minShared) continue;
@@ -135,13 +138,11 @@ export function detectCoordinatedVoting(
     suspiciousReviewers.add(pair.a);
     suspiciousReviewers.add(pair.b);
 
-    // Each flagged vote counts once even if a reviewer has several partners.
-    const seen = new Set<string>();
     for (const itemId of pair.items) {
       for (const reviewerId of [pair.a, pair.b]) {
         const key = `${reviewerId}\u0000${itemId}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
+        if (countedVotes.has(key)) continue;
+        countedVotes.add(key);
         suspiciousVotesByItem.set(itemId, (suspiciousVotesByItem.get(itemId) ?? 0) + 1);
         suspiciousVotesByReviewer.set(
           reviewerId,
