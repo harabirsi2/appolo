@@ -38,7 +38,7 @@ async function check(name, fn) {
   }
 }
 
-async function call(path, { method = "GET", body, cookie, redirect = "manual" } = {}) {
+async function call(path, { method = "GET", body, cookie, redirect = "manual", headers: requestHeaders = {} } = {}) {
   const response = await fetch(BASE + path, {
     method,
     redirect,
@@ -47,6 +47,7 @@ async function call(path, { method = "GET", body, cookie, redirect = "manual" } 
       ...(body ? { "content-type": "application/json" } : {}),
       ...(cookie ? { cookie } : {}),
       "x-forwarded-for": clientIp,
+      ...requestHeaders,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -102,6 +103,66 @@ await check("server is up and database is reachable", () => {
   assert.equal(health.status, 200);
   assert.equal(health.json?.ok, true);
   assert.equal(health.json?.database, "up");
+});
+
+await check("security headers and nonce-based CSP are present", async () => {
+  const page = await call("/login");
+  assert.equal(page.status, 200);
+  const csp = page.headers.get("content-security-policy") ?? "";
+  assert.match(csp, /default-src 'self'/);
+  assert.match(csp, /script-src 'self' 'nonce-[^']+' 'strict-dynamic'/);
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.match(csp, /object-src 'none'/);
+  assert.equal(page.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(page.headers.get("x-frame-options"), "DENY");
+  assert.equal(page.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
+  assert.match(page.text, /nonce="/, "Next did not attach the CSP nonce to its scripts");
+
+  for (const path of ["/", "/this-page-does-not-exist"]) {
+    const document = await call(path);
+    assert.equal(document.status, path === "/" ? 200 : 404);
+    assert.match(document.text, /nonce="/, `prerendered ${path} has no CSP nonce`);
+  }
+
+  // Customer sites iframe these widgets; they must not inherit the app's
+  // anti-framing policy.
+  const embed = await call("/embed/not-a-real-widget");
+  const embedCsp = embed.headers.get("content-security-policy") ?? "";
+  assert.equal(embed.headers.get("x-frame-options"), null);
+  assert.match(embedCsp, /frame-ancestors \*/);
+});
+
+await check("cross-origin mutations are rejected while same-origin and non-browser requests pass the guard", async () => {
+  const path = "/api/profile/pin";
+  const body = { ratingId: null };
+  const crossOrigin = await call(path, {
+    method: "POST",
+    body,
+    headers: { origin: "https://evil.example" },
+  });
+  const nullOrigin = await call(path, {
+    method: "POST",
+    body,
+    headers: { origin: "null" },
+  });
+  const crossSiteHint = await call(path, {
+    method: "POST",
+    body,
+    headers: { "sec-fetch-site": "cross-site" },
+  });
+  const sameOrigin = await call(path, {
+    method: "POST",
+    body,
+    headers: { origin: new URL(BASE).origin },
+  });
+  const nonBrowser = await call(path, { method: "POST", body });
+
+  for (const rejected of [crossOrigin, nullOrigin, crossSiteHint]) {
+    assert.equal(rejected.status, 403, `cross-origin mutation returned ${rejected.status}`);
+    assert.equal(rejected.json?.code, "CSRF_REJECTED");
+  }
+  assert.equal(sameOrigin.status, 401, "a same-origin unauthenticated mutation should reach auth");
+  assert.equal(nonBrowser.status, 401, "an origin-less non-browser mutation should still reach auth");
 });
 
 await check("anonymous API and pages are protected", async () => {
@@ -256,6 +317,14 @@ await check("rankings screen renders the reorder control for a saved order", () 
 });
 
 const [first, second] = sample;
+// Snapshot both scores before the vote so undo can be held to restoring them
+// exactly, not just to making the comparison count go down.
+const eloBeforeVote = new Map(
+  (await call("/api/rankings?kind=movie", { cookie: alpha.cookie })).json.rankings.map((item) => [
+    item.id,
+    item.elo,
+  ]),
+);
 const tieVote = await call(`/api/rankings/${first.id}/vote`, {
   method: "POST",
   body: { opponentId: second.id, result: "tie" },
@@ -285,10 +354,38 @@ await check("all rankings view sorts by score and lets the model break ties", ()
 
 const undo = await call(`/api/rankings/${first.id}/undo`, { method: "POST", cookie: alpha.cookie });
 const modelAfterUndo = await call("/api/rankings/model?kind=movie", { cookie: alpha.cookie });
-await check("undo removes the comparison and rebuilds the model", () => {
+const afterUndo = await call("/api/rankings?kind=movie", { cookie: alpha.cookie });
+await check("undo removes the comparison, restores both scores and rebuilds the model", () => {
   assert.equal(undo.status, 200);
   assert.equal(undo.json.undone, true);
   assert.equal(modelAfterUndo.json.comparisons, 0);
+  const eloAfter = new Map(afterUndo.json.rankings.map((item) => [item.id, item.elo]));
+  assert.equal(eloAfter.get(first.id), eloBeforeVote.get(first.id), "initiator score was not restored");
+  assert.equal(eloAfter.get(second.id), eloBeforeVote.get(second.id), "opponent score was not restored");
+});
+
+// The opponent can undo too: the matchup is found from either side and only
+// the timeline event belonging to that comparison may disappear.
+const opponentVote = await call(`/api/rankings/${first.id}/vote`, {
+  method: "POST",
+  body: { opponentId: second.id, result: "win" },
+  cookie: alpha.cookie,
+});
+const opponentUndo = await call(`/api/rankings/${second.id}/undo`, {
+  method: "POST",
+  cookie: alpha.cookie,
+});
+const afterOpponentUndo = await call("/api/rankings?kind=movie", { cookie: alpha.cookie });
+const modelAfterOpponentUndo = await call("/api/rankings/model?kind=movie", { cookie: alpha.cookie });
+await check("undo from the opponent side restores both scores", () => {
+  assert.equal(opponentVote.status, 200, `vote failed: ${opponentVote.text.slice(0, 160)}`);
+  assert.equal(opponentUndo.status, 200);
+  assert.equal(opponentUndo.json.undone, true);
+  assert.equal(opponentUndo.json.opponentId, second.id);
+  const eloAfter = new Map(afterOpponentUndo.json.rankings.map((item) => [item.id, item.elo]));
+  assert.equal(eloAfter.get(first.id), eloBeforeVote.get(first.id), "initiator score was not restored");
+  assert.equal(eloAfter.get(second.id), eloBeforeVote.get(second.id), "opponent score was not restored");
+  assert.equal(modelAfterOpponentUndo.json.comparisons, 0);
 });
 
 const follow = await call("/api/follow", {

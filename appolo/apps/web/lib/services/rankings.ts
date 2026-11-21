@@ -7,6 +7,7 @@ import { DomainError } from "./errors";
 import { scheduleCatalogEnrichment } from "./catalog-providers";
 import { nextEloAdaptive } from "@appolo/core/ranking";
 import { getDb, withOrg, schema, type Tx } from "@/lib/db";
+import { likeContains, likePrefix } from "./like-pattern";
 const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, rankingOrder } = schema;
 
 export interface RankedItem extends CatalogItem {
@@ -104,7 +105,7 @@ export async function listCatalog(options: {
   if (options.kind) filters.push(eq(catalogItems.kind, options.kind as MediaKind));
   if (options.genre) filters.push(hasGenre(catalogItems.genres, options.genre));
   if (options.q) {
-    const like = `%${options.q}%`;
+    const like = likeContains(options.q);
     filters.push(sql`(${catalogItems.title} ilike ${like} or ${catalogItems.subtitle} ilike ${like})`);
   }
 
@@ -113,8 +114,8 @@ export async function listCatalog(options: {
     ? [
         sql`case
           when lower(${catalogItems.title}) = lower(${query}) then 3
-          when ${catalogItems.title} ilike ${`${query}%`} then 2
-          when ${catalogItems.subtitle} ilike ${`${query}%`} then 1
+          when ${catalogItems.title} ilike ${likePrefix(query)} then 2
+          when ${catalogItems.subtitle} ilike ${likePrefix(query)} then 1
           else 0
         end desc`,
         sql`greatest(similarity(${catalogItems.title}, ${query}), coalesce(similarity(${catalogItems.subtitle}, ${query}), 0)) desc`,
@@ -130,8 +131,14 @@ export async function listCatalog(options: {
 
   return rows.map(mapCatalogItem);
 }
-export async function rankedRatings(orgId: string, options: { kind?: string; limit?: number } = {}): Promise<RankedItem[]> {
+export async function rankedRatings(
+  orgId: string,
+  options: { kind?: string; limit?: number; publicOnly?: boolean } = {},
+): Promise<RankedItem[]> {
   return withOrg(orgId, async (tx) => {
+    const filters = [eq(itemRatings.orgId, orgId)];
+    if (options.kind) filters.push(eq(catalogItems.kind, options.kind as MediaKind));
+    if (options.publicOnly) filters.push(eq(itemRatings.moderationStatus, "visible"));
     const rows = await tx
       .select({
         item: catalogItems,
@@ -139,11 +146,7 @@ export async function rankedRatings(orgId: string, options: { kind?: string; lim
       })
       .from(itemRatings)
       .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
-      .where(
-        options.kind
-          ? and(eq(itemRatings.orgId, orgId), eq(catalogItems.kind, options.kind as MediaKind))
-          : eq(itemRatings.orgId, orgId),
-      );
+      .where(and(...filters));
 
     const manual = options.kind
       ? await tx
@@ -250,7 +253,7 @@ async function getOrInitRatings(
   const ids = [...new Set(itemIds)].sort();
   await tx
     .insert(itemRatings)
-    .values(ids.map((itemId) => ({ orgId, itemId })))
+    .values(ids.map((itemId) => ({ orgId, itemId, source: "user" })))
     .onConflictDoNothing();
 
   const rows = await tx
@@ -449,6 +452,7 @@ export async function submitVote(
           ties: itemRating.ties + (result === "tie" ? 1 : 0),
           skips:
             itemRating.skips + (result === "skip" || result === "undecided" ? 1 : 0),
+          source: "user",
           updatedAt: new Date(),
         })
         .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, itemId)))
@@ -466,11 +470,32 @@ export async function submitVote(
           ties: opponentRating.ties + (result === "tie" ? 1 : 0),
           skips:
             opponentRating.skips + (result === "skip" || result === "undecided" ? 1 : 0),
+          source: "user",
           updatedAt: new Date(),
         })
         .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, opponentId)))
         .returning()
     )[0]!;
+
+    // The timeline event is written first so the matchup can carry its id.
+    // Undo then deletes exactly the event this comparison created instead of
+    // guessing at the newest `rated` event for the item.
+    let eventId: string | null = null;
+    if (counted) {
+      const [event] = await tx
+        .insert(ratingEvents)
+        .values({
+          orgId,
+          itemId,
+          kind: "rated",
+          detail:
+            result === "tie"
+              ? `Tied with ${opponent.title}`
+              : `${result === "win" ? "Picked over" : "Lost to"} ${opponent.title}`,
+        })
+        .returning({ id: ratingEvents.id });
+      eventId = event?.id ?? null;
+    }
 
     await tx.insert(itemMatchups).values({
       orgId,
@@ -482,19 +507,8 @@ export async function submitVote(
       itemEloAfter: after.a,
       opponentEloBefore: before.opponent,
       opponentEloAfter: after.b,
+      eventId,
     });
-
-    if (counted) {
-      await tx.insert(ratingEvents).values({
-        orgId,
-        itemId,
-        kind: "rated",
-        detail:
-          result === "tie"
-            ? `Tied with ${opponent.title}`
-            : `${result === "win" ? "Picked over" : "Lost to"} ${opponent.title}`,
-      });
-    }
 
     return {
       result,
@@ -522,9 +536,14 @@ export interface UndoResult {
  *
  * Elo values are restored from the stored `*_elo_before` columns (not
  * recomputed heuristically), counters are decremented for the exact outcome,
- * the durable matchup row is deleted, the matching timeline event is removed,
- * and the statistical model is rebuilt. Returns `undone: false` when there is
- * nothing to undo.
+ * the durable matchup row is deleted, the timeline event stored on that row is
+ * removed, and the statistical model is rebuilt. Returns `undone: false` when
+ * there is nothing to undo.
+ *
+ * Both rating rows are locked through `getOrInitRatings`, the same helper a
+ * vote uses, so the counters below are read under the lock (a concurrent vote
+ * can no longer be overwritten) and the ids are always locked in sorted order
+ * (undo can no longer deadlock against a vote).
  */
 export async function undoLastComparison(orgId: string, itemId: string): Promise<UndoResult> {
   const item = await getCatalogItem(itemId);
@@ -553,62 +572,73 @@ export async function undoLastComparison(orgId: string, itemId: string): Promise
     // so undoing one has to remove it too.
     const countedEvent = row.result !== "skip" && row.result !== "undecided";
 
-    const [itemRating] = await tx
-      .select()
-      .from(itemRatings)
-      .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, row.itemId)))
-      .limit(1);
-    if (itemRating) {
-      await tx
-        .update(itemRatings)
-        .set({
-          elo: row.itemEloBefore,
-          matches: Math.max(0, itemRating.matches - 1),
-          wins: Math.max(0, itemRating.wins - (row.result === "win" ? 1 : 0)),
-          losses: Math.max(0, itemRating.losses - (row.result === "loss" ? 1 : 0)),
-          ties: Math.max(0, itemRating.ties - (row.result === "tie" ? 1 : 0)),
-          skips: Math.max(0, itemRating.skips - skipDelta),
-          updatedAt: new Date(),
-        })
-        .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, row.itemId)));
-    }
+    // Lock both rating rows in sorted id order (the same order a vote uses)
+    // before reading any counter, so a vote committing between the matchup read
+    // and the update can no longer be silently overwritten.
+    const ratings = await getOrInitRatings(tx, orgId, [row.itemId, row.opponentId]);
+    const itemRating = ratings.get(row.itemId)!;
+    const opponentRating = ratings.get(row.opponentId)!;
 
-    const [opponentRating] = await tx
-      .select()
-      .from(itemRatings)
-      .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, row.opponentId)))
-      .limit(1);
-    if (opponentRating) {
-      await tx
-        .update(itemRatings)
-        .set({
-          elo: row.opponentEloBefore,
-          matches: Math.max(0, opponentRating.matches - 1),
-          wins: Math.max(0, opponentRating.wins - (row.result === "loss" ? 1 : 0)),
-          losses: Math.max(0, opponentRating.losses - (row.result === "win" ? 1 : 0)),
-          ties: Math.max(0, opponentRating.ties - (row.result === "tie" ? 1 : 0)),
-          skips: Math.max(0, opponentRating.skips - skipDelta),
-          updatedAt: new Date(),
-        })
-        .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, row.opponentId)));
-    }
+    // The rows are already locked, so these two updates cannot interleave with
+    // a vote; ordering them by id merely keeps the write order predictable.
+    const itemUpdate = {
+      elo: row.itemEloBefore,
+      matches: Math.max(0, itemRating.matches - 1),
+      wins: Math.max(0, itemRating.wins - (row.result === "win" ? 1 : 0)),
+      losses: Math.max(0, itemRating.losses - (row.result === "loss" ? 1 : 0)),
+      ties: Math.max(0, itemRating.ties - (row.result === "tie" ? 1 : 0)),
+      skips: Math.max(0, itemRating.skips - skipDelta),
+      updatedAt: new Date(),
+    };
+    const opponentUpdate = {
+      elo: row.opponentEloBefore,
+      matches: Math.max(0, opponentRating.matches - 1),
+      wins: Math.max(0, opponentRating.wins - (row.result === "loss" ? 1 : 0)),
+      losses: Math.max(0, opponentRating.losses - (row.result === "win" ? 1 : 0)),
+      ties: Math.max(0, opponentRating.ties - (row.result === "tie" ? 1 : 0)),
+      skips: Math.max(0, opponentRating.skips - skipDelta),
+      updatedAt: new Date(),
+    };
 
+    const [firstId, firstUpdate, secondId, secondUpdate] =
+      row.itemId < row.opponentId
+        ? ([row.itemId, itemUpdate, row.opponentId, opponentUpdate] as const)
+        : ([row.opponentId, opponentUpdate, row.itemId, itemUpdate] as const);
+
+    await tx
+      .update(itemRatings)
+      .set(firstUpdate)
+      .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, firstId)));
+    await tx
+      .update(itemRatings)
+      .set(secondUpdate)
+      .where(and(eq(itemRatings.orgId, orgId), eq(itemRatings.itemId, secondId)));
+
+    // Delete the matchup before the event: the `event_id` foreign key nulls
+    // itself out otherwise, which is harmless but noisier.
     await tx.delete(itemMatchups).where(eq(itemMatchups.id, row.id));
 
     if (countedEvent) {
-      const [event] = await tx
-        .select({ id: ratingEvents.id })
-        .from(ratingEvents)
-        .where(
-          and(
-            eq(ratingEvents.orgId, orgId),
-            eq(ratingEvents.itemId, row.itemId),
-            eq(ratingEvents.kind, "rated"),
-          ),
-        )
-        .orderBy(desc(ratingEvents.createdAt))
-        .limit(1);
-      if (event) await tx.delete(ratingEvents).where(eq(ratingEvents.id, event.id));
+      if (row.eventId) {
+        await tx
+          .delete(ratingEvents)
+          .where(and(eq(ratingEvents.orgId, orgId), eq(ratingEvents.id, row.eventId)));
+      } else {
+        // Legacy row from before the event id existed. The event was written
+        // in the same transaction, so it shares this timestamp exactly — the
+        // same fingerprint the backfill uses. Never fall back to "the newest
+        // rated event for this item": that is what orphaned events before.
+        await tx
+          .delete(ratingEvents)
+          .where(
+            and(
+              eq(ratingEvents.orgId, orgId),
+              eq(ratingEvents.itemId, row.itemId),
+              eq(ratingEvents.kind, "rated"),
+              eq(ratingEvents.createdAt, row.createdAt),
+            ),
+          );
+      }
     }
 
     return { undone: true, itemId: row.itemId, opponentId: row.opponentId } satisfies UndoResult;
@@ -671,10 +701,10 @@ export async function setManualRating(orgId: string, itemId: string, score: numb
   return withOrg(orgId, async (tx) => {
     const [row] = await tx
       .insert(itemRatings)
-      .values({ orgId, itemId, elo, manualScore: clamped.toFixed(1) })
+      .values({ orgId, itemId, elo, manualScore: clamped.toFixed(1), source: "user" })
       .onConflictDoUpdate({
         target: [itemRatings.orgId, itemRatings.itemId],
-        set: { elo, manualScore: clamped.toFixed(1), updatedAt: new Date() },
+        set: { elo, manualScore: clamped.toFixed(1), source: "user", updatedAt: new Date() },
       })
       .returning();
     await tx.insert(ratingEvents).values({

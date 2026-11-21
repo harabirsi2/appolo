@@ -3,6 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@9.15.4",
+  "pnpm": {
+    "overrides": {
+      "postcss": "8.5.32",
+      "zod": "4.6.7"
+    }
+  },
   "engines": {
     "node": ">=20"
   },
@@ -13,6 +19,11 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter @appolo/core test",
+    "test:imports": "pnpm --filter @appolo/db exec tsx --tsconfig ../../apps/web/tsconfig.json --test --test-force-exit ../../apps/web/lib/services/importers.test.ts",
+    "test:moderation": "pnpm --filter @appolo/db exec tsx --tsconfig ../../apps/web/tsconfig.json --test --test-force-exit ../../apps/web/lib/services/moderation.test.ts",
+    "test:ranking": "pnpm --filter @appolo/db exec tsx --tsconfig ../../apps/web/tsconfig.json --test --test-force-exit ../../apps/web/lib/services/ranking-math.test.ts",
+    "test:undo": "pnpm --filter @appolo/db exec tsx --tsconfig ../../apps/web/tsconfig.json --test --test-force-exit ../../apps/web/lib/services/rankings-undo.test.ts",
+    "audit": "pnpm audit --prod --audit-level=low",
     "db:generate": "pnpm --filter @appolo/db generate",
     "db:migrate": "pnpm --filter @appolo/db migrate",
     "db:seed": "pnpm --filter @appolo/db seed",
@@ -28,7 +39,7 @@
     "db:role-guard": "pnpm --filter @appolo/db role-guard",
     "visual": "node scripts/visual.mjs",
     "media-art": "node scripts/media-art.mjs",
-    "verify": "pnpm preflight && pnpm db:role-guard && pnpm media-art && pnpm typecheck && pnpm test && pnpm visual && pnpm e2e && pnpm gap-audit",
+    "verify": "pnpm preflight && pnpm db:role-guard && pnpm media-art && pnpm typecheck && pnpm test && pnpm test:imports && pnpm test:moderation && pnpm test:ranking && pnpm test:undo && pnpm visual && pnpm e2e && pnpm gap-audit",
     "ci": "powershell -ExecutionPolicy Bypass -File scripts/ci.ps1",
     "a11y": "node scripts/a11y.mjs"
   },

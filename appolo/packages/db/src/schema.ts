@@ -1170,6 +1170,13 @@ export const itemMatchups = pgTable(
      * those are read from `result` instead.
      */
     outcome: text("outcome"),
+    /**
+     * The `rating_events` row this comparison created (ties included). Undo
+     * deletes exactly this event instead of guessing at the newest one. Null
+     * for skips/undecideds, which write no event, and for rows written before
+     * migration 0023.
+     */
+    eventId: uuid("event_id").references(() => ratingEvents.id, { onDelete: "set null" }),
     itemEloBefore: integer("item_elo_before").notNull(),
     itemEloAfter: integer("item_elo_after").notNull(),
     opponentEloBefore: integer("opponent_elo_before").notNull(),
