@@ -1,7 +1,7 @@
 import { scoreForElo, MediaKind } from "@appolo/core";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
-const { catalogItems } = schema;
+const { catalogItems, itemRatings, profiles } = schema;
 
 export interface CatalogItem {
   id: string;
@@ -69,6 +69,13 @@ export async function getCatalogItem(itemId: string): Promise<CatalogItem | null
     return null;
   }
   const db = getDb();
-  const rows = await db.select().from(catalogItems).where(eq(catalogItems.id, itemId)).limit(1);
-  return rows[0] ? mapCatalogItem(rows[0]) : null;
+  const rows = await db
+    .select({ visibleReviews: sql<number>`count(*)::int` })
+    .from(itemRatings)
+    .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
+    .where(and(eq(itemRatings.itemId, itemId), eq(itemRatings.moderationStatus, "visible"), eq(profiles.moderationStatus, "visible")));
+  const itemRows = await db.select().from(catalogItems).where(eq(catalogItems.id, itemId)).limit(1);
+  if (!itemRows[0]) return null;
+  const mapped = mapCatalogItem(itemRows[0]);
+  return { ...mapped, totalReviews: rows[0]?.visibleReviews ?? 0 };
 }

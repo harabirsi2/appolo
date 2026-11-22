@@ -14,10 +14,11 @@ export function parseCsv(text: string): Array<Record<string, string>> {
     const char = text[i];
     if (char === '"') {
       if (inQuotes && text[i + 1] === '"') {
-        current += '"';
+        current += '""';
         i++;
       } else {
         inQuotes = !inQuotes;
+        current += char;
       }
     } else if ((char === "\n" || char === "\r") && !inQuotes) {
       if (current.trim() !== "" || lines.length === 0) lines.push(current);

@@ -10,8 +10,6 @@ export function ProfileSettings({ profile }: { profile: ProfileSummary }) {
   const [avatarHue, setAvatarHue] = useState(profile.avatarHue);
   const [manualMode, setManualMode] = useState(profile.manualMode);
   const [spotifyConnected, setSpotifyConnected] = useState(profile.spotifyConnected);
-  const [appleMusicConnected, setAppleMusicConnected] = useState(profile.appleMusicConnected);
-  const [language, setLanguage] = useState(profile.language);
   const [profileLayout, setProfileLayout] = useState<"list" | "grid">(profile.profileLayout);
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -30,8 +28,6 @@ export function ProfileSettings({ profile }: { profile: ProfileSummary }) {
           avatarHue,
           manualMode,
           spotifyConnected,
-          appleMusicConnected,
-          language,
           profileLayout,
         }),
       });
@@ -80,18 +76,6 @@ export function ProfileSettings({ profile }: { profile: ProfileSummary }) {
           Spotify connected
           <input type="checkbox" checked={spotifyConnected} onChange={(e) => setSpotifyConnected(e.target.checked)} />
         </label>
-        <label className="flex items-center justify-between text-[13px] text-ink">
-          Apple Music connected
-          <input type="checkbox" checked={appleMusicConnected} onChange={(e) => setAppleMusicConnected(e.target.checked)} />
-        </label>
-        <div className="space-y-1">
-          <label className="block text-[12px] text-muted-2">Language</label>
-          <select value={language} onChange={(e) => setLanguage(e.target.value)} className="h-10 w-full rounded-xl border border-white/[0.06] bg-[#1a1a1d] px-3 text-[14px] text-ink">
-            <option value="en">English</option>
-            <option value="es">Español</option>
-            <option value="pt">Português</option>
-          </select>
-        </div>
         <div className="space-y-1">
           <label className="block text-[12px] text-muted-2">Profile layout</label>
           <select value={profileLayout} onChange={(e) => setProfileLayout(e.target.value as "list" | "grid")} className="h-10 w-full rounded-xl border border-white/[0.06] bg-[#1a1a1d] px-3 text-[14px] text-ink">

@@ -148,7 +148,6 @@ export function ReviewScreen({
 
         <ReviewEngagement
           ratingId={review.id}
-          viewerOrgId={viewerOrgId}
           initialReactions={review.reactions}
           initialCommentCount={review.commentCount}
         />
