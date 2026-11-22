@@ -31,8 +31,15 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     const parsed = voteInputSchema.safeParse(body);
     if (!parsed.success) return jsonError(firstIssue(parsed.error), 400, "INVALID_VOTE");
 
-    const outcome = await submitVote(session.org.id, itemId, parsed.data.opponentId, parsed.data.result);
+    // Set by the client for every vote; the service worker replays it verbatim
+    // when a vote taken offline finally reaches the server.
+    const outcome = await submitVote(session.org.id, itemId, parsed.data.opponentId, parsed.data.result, {
+      idempotencyKey: request.headers.get("idempotency-key"),
+    });
     invalidateCommunity();
+    // A replay changed nothing, so there is nothing to invalidate for it; the
+    // header also stops a proxy from serving one user's result to another.
+    if (outcome.replayed) return NextResponse.json(outcome, { headers: { "x-idempotent-replay": "1" } });
     // A vote moves the podium, which is what the share card renders.
     revalidatePublicPodiumCard();
     revalidatePublicProfile();

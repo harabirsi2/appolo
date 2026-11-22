@@ -36,6 +36,37 @@ body {
   color: var(--color-ink);
 }
 
+/* iOS: 100vh is the height *without* the collapsing URL bar, so a 100vh shell
+   is taller than the screen while the bar is visible. dvh follows the bar; the
+   vh declaration stays first as the fallback for browsers without dvh. */
+html {
+  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* A stand-alone app that rubber-bands into a white gutter looks like a website
+   someone wrapped; the page background covers it instead. */
+@media (display-mode: standalone) {
+  html,
+  body {
+    overscroll-behavior-y: contain;
+  }
+}
+
+/* iOS Safari zooms the whole page when a focused form control is under 16px,
+   and never zooms back out — the app then sits zoomed in and scrolled sideways.
+   Only the touch build of WebKit needs this; the desktop layout keeps its
+   smaller labels. */
+@supports (-webkit-touch-callout: none) {
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+}
+
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -106,6 +137,13 @@ body {
   }
   .safe-bottom {
     padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+  .safe-top {
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+  }
+  .safe-x {
+    padding-left: max(0px, env(safe-area-inset-left));
+    padding-right: max(0px, env(safe-area-inset-right));
   }
   .num {
     font-variant-numeric: tabular-nums lining-nums;

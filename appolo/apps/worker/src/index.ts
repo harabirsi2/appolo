@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import IORedis from "ioredis";
 import { Queue, Worker, type Job } from "bullmq";
 import { startCatalogPipeline, type CatalogPipeline } from "./catalog";
+import { createPushSender, pushConfigured, type PushSender } from "./push";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..", "..", "..");
@@ -38,11 +39,24 @@ async function main(): Promise<void> {
 
   const queue = new Queue(QUEUE_NAME, { connection });
 
-  const worker = new Worker<HeartbeatResult>(
+  // Declared before the worker so a job that fires during startup sees `null`
+  // instead of a temporal-dead-zone error.
+  let push: PushSender | null = null;
+
+  const worker = new Worker<unknown>(
     QUEUE_NAME,
-    async (job: Job<HeartbeatResult>) => {
+    async (job: Job<unknown>) => {
       if (job.name === "heartbeat") {
-        return { at: new Date().toISOString(), pid: process.pid };
+        const result: HeartbeatResult = { at: new Date().toISOString(), pid: process.pid };
+        return result;
+      }
+      // Push jobs are no-ops without VAPID keys; the subscriptions are already
+      // stored, so enabling keys starts delivering on the next tick.
+      if (job.name === "push-friend-activity") {
+        return push ? { sent: await push.sendFriendActivity() } : { sent: 0, skipped: "no vapid keys" };
+      }
+      if (job.name === "push-weekly-digest") {
+        return push ? { sent: await push.sendWeeklyDigest() } : { sent: 0, skipped: "no vapid keys" };
       }
       throw new Error(`unknown job: ${job.name}`);
     },
@@ -61,6 +75,26 @@ async function main(): Promise<void> {
     console.log("[worker] DATABASE_URL is empty — catalog enrichment is disabled.");
   }
 
+  // Push. The friend-activity window and the repeat interval must stay equal:
+  // a wider window would announce the same vote twice, a narrower one would
+  // miss votes. The weekly digest rides the same queue on a cron pattern.
+  if (DATABASE_URL && pushConfigured()) {
+    push = createPushSender(DATABASE_URL);
+    await queue.add(
+      "push-friend-activity",
+      {},
+      { repeat: { every: 5 * 60_000 }, removeOnComplete: 20, removeOnFail: 20 },
+    );
+    await queue.add(
+      "push-weekly-digest",
+      {},
+      { repeat: { pattern: "0 9 * * 1" }, removeOnComplete: 5, removeOnFail: 5 },
+    );
+    console.log("[worker] push delivery enabled (friend activity every 5m, digest Mondays 09:00)");
+  } else if (DATABASE_URL) {
+    console.log("[worker] PUSH_VAPID_* is empty — push jobs idle, subscriptions are still stored.");
+  }
+
   // Prove the loop works end to end once per boot.
   await queue.add("heartbeat", { at: new Date().toISOString(), pid: process.pid }, { removeOnComplete: 20 });
   console.log(`[worker] listening on "${QUEUE_NAME}"`);
@@ -68,6 +102,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`[worker] ${signal} — draining`);
     await catalog?.stop();
+    await push?.close();
     await worker.close();
     await queue.close();
     connection.disconnect();

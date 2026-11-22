@@ -16,10 +16,12 @@
     "bullmq": "^5.34.0",
     "drizzle-orm": "^0.45.4",
     "ioredis": "^5.4.2",
-    "postgres": "^3.4.5"
+    "postgres": "^3.4.5",
+    "web-push": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/web-push": "^3.6.4",
     "dotenv": "^16.4.7",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"

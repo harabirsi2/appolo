@@ -8,7 +8,7 @@ import { scheduleCatalogEnrichment } from "./catalog-providers";
 import { nextEloAdaptive } from "@appolo/core/ranking";
 import { catalogQueryClauses } from "./catalog-search-order";
 import { getDb, withOrg, schema, type Tx } from "@/lib/db";
-const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, rankingOrder } = schema;
+const { catalogItems, itemRatings, itemMatchups, watchlist, ratingEvents, rankingOrder, voteReceipts } = schema;
 
 export interface RankedItem extends CatalogItem {
   ratingId: string;
@@ -429,17 +429,69 @@ export interface VoteResult {
   opponent: RankedItem;
   result: MatchResult;
   itemDelta: number;
+  /** True when this delivery found the vote already applied (offline replay). */
+  replayed?: boolean;
 }
 
-/** Record one vote and update both Elo ratings (zero-sum). */
+const IDEMPOTENCY_MIN = 8;
+const IDEMPOTENCY_MAX = 120;
+
+/**
+ * Accept the client's key only if it looks like one. The value ends up in a
+ * primary key and arrives straight off the wire, so it is bounded and trimmed;
+ * anything malformed is dropped rather than rejected, because a vote without a
+ * key must still work (the key is an optimisation for retries, not a contract).
+ */
+export function normalizeIdempotencyKey(raw: string | null | undefined): string | null {
+  const value = raw?.trim();
+  if (!value || value.length < IDEMPOTENCY_MIN || value.length > IDEMPOTENCY_MAX) return null;
+  return value;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  const codes = [error, (error as { cause?: unknown })?.cause].map(
+    (candidate) => (candidate as { code?: unknown } | null)?.code,
+  );
+  return codes.includes("23505");
+}
+
+/** The stored response of a vote that already committed under this key. */
+async function replayReceipt(orgId: string, key: string): Promise<VoteResult | null> {
+  const [row] = await withOrg(orgId, (tx) =>
+    tx
+      .select({ response: voteReceipts.response })
+      .from(voteReceipts)
+      .where(and(eq(voteReceipts.orgId, orgId), eq(voteReceipts.idempotencyKey, key)))
+      .limit(1),
+  );
+  if (!row) return null;
+  return { ...(row.response as VoteResult), replayed: true };
+}
+
+/**
+ * Record one vote and update both Elo ratings (zero-sum).
+ *
+ * Passing `idempotencyKey` makes the call safe to retry. The key is written as
+ * a `vote_receipts` row inside the same transaction as the matchup, so a
+ * duplicate delivery fails on the primary key and rolls back before it can
+ * touch `item_matchups` — the append-only log keeps exactly one row per real
+ * comparison. The original response is replayed, `replayed: true`.
+ */
 export async function submitVote(
   orgId: string,
   itemId: string,
   opponentId: string,
   result: MatchResult,
+  options?: { idempotencyKey?: string | null },
 ): Promise<VoteResult> {
   if (itemId === opponentId) {
     throw new DomainError("SAME_ITEM", "You cannot compare an item with itself.");
+  }
+
+  const key = normalizeIdempotencyKey(options?.idempotencyKey);
+  if (key) {
+    const replayed = await replayReceipt(orgId, key);
+    if (replayed) return replayed;
   }
 
   const [item, opponent] = await Promise.all([getCatalogItem(itemId), getCatalogItem(opponentId)]);
@@ -449,7 +501,9 @@ export async function submitVote(
     throw new DomainError("KIND_MISMATCH", "Choose two items of the same kind.");
   }
 
-  const output = await withOrg(orgId, async (tx) => {
+  let output: VoteResult;
+  try {
+    output = await withOrg(orgId, async (tx) => {
     const ratings = await getOrInitRatings(tx, orgId, [itemId, opponentId]);
     const itemRating = ratings.get(itemId)!;
     const opponentRating = ratings.get(opponentId)!;
@@ -533,13 +587,37 @@ export async function submitVote(
       eventId,
     });
 
-    return {
+    const voted: VoteResult = {
       result,
       itemDelta: counted ? after.a - before.item : 0,
       item: { ...item, ...rankedExtras(updatedItem) },
       opponent: { ...opponent, ...rankedExtras(updatedOpponent) },
     };
+
+    // The commit marker. A replay of this key conflicts on the primary key,
+    // which aborts this transaction before any of the writes above commit.
+    if (key) {
+      await tx.insert(voteReceipts).values({
+        orgId,
+        idempotencyKey: key,
+        itemId,
+        opponentId,
+        result,
+        response: voted,
+      });
+    }
+
+    return voted;
   });
+  } catch (error) {
+    // Lost the race to a concurrent delivery of the same key: the other
+    // request committed, so answer with what it stored instead of an error.
+    if (key && isUniqueViolation(error)) {
+      const replayed = await replayReceipt(orgId, key);
+      if (replayed) return replayed;
+    }
+    throw error;
+  }
 
   // The vote is committed; rebuild the statistical snapshot in the background.
   // Coalescing keeps a burst of votes to one fit, and getRankingModel heals

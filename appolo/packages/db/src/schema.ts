@@ -1653,3 +1653,51 @@ export const socialNotifications = pgTable(
     orgIdx: index("social_notifications_org_idx").on(t.orgId, t.createdAt),
   }),
 );
+
+/**
+ * Commit marker for an accepted vote, keyed by the client's idempotency key.
+ *
+ * An offline replay re-sends the same key; the primary key rejects the second
+ * insert inside the transaction that would have written the matchup, so the
+ * append-only `item_matchups` log can never record the comparison twice. The
+ * stored `response` is replayed so the client sees the same Elo delta.
+ */
+export const voteReceipts = pgTable(
+  "vote_receipts",
+  {
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    itemId: uuid("item_id").notNull().references(() => catalogItems.id, { onDelete: "cascade" }),
+    opponentId: uuid("opponent_id").references(() => catalogItems.id, { onDelete: "set null" }),
+    result: text("result").notNull(),
+    response: jsonb("response").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.orgId, t.idempotencyKey], name: "vote_receipts_pk" }),
+    orgIdx: index("vote_receipts_org_created_idx").on(t.orgId, t.createdAt),
+  }),
+);
+
+/** One row per browser/device push endpoint; the endpoint URL is unique. */
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: pk(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    userAgent: text("user_agent"),
+    enabled: boolean("enabled").notNull().default(true),
+    failureCount: integer("failure_count").notNull().default(0),
+    lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+    lastFailureAt: timestamp("last_failure_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    endpointUq: uniqueIndex("push_subscriptions_endpoint_uq").on(t.endpoint),
+    orgIdx: index("push_subscriptions_org_idx").on(t.orgId),
+  }),
+);

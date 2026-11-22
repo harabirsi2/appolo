@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Button } from "@appolo/ui";
 import { MEDIA_KIND_LABELS } from "@appolo/core";
 import { MediaArt } from "@/components/media-art";
+import { PushOptIn } from "@/components/push-opt-in";
 import { requireSession } from "@/lib/session";
 import { nextUnratedItem, tasteStats } from "@/lib/services/rankings";
 
@@ -63,6 +64,13 @@ export default async function FirstRatingPage({
             {stats.rated} of {SOLID_AT}
           </p>
         </div>
+      </div>
+
+      {/* The permission ask lives here rather than on arrival: the person has
+          just felt the product work, which is the only moment a browser prompt
+          is worth spending (a denial is permanent). */}
+      <div className="mt-6">
+        <PushOptIn />
       </div>
 
       {next ? (

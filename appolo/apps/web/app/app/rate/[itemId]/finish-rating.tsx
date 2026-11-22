@@ -132,16 +132,29 @@ export function FinishRating({
     setBusy(true);
     setError(null);
     try {
+      // Generated per tap, not per session: the service worker stores this key
+      // with the queued request and replays it, so a vote that reached the
+      // server before the connection dropped is applied exactly once.
+      const idempotencyKey = crypto.randomUUID();
       const response = await fetch(`/api/rankings/${item.id}/vote`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
         body: JSON.stringify({ opponentId: opponent.id, result }),
       });
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? "Could not save that vote.");
       }
-      const outcome = (await response.json()) as { item: { score: number } };
+      const outcome = (await response.json()) as { item?: { score: number }; queued?: boolean };
+
+      if (outcome.queued || !outcome.item) {
+        // Queued on the device: there is no next matchup to fetch yet, and the
+        // score has not moved. PwaRegister asks the worker to flush on reconnect.
+        setVotes((value) => value + 1);
+        setMessage("Saved on this device — this comparison syncs when you are back online.");
+        return;
+      }
+      const scored = outcome as { item: { score: number } };
 
       const nextResponse = await fetch(`/api/rankings/${item.id}/matchup`, { cache: "no-store" });
       if (!nextResponse.ok) {
@@ -152,7 +165,7 @@ export function FinishRating({
         opponent: { id: string; kind: MediaKind; title: string; year: number | null; imageUrl: string | null };
       };
 
-      setItem((current) => ({ ...current, score: outcome.item.score }));
+      setItem((current) => ({ ...current, score: scored.item.score }));
       setOpponent({
         id: next.opponent.id,
         kind: next.opponent.kind,
