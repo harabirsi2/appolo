@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { after } from "next/server";
-import { MEDIA_KIND_LABELS, MEDIA_KIND_SINGULAR, scoreBand, youtubeEmbedUrl } from "@appolo/core";
+import { MEDIA_KIND_LABELS, MEDIA_KIND_SINGULAR, scoreBand, scoreInterval, youtubeEmbedUrl } from "@appolo/core";
 import { requireSession } from "@/lib/session";
 import { getCatalogItem, getRating, creditsForItem, isWatchlisted, similarItems } from "@/lib/services/rankings";
+import { getRankingModel } from "@/lib/services/ranking-math";
+import { explainPosition } from "@/lib/services/explain";
+import { ConfidenceBadge } from "@/components/confidence-badge";
 import { itemCommunity } from "@/lib/services/social";
 import { hydrateCatalogItem } from "@/lib/services/catalog-search";
 import { MediaArt, mediaHue } from "@/components/media-art";
@@ -32,13 +35,23 @@ export default async function ItemPage({ params }: Params) {
   const item = await getCatalogItem(id);
   if (!item) notFound();
 
-  const [community, rating, credits, watching, similar] = await Promise.all([
+  const [community, rating, credits, watching, similar, model] = await Promise.all([
     itemCommunity(item.id, 12, session.org.id),
     getRating(session.org.id, item.id),
     creditsForItem(item.id),
     isWatchlisted(session.org.id, item.id),
     similarItems(item.id, 8),
+    // The fitted model supplies the confidence interval; a missing snapshot
+    // must not take the page down, so it degrades to no badge.
+    getRankingModel(session.org.id, item.kind).catch(() => null),
   ]);
+
+  // Only a rated title has a position to explain, and the drill-down reads the
+  // matchup log, so it is skipped entirely for unrated catalog pages.
+  const explanation = rating ? await explainPosition(session.org.id, item.id).catch(() => null) : null;
+  const fit = model?.byId.get(item.id) ?? null;
+  const interval = fit && model ? scoreInterval(fit, model.items, model.tieParameter) : null;
+  const topMover = explanation?.movers[0] ?? null;
 
   const hue = mediaHue(item.title);
   const spotify = item.links.spotify;
@@ -169,7 +182,33 @@ export default async function ItemPage({ params }: Params) {
               </p>
             </div>
           </div>
+
+          {interval ? (
+            <div className="mt-3 border-t border-white/[0.06] pt-2.5">
+              <p className="mb-1 text-[9px] uppercase tracking-[0.12em] text-muted-2">Ranking model</p>
+              <ConfidenceBadge interval={interval} />
+            </div>
+          ) : null}
         </div>
+
+        {explanation ? (
+          <Link
+            href={`/app/item/${item.id}/why`}
+            className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] px-4 py-3 transition-colors hover:border-white/[0.14] hover:bg-white/[0.04]"
+          >
+            <div className="min-w-0">
+              <p className="text-[9px] uppercase tracking-[0.12em] text-muted-2">
+                Why it&apos;s #{explanation.position} in {MEDIA_KIND_LABELS[item.kind]}
+              </p>
+              <p className="mt-0.5 truncate text-[12px] text-muted">
+                {topMover
+                  ? `${topMover.result === "win" ? "Picked over" : topMover.result === "loss" ? "Lost to" : "Tied with"} ${topMover.opponentTitle} · ${topMover.delta >= 0 ? "+" : ""}${topMover.delta} Elo`
+                  : `${explanation.countedMatchups} counted comparison${explanation.countedMatchups === 1 ? "" : "s"}`}
+              </p>
+            </div>
+            <span className="shrink-0 text-[12px] font-semibold text-brand">See why →</span>
+          </Link>
+        ) : null}
 
         <section className="mt-7">
           <h2 className="text-[15px] font-semibold text-ink">Overview</h2>

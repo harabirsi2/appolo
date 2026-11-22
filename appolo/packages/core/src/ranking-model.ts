@@ -169,6 +169,65 @@ export function davidsonProbabilities(
 }
 
 /** Probability that A is preferred to B under the fitted model. */
+/**
+ * Expected-wins score for a strength against a field, on the 0–10 scale the
+ * UI uses: 10 × mean P(this beats each other item). Extracted so the interval
+ * below evaluates exactly the same statistic the fit reports as
+ * `personalScore`.
+ */
+export function expectedWinsAgainst(
+  theta: number,
+  field: readonly number[],
+  tieParameter: number,
+): number {
+  if (field.length === 0) return 5;
+  let total = 0;
+  for (const other of field) total += probabilityABeatsB(theta, other, tieParameter);
+  return (total / field.length) * 10;
+}
+
+export interface ScoreInterval {
+  /** Expected-wins score (0–10), same quantity as `FittedItem.personalScore`. */
+  score: number;
+  /** Lower/upper bounds of the 95% interval, on the same 0–10 scale. */
+  lower: number;
+  upper: number;
+  /** Half-width of the wider side, rounded to 0.1 for display as `± margin`. */
+  margin: number;
+  comparisons: number;
+}
+
+/**
+ * Map an item's θ interval onto the score the UI shows.
+ *
+ * The interval is not a rescaled θ error: it is the expected-wins score
+ * re-evaluated at θ − 1.96·SE and θ + 1.96·SE against the same field, so it
+ * respects the logistic squash (a score near 9 cannot move up much) and the
+ * asymmetry of the outward bias allowance. Both end points are clamped to the
+ * scale, and the margin is the larger half-width so the badge never understates
+ * uncertainty.
+ */
+export function scoreInterval(
+  item: FittedItem,
+  field: readonly FittedItem[],
+  tieParameter: number,
+): ScoreInterval {
+  const others = field.filter((other) => other.id !== item.id).map((other) => other.theta);
+  const round = (value: number) => Math.round(value * 10) / 10;
+  const score = round(expectedWinsAgainst(item.theta, others, tieParameter));
+  const low = expectedWinsAgainst(item.lower, others, tieParameter);
+  const high = expectedWinsAgainst(item.upper, others, tieParameter);
+  const lower = round(Math.max(0, Math.min(score, low, high)));
+  const upper = round(Math.min(10, Math.max(score, low, high)));
+  return {
+    score,
+    lower,
+    upper,
+    margin: round(Math.max(score - lower, upper - score)),
+    comparisons: item.comparisons,
+  };
+}
+
 export function probabilityABeatsB(
   thetaA: number,
   thetaB: number,
