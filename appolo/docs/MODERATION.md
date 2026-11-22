@@ -60,33 +60,60 @@ unambiguous body. A false flag costs one click; a false hide costs a customer.
 Every decision carries a `reason` sentence written for a human ("Duplicate of
 review 3f2a… (97% similar)."), which is what goes on the report.
 
-## Wiring (10 lines, blocked on an uncommitted file)
+## Wiring: computed on insert, persisted, sorted
 
-`lib/services/moderation.ts` — the reports pipeline — is currently uncommitted
-work in progress, so this module is shipped standalone and **not yet called**.
-When that lands, wire it where the report row is inserted (around the
-`insert(abuseReports)` call):
+`reportContent()` in `lib/services/moderation.ts` calls `triage()` **before** the
+insert and stores the result on the report row (migration `0029`):
 
-```ts
-import { triage, autoHideEnabled } from "./moderation-signals";
+| Column | Meaning |
+| --- | --- |
+| `triage_action` | `none` / `flag` / `hide` — advisory only |
+| `triage_score` | the 0..100 spam score, kept for tuning |
+| `triage_reason` | one sentence for the moderator, `null` when `none` |
 
-// candidates: the same author's recent bodies, plus bodies on the same item.
-// Own-tenant rows only — the app role must not read another tenant's text.
-const decision = triage({ body: target.body, candidates, autoHideEnabled: autoHideEnabled() });
+Candidates for duplicate detection are the **author's own** recent bodies of the
+same content type (last 200, via the admin client because the queue is
+cross-tenant):
 
-await withOrg(reporterOrgId, (tx) =>
-  tx.insert(abuseReports).values({
-    /* …existing columns… */
-    // Persist the signal so the queue can sort by it without recomputing:
-    details: [input.details, decision.action === "none" ? null : decision.reason]
-      .filter(Boolean).join("\n\n") || null,
-  }),
-);
+- `contentType = 'review'` → `item_ratings.review_text` for `content_org_id`
+- `contentType = 'comment'` → `rating_comments.body` for `content_org_id`
+- `contentType = 'profile'` → no body, no query, always `none`
+
+That is the shape spam actually takes here: one account pasting the same
+paragraph across items. Comparing against other tenants' text would mean reading
+everyone's reviews on the report path, which the RLS model does not allow and
+this does not need.
+
+The queue (`moderationQueue`) orders by signal first, then newest:
+
+```sql
+case triage_action when 'hide' then 0 when 'flag' then 1 else 2 end,
+created_at desc
 ```
 
-That needs one extra column (or reuse of `details`) plus a queue sort on the
-signal — an hour of work, not a day. Until then `pnpm test:signals` proves the
-rules, and the pipeline is unchanged.
+so a flagged duplicate or advert does not sit behind a day of "this review is
+mean". The admin page shows `flag · signal 67` plus the reason line on any report
+that carries one.
+
+Why compute at insert and not at read:
+
+- The queue would otherwise re-scan the author's history every time a moderator
+  opens it.
+- A threshold change would silently rewrite the meaning of past reports. Stored
+  decisions keep the audit trail honest, and re-running is a migration, not a
+  behaviour change.
+
+**Nothing is hidden automatically.** `hide` is only recorded (and still waits for
+a moderator) when `MODERATION_AUTO_HIDE=1` *and* the signal is unambiguous.
+Rejected on purpose: a background job that re-scores old reports on a schedule —
+with 200 candidates and a few reports a day, insert-time is the only moment that
+matters.
+
+The database test (`moderation.test.ts`) files three real reports through
+`reportContent` and asserts the persisted columns: a copy of an earlier review is
+`flag` with a reason naming the original, a link-spam body is `flag` with a score
+≥ 40, and a clean review is `none` with no reason — plus that the queue puts the
+flagged ones first.
 
 ## What is skipped, and why
 

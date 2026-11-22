@@ -143,8 +143,11 @@ Revisit at two instances.
 ## 3. Moderation automation v1
 
 See [MODERATION.md](./MODERATION.md). Two signals on the report pipeline —
-duplicate detection and link-spam scoring — with `flag` as the default action and
-`hide` gated behind `MODERATION_AUTO_HIDE=1`.
+duplicate detection and link-spam scoring — run when the report is inserted and
+persisted on the row (`triage_action`, `triage_score`, `triage_reason`, migration
+`0029`), so the queue sorts flagged reports first without re-scanning history on
+every open. `flag` is the default action; `hide` is recorded only with
+`MODERATION_AUTO_HIDE=1` and still waits for a moderator.
 
 ---
 

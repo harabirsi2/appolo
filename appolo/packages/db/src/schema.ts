@@ -1578,6 +1578,16 @@ export const abuseReports = pgTable(
     status: text("status").notNull().default("open"),
     /** hide | remove | dismiss, set when the report is resolved. */
     action: text("action"),
+    /**
+     * Advisory triage from moderation-signals (none | flag | hide), computed
+     * when the report is filed and used to sort the queue. Never hides content
+     * on its own; see sql/0029_report_triage.sql.
+     */
+    triageAction: text("triage_action").notNull().default("none"),
+    /** 0..100 spam score behind the decision, kept for review and tuning. */
+    triageScore: integer("triage_score").notNull().default(0),
+    /** One sentence for the moderator: why this report is where it is. */
+    triageReason: text("triage_reason"),
     moderatedBy: uuid("moderated_by").references(() => users.id, { onDelete: "set null" }),
     moderatedAt: timestamp("moderated_at", { withTimezone: true }),
     createdAt: createdAt(),

@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getAdminDb, schema } from "@appolo/db";
 import {
   moderationQueue,
@@ -370,5 +370,113 @@ test("reports for unknown or non-uuid content are rejected without creating rows
     assert.equal(count, undefined);
   } finally {
     await admin.delete(orgs).where(eq(orgs.id, reporterOrgId));
+  }
+});
+test("report triage flags a duplicate and link spam, and leaves a clean review alone", async () => {
+  const fixture: Fixture = { orgIds: [], userIds: [], itemIds: [] };
+  const prefix = `Triage ${randomUUID().slice(0, 8)}`;
+
+  const cleanBody =
+    "Recorded in one room with the windows open, and you can hear the room on every chorus. It is the sound of a band refusing to hide behind reverb.";
+
+  try {
+    const authorOrgId = await createOrg("triage-author");
+    const spamOrgId = await createOrg("triage-spam");
+    const reporterOrgId = await createOrg("triage-reporter");
+    fixture.orgIds.push(authorOrgId, spamOrgId, reporterOrgId);
+
+    await createProfile(authorOrgId, "triage-author");
+    await createProfile(spamOrgId, "triage-spam");
+    await createProfile(reporterOrgId, "triage-reporter");
+
+    const items = await admin
+      .insert(catalogItems)
+      .values([
+        { kind: "movie", title: `${prefix} One`, subtitle: "Test" },
+        { kind: "movie", title: `${prefix} Two`, subtitle: "Test" },
+      ])
+      .returning({ id: catalogItems.id });
+    fixture.itemIds.push(...items.map((row) => row.id));
+    const [first, second] = items;
+    assert.ok(first && second, "the fixture needs two catalogue items");
+
+    const [originalReview] = await admin
+      .insert(itemRatings)
+      .values({ orgId: authorOrgId, itemId: first.id, elo: 1650, reviewText: cleanBody })
+      .returning({ id: itemRatings.id });
+    const [copiedReview] = await admin
+      .insert(itemRatings)
+      .values({ orgId: authorOrgId, itemId: second.id, elo: 1600, reviewText: cleanBody })
+      .returning({ id: itemRatings.id });
+    const [spamReview] = await admin
+      .insert(itemRatings)
+      .values({
+        orgId: spamOrgId,
+        itemId: first.id,
+        elo: 1500,
+        reviewText:
+          "Free followers! Telegram me at https://bit.ly/promo and check my bio, buy now with discount code",
+      })
+      .returning({ id: itemRatings.id });
+    const [cleanReview] = await admin
+      .insert(itemRatings)
+      .values({
+        orgId: spamOrgId,
+        itemId: second.id,
+        elo: 1550,
+        reviewText:
+          "A quiet, patient record that only makes sense on the third listen. The last track is the whole argument.",
+      })
+      .returning({ id: itemRatings.id });
+
+    assert.ok(originalReview && copiedReview && spamReview && cleanReview);
+
+    const duplicateReport = await reportContent(reporterOrgId, {
+      contentType: "review",
+      contentId: copiedReview.id,
+      reason: "spam",
+    });
+    const spamReport = await reportContent(reporterOrgId, {
+      contentType: "review",
+      contentId: spamReview.id,
+      reason: "spam",
+    });
+    const cleanReport = await reportContent(reporterOrgId, {
+      contentType: "review",
+      contentId: cleanReview.id,
+      reason: "other",
+    });
+
+    const rows = await admin
+      .select()
+      .from(abuseReports)
+      .where(inArray(abuseReports.id, [duplicateReport.id, spamReport.id, cleanReport.id]));
+    const byId = new Map(rows.map((row) => [row.id, row]));
+
+    const duplicate = byId.get(duplicateReport.id);
+    assert.equal(duplicate?.triageAction, "flag", "a copy of an earlier review must be flagged");
+    assert.match(duplicate?.triageReason ?? "", /Duplicate of review/i);
+    assert.ok((duplicate?.triageReason ?? "").includes(originalReview.id), "the reason must name the original");
+
+    const spam = byId.get(spamReport.id);
+    assert.equal(spam?.triageAction, "flag", "a link-spam body must be flagged");
+    assert.ok((spam?.triageScore ?? 0) >= 40, `expected a spam score of at least 40, got ${spam?.triageScore}`);
+    assert.match(spam?.triageReason ?? "", /spam/i);
+
+    const clean = byId.get(cleanReport.id);
+    assert.equal(clean?.triageAction, "none", "a clean review must not be flagged");
+    assert.equal(clean?.triageScore, 0);
+    assert.equal(clean?.triageReason, null, "an unflagged report carries no signal text");
+
+    // The queue sorts by signal first, so a flagged report does not wait behind
+    // an unflagged one filed later.
+    const queue = await moderationQueue(200);
+    const ids = queue.map((entry) => entry.id);
+    const flaggedAt = Math.min(ids.indexOf(duplicateReport.id), ids.indexOf(spamReport.id));
+    const cleanAt = ids.indexOf(cleanReport.id);
+    assert.ok(flaggedAt >= 0 && cleanAt >= 0, "all three reports must be queued");
+    assert.ok(flaggedAt < cleanAt, "flagged reports must sort ahead of unflagged ones");
+  } finally {
+    await cleanup(fixture);
   }
 });

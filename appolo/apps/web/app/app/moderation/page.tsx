@@ -62,7 +62,15 @@ export default async function ModerationPage() {
                         {report.target.moderationStatus}
                       </span>
                     ) : null}
+                    {report.triageAction !== "none" ? (
+                      <span className="rounded-full border border-brand/30 bg-brand/10 px-2 py-0.5 text-[10px] text-brand">
+                        {report.triageAction} · signal {report.triageScore}
+                      </span>
+                    ) : null}
                   </div>
+                  {report.triageReason ? (
+                    <p className="mt-1 text-[12px] text-brand">{report.triageReason}</p>
+                  ) : null}
                   <p className="mt-1 text-[12px] text-muted-2">
                     {report.target?.label ?? "Content no longer exists."}
                   </p>

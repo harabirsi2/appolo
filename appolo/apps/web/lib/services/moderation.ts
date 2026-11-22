@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getAdminDb, withOrg, schema } from "@/lib/db";
 import {
@@ -7,6 +7,7 @@ import {
   REPORT_REASONS,
   type ModerationAction,
 } from "@/lib/moderation-constants";
+import { autoHideEnabled, triage, type DuplicateCandidate } from "./moderation-signals";
 import { DomainError } from "./errors";
 
 const { abuseReports, catalogItems, itemRatings, profiles, ratingComments } = schema;
@@ -48,6 +49,10 @@ export interface ModerationQueueItem {
   details: string | null;
   status: string;
   action: string | null;
+  /** Advisory priority from moderation-signals: none | flag | hide. */
+  triageAction: string;
+  triageScore: number;
+  triageReason: string | null;
   createdAt: Date;
   reporter: { orgId: string; username: string; displayName: string } | null;
   target: ReportTarget | null;
@@ -150,6 +155,55 @@ async function loadTarget(
   };
 }
 
+/** How many of the author's earlier bodies a new report is compared against. */
+const DUPLICATE_WINDOW = 200;
+
+/**
+ * Run the moderation signals for a report that is about to be inserted.
+ *
+ * Candidates are the author's own recent bodies of the same content type: that
+ * is what "posted the same paragraph twice" looks like, and it keeps the query
+ * inside one org's rows even though the queue runs through the admin client.
+ * Profiles carry no body, so they skip the query entirely and land on 'none'.
+ *
+ * The result is advisory — nothing is hidden here. `hide` is recorded when the
+ * signal is unambiguous and auto-hide is switched on, and it still waits for a
+ * moderator; see docs/MODERATION.md.
+ */
+async function triageReport(target: ReportTarget, contentId: string) {
+  const body = target.body?.trim() ?? "";
+  if (body.length === 0) return triage({ body });
+
+  const admin = getAdminDb();
+  const candidates: DuplicateCandidate[] = [];
+
+  if (target.contentType === "review") {
+    const rows = await admin
+      .select({ id: itemRatings.id, body: itemRatings.reviewText })
+      .from(itemRatings)
+      .where(
+        and(
+          eq(itemRatings.orgId, target.contentOrgId),
+          ne(itemRatings.id, contentId),
+          isNotNull(itemRatings.reviewText),
+        ),
+      )
+      .orderBy(desc(itemRatings.createdAt))
+      .limit(DUPLICATE_WINDOW);
+    for (const row of rows) if (row.body) candidates.push({ id: row.id, body: row.body });
+  } else if (target.contentType === "comment") {
+    const rows = await admin
+      .select({ id: ratingComments.id, body: ratingComments.body })
+      .from(ratingComments)
+      .where(and(eq(ratingComments.orgId, target.contentOrgId), ne(ratingComments.id, contentId)))
+      .orderBy(desc(ratingComments.createdAt))
+      .limit(DUPLICATE_WINDOW);
+    for (const row of rows) if (row.body) candidates.push({ id: row.id, body: row.body });
+  }
+
+  return triage({ body, candidates, autoHideEnabled: autoHideEnabled() });
+}
+
 /**
  * File a report. The unique reporter/content key means a repeated report from
  * the same workspace returns the existing report instead of creating noise.
@@ -166,6 +220,10 @@ export async function reportContent(
     throw new DomainError("SELF_REPORT", "You cannot report your own content.", 400);
   }
 
+  // Computed before the insert so the queue never has to re-scan the author's
+  // history, and persisted so a threshold change cannot rewrite past reports.
+  const decision = await triageReport(target, input.contentId);
+
   const inserted = await withOrg(reporterOrgId, (tx) =>
     tx
       .insert(abuseReports)
@@ -176,6 +234,9 @@ export async function reportContent(
         contentId: input.contentId,
         reason: input.reason,
         details: input.details?.trim() || null,
+        triageAction: decision.action,
+        triageScore: Math.round(decision.spam.score),
+        triageReason: decision.action === "none" ? null : decision.reason,
       })
       .onConflictDoNothing()
       .returning({ id: abuseReports.id }),
@@ -204,11 +265,15 @@ export async function reportContent(
 /** Open reports for the platform moderation queue, newest first. */
 export async function moderationQueue(limit = 100): Promise<ModerationQueueItem[]> {
   const admin = getAdminDb();
+  // Priority first, then newest: a flagged duplicate or advert should not wait
+  // behind a day of "this review is mean" reports. 'hide' sorts above 'flag'
+  // because it means the signal was unambiguous.
+  const priority = sql`case ${abuseReports.triageAction} when 'hide' then 0 when 'flag' then 1 else 2 end`;
   const rows = await admin
     .select()
     .from(abuseReports)
     .where(eq(abuseReports.status, "open"))
-    .orderBy(desc(abuseReports.createdAt))
+    .orderBy(priority, desc(abuseReports.createdAt))
     .limit(Math.min(Math.max(limit, 1), 200));
   if (rows.length === 0) return [];
 
@@ -243,6 +308,9 @@ export async function moderationQueue(limit = 100): Promise<ModerationQueueItem[
     details: row.details,
     status: row.status,
     action: row.action,
+    triageAction: row.triageAction,
+    triageScore: row.triageScore,
+    triageReason: row.triageReason,
     createdAt: row.createdAt,
     reporter: reporterByOrg.get(row.reporterOrgId) ?? null,
     target: targets[index] ?? null,
