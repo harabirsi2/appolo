@@ -9,7 +9,7 @@ import { capabilitiesFor, sha256, type Capability, type Role } from "@appolo/cor
 const { sessions, users, memberships, orgs } = schema;
 
 export interface SessionContext {
-  user: { id: string; email: string; name: string };
+  user: { id: string; email: string; name: string; isModerator: boolean };
   sessionId: string;
   org: { id: string; name: string; slug: string; planTier: string };
   membership: { id: string; role: Role; locationIds: string[] };
@@ -37,6 +37,7 @@ const readSession = cache(async (): Promise<SessionContext | null> => {
       userId: users.id,
       email: users.email,
       name: users.name,
+      isModerator: users.isModerator,
       membershipId: memberships.id,
       role: memberships.role,
       locationIds: memberships.locationIds,
@@ -68,7 +69,7 @@ const readSession = cache(async (): Promise<SessionContext | null> => {
   if (!org) return null;
 
   return {
-    user: { id: row.userId, email: row.email, name: row.name },
+    user: { id: row.userId, email: row.email, name: row.name, isModerator: row.isModerator },
     sessionId: row.sessionId,
     org,
     membership: {

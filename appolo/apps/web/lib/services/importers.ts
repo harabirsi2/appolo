@@ -3,7 +3,7 @@ import { getDb, withOrg, schema } from "@/lib/db";
 import { DomainError } from "./errors";
 import { mapCatalogItem, type CatalogItem } from "./catalog-item";
 
-const { catalogItems, itemRatings, ratingEvents } = schema;
+const { catalogItems, itemRatings, ratingEvents, watchlist } = schema;
 
 /** Parse a CSV into rows keyed by header. Handles quoted fields. */
 export function parseCsv(text: string): Array<Record<string, string>> {
@@ -133,12 +133,15 @@ export interface ImportStats {
   skipped: number;
   created: number;
   updated: number;
+  /** Items saved without a score, currently Spotify top tracks. */
+  unrated: number;
 }
 
 async function upsertRating(
   orgId: string,
   itemId: string,
   score: number,
+  source: "letterboxd" | "goodreads",
 ): Promise<"created" | "updated"> {
   const clamped = Math.min(10, Math.max(0, score));
   const elo = Math.round(1200 + clamped * 60);
@@ -148,10 +151,10 @@ async function upsertRating(
   await withOrg(orgId, async (tx) => {
     await tx
       .insert(itemRatings)
-      .values({ orgId, itemId, elo, manualScore: clamped.toFixed(1) })
+      .values({ orgId, itemId, elo, manualScore: clamped.toFixed(1), source })
       .onConflictDoUpdate({
         target: [itemRatings.orgId, itemRatings.itemId],
-        set: { elo, manualScore: clamped.toFixed(1), updatedAt: new Date() },
+        set: { elo, manualScore: clamped.toFixed(1), source, updatedAt: new Date() },
       });
     await tx.insert(ratingEvents).values({
       orgId,
@@ -167,7 +170,7 @@ const MAX_ROWS = 5000;
 
 export async function importLetterboxd(orgId: string, csv: string): Promise<ImportStats> {
   const rows = parseCsv(csv).slice(0, MAX_ROWS);
-  const stats: ImportStats = { imported: 0, skipped: 0, created: 0, updated: 0 };
+  const stats: ImportStats = { imported: 0, skipped: 0, created: 0, updated: 0, unrated: 0 };
   for (const row of rows) {
     const title = get(row, "name", "title");
     if (!title) {
@@ -187,7 +190,7 @@ export async function importLetterboxd(orgId: string, csv: string): Promise<Impo
       year,
     });
     const score = rating * 2; // 0.5–5 → 0–10
-    const outcome = await upsertRating(orgId, item.id, score);
+    const outcome = await upsertRating(orgId, item.id, score, "letterboxd");
     if (outcome === "created") stats.created++;
     else stats.updated++;
     stats.imported++;
@@ -197,7 +200,7 @@ export async function importLetterboxd(orgId: string, csv: string): Promise<Impo
 
 export async function importGoodreads(orgId: string, csv: string): Promise<ImportStats> {
   const rows = parseCsv(csv).slice(0, MAX_ROWS);
-  const stats: ImportStats = { imported: 0, skipped: 0, created: 0, updated: 0 };
+  const stats: ImportStats = { imported: 0, skipped: 0, created: 0, updated: 0, unrated: 0 };
   for (const row of rows) {
     const title = get(row, "title");
     if (!title) { stats.skipped++; continue; }
@@ -207,7 +210,7 @@ export async function importGoodreads(orgId: string, csv: string): Promise<Impor
     if (rating === null) { stats.skipped++; continue; }
     const item = await findOrCreateCatalogItem(orgId, { kind: "book", title: title, subtitle: author || "Book", year: year });
     const score = rating * 2;
-    const outcome = await upsertRating(orgId, item.id, score);
+    const outcome = await upsertRating(orgId, item.id, score, "goodreads");
     if (outcome === "created") stats.created++; else stats.updated++;
     stats.imported++;
   }
@@ -215,7 +218,7 @@ export async function importGoodreads(orgId: string, csv: string): Promise<Impor
 }
 
 export async function importSpotifyTopTracks(orgId: string, accessToken: string): Promise<ImportStats> {
-  const stats: ImportStats = { imported: 0, skipped: 0, created: 0, updated: 0 };
+  const stats: ImportStats = { imported: 0, skipped: 0, created: 0, updated: 0, unrated: 0 };
   const response = await fetch("https://api.spotify.com/v1/me/top/tracks?limit=50&time_range=medium_term", {
     cache: "no-store",
     signal: AbortSignal.timeout(10_000),
@@ -231,8 +234,7 @@ export async function importSpotifyTopTracks(orgId: string, accessToken: string)
     }>;
   };
   const items = payload.items ?? [];
-  for (let index = 0; index < items.length; index++) {
-    const track = items[index]!;
+  for (const track of items) {
     const title = (track.name ?? "").trim();
     if (!title) {
       stats.skipped++;
@@ -251,10 +253,19 @@ export async function importSpotifyTopTracks(orgId: string, accessToken: string)
     if (imageUrl) {
       await getDb().update(catalogItems).set({ imageUrl, backdropUrl: imageUrl }).where(eq(catalogItems.id, catalogItem.id));
     }
-    const score = Math.max(6, 10 - index * 0.12);
-    const outcome = await upsertRating(orgId, catalogItem.id, score);
-    if (outcome === "created") stats.created++;
+    // A top-tracks list is listening history, not an explicit ranking. Save the
+    // track as unrated so the user can put it on their watchlist and rate it
+    // deliberately later; never manufacture a score from its position.
+    const [added] = await withOrg(orgId, (tx) =>
+      tx
+        .insert(watchlist)
+        .values({ orgId, itemId: catalogItem.id })
+        .onConflictDoNothing()
+        .returning({ id: watchlist.id }),
+    );
+    if (added) stats.created++;
     else stats.updated++;
+    stats.unrated++;
     stats.imported++;
   }
   return stats;

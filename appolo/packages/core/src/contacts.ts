@@ -30,7 +30,7 @@ export const consentInputSchema = z.object({
   channel: z.enum(CONSENT_CHANNELS),
   status: z.enum(["granted", "revoked"]),
   source: z.string().trim().min(1).max(80).default("manual"),
-  evidence: z.record(z.unknown()).optional(),
+  evidence: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const contactQuerySchema = z.object({
