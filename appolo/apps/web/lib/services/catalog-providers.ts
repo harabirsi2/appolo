@@ -54,10 +54,16 @@ const LOCAL_MATCHES_ENOUGH = 5;
 const KINDS: readonly MediaKind[] = ["movie", "tv", "music", "podcast", "book", "game"];
 
 /**
- * Per-minute ceiling for the *request path*. Serverless web instances share a
- * provider quota with the worker, so this stays well under each provider's
- * limit; the worker has its own limiter (CATALOG_WORKER_REQ_PER_MIN). Raise it
- * per install with CATALOG_PROVIDER_REQ_PER_MIN once you know your plan.
+ * Per-minute ceiling for the *request path*.
+ *
+ * This is the internal ceiling, distinct from the per-user quota in
+ * `consumeAction("search", …)` (30 a minute, which is what the e2e suite
+ * exercises). It sits higher on purpose: a single user can burn their quota in
+ * one page of searches, but several users sharing one instance must not exhaust
+ * a provider's own limit between them. iTunes allows on the order of 20 calls a
+ * minute per IP, so going much above this is a fast path to 429s that look like
+ * outages. Raise it per install with CATALOG_PROVIDER_REQ_PER_MIN once you know
+ * your plan; the worker has its own limiter (CATALOG_WORKER_REQ_PER_MIN).
  */
 function maxRequestsPerMinute(): number {
   const raw = Number(process.env.CATALOG_PROVIDER_REQ_PER_MIN ?? "");
