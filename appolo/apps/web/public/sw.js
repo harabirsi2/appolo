@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-globals */
 /**
  * Appolo service worker.
  *

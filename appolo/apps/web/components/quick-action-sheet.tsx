@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/podiums";
 
@@ -22,6 +22,17 @@ const ACTIONS = [
 export function QuickActionSheet() {
   const [open, setOpen] = useState(false);
 
+  // The sheet is dismissable by pointer (backdrop, or any action link); Escape
+  // is the keyboard path, so the backdrop handler below never strands anyone.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
   return (
     <>
       <button
@@ -35,13 +46,20 @@ export function QuickActionSheet() {
       </button>
 
       {open ? (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
-          onClick={() => setOpen(false)}
-        >
+        <div className="fixed inset-0 z-50 flex items-end justify-center">
+          {/* Backdrop dismissal as a button: keyboard reachable and announced,
+              instead of a div that only a pointer can dismiss. */}
+          <button
+            type="button"
+            aria-label="Close quick actions"
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setOpen(false)}
+          />
           <div
-            className="w-full max-w-[560px] rounded-t-3xl border-t border-white/[0.08] bg-[#111318] px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-5"
-            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Quick actions"
+            className="relative w-full max-w-[560px] rounded-t-3xl border-t border-white/[0.08] bg-[#111318] px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-5"
           >
             <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20" />
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-2">Quick actions</p>

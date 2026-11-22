@@ -7,14 +7,17 @@ import { MediaArt } from "./media-art";
 import { Avatar, Icon, ScoreText } from "./podiums";
 import { ReviewEngagement } from "./review-engagement";
 import { ReviewBody } from "./review-body";
+import { ReportButton } from "./report-button";
 import { ShareButton } from "./share-button";
 
 /** The full, shareable view of a single review. */
 export function ReviewScreen({
   review,
+  viewerOrgId = null,
   backHref,
 }: {
   review: ReviewView;
+  viewerOrgId?: string | null;
   backHref?: string;
 }) {
   const band = scoreBand(review.score);
@@ -39,11 +42,16 @@ export function ReviewScreen({
             </Link>
             <p className="truncate text-[11px] text-muted-2">{`@${review.username}`}</p>
           </div>
-          <ShareButton
-            title={`${review.displayName} on ${review.itemTitle}`}
-            path={`/review/${review.id}`}
-            imagePath={`/api/og/review/${review.id}`}
-          />
+          <div className="flex items-center gap-3">
+            {viewerOrgId && viewerOrgId !== review.orgId ? (
+              <ReportButton contentType="review" contentId={review.id} />
+            ) : null}
+            <ShareButton
+              title={`${review.displayName} on ${review.itemTitle}`}
+              path={`/review/${review.id}`}
+              imagePath={`/api/og/review/${review.id}`}
+            />
+          </div>
         </div>
 
         <div className="mt-4 flex items-center gap-3 rounded-xl border border-white/[0.06] bg-black/25 p-3">
@@ -78,8 +86,15 @@ export function ReviewScreen({
 
         {video ? (
           video.kind === "iframe" ? (
-            <iframe src={video.src} className="mt-3 aspect-video w-full rounded-xl" allowFullScreen />
+            <iframe
+              src={video.src}
+              title="Your review video"
+              className="mt-3 aspect-video w-full rounded-xl"
+              allowFullScreen
+            />
           ) : (
+            // The clip is chosen by the reviewer; there is no caption file to attach.
+            // eslint-disable-next-line jsx-a11y/media-has-caption
             <video src={video.src} controls className="mt-3 w-full rounded-xl" />
           )
         ) : null}
@@ -133,6 +148,7 @@ export function ReviewScreen({
 
         <ReviewEngagement
           ratingId={review.id}
+          viewerOrgId={viewerOrgId}
           initialReactions={review.reactions}
           initialCommentCount={review.commentCount}
         />

@@ -1,0 +1,448 @@
+name: CI
+
+# Pull requests and pushes to main. The visual-baseline refresh runs only when
+# dispatched with the `update_visual_baselines` input (see docs/CI.md): it
+# regenerates the committed screenshots and uploads them as an artifact instead
+# of comparing against them.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      update_visual_baselines:
+        description: "Regenerate the committed visual baselines on the Ubuntu runner"
+        type: boolean
+        default: false
+
+# One run per ref: a superseded push is cancelled rather than racing the new one.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PNPM_VERSION: "9.15.4"
+  NODE_VERSION: "22"
+  # The app must connect as a role that cannot bypass RLS; migrations and seeds
+  # need the owner. Both are asserted below.
+  DATABASE_URL: postgresql://appolo_app:appolo_dev_password@127.0.0.1:55432/appolo
+  MIGRATE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55432/appolo
+  APP_URL: http://localhost:3000
+  SESSION_COOKIE: appolo_session
+
+defaults:
+  run:
+    working-directory: appolo
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast checks: no database, no browser. These gate everything else.
+  # ---------------------------------------------------------------------------
+  static:
+    name: Typecheck and lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: appolo/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck every package
+        run: pnpm typecheck
+      - name: Lint (typescript-eslint strict, react-hooks, jsx-a11y)
+        run: pnpm lint
+      # Fail on a known vulnerable dependency, including low severity. No
+      # allowlist: resolve the finding or keep the build red.
+      - name: Dependency audit policy
+        run: pnpm audit --prod --audit-level=low
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: appolo/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      # Elo, adaptive K, opponent selection, the fit, intervals, taste match,
+      # coordination, messaging safety, metadata and normalisation.
+      - name: Core test suite
+        run: pnpm test
+
+  # ---------------------------------------------------------------------------
+  # Database integration: every DB-backed suite runs here, in one job, because
+  # they all mutate the same throwaway Postgres and each uses its own orgs.
+  # ---------------------------------------------------------------------------
+  database:
+    name: Database suites (RLS, concurrency, undo, idempotency)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: appolo
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d appolo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: appolo/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Create the non-superuser app role
+        working-directory: .
+        run: |
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          begin
+            if not exists (select 1 from pg_roles where rolname = 'appolo_app') then
+              create role appolo_app login password 'appolo_dev_password' nosuperuser nobypassrls;
+            else
+              alter role appolo_app nosuperuser nobypassrls;
+            end if;
+          end $$;
+          SQL
+      - name: Assert the app role cannot bypass RLS
+        working-directory: .
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
+            "select current_user, rolsuper, rolbypassrls from pg_roles where rolname = current_user" \
+            | tee /tmp/app-role.txt
+          grep -qx 'appolo_app|f|f' /tmp/app-role.txt
+      - name: Migrate
+        run: pnpm db:migrate
+      - name: Seed the catalog
+        run: pnpm db:seed
+      - name: World readability probes (RLS on item_matchups and ranking_models)
+        run: pnpm db:rls-test
+      - name: Webhook idempotency
+        run: pnpm db:idempotency-test
+      - name: Two-connection vote races and replay
+        run: pnpm test:concurrency
+      - name: Undo restores both Elo sides
+        run: pnpm test:undo
+      - name: Ranking model
+        run: pnpm test:ranking
+      - name: Importers and moderation
+        run: pnpm test:imports && pnpm test:moderation
+
+  # ---------------------------------------------------------------------------
+  # HTTP-level suites against a built, seeded server. Three jobs so a failing
+  # screenshot does not hide a failing API check.
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: E2E (HTTP)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres: &postgres-service
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: appolo
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d appolo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Exercise Spotify connect issuance and the provider quota path without
+      # real accounts: the callback is tested with a valid state and no code.
+      SPOTIFY_CLIENT_ID: e2e-client
+      CATALOG_PROVIDERS: itunes
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: appolo/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Create the non-superuser app role
+        working-directory: .
+        run: |
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          begin
+            if not exists (select 1 from pg_roles where rolname = 'appolo_app') then
+              create role appolo_app login password 'appolo_dev_password' nosuperuser nobypassrls;
+            end if;
+          end $$;
+          SQL
+      - name: Migrate
+        run: pnpm db:migrate
+      - name: Seed the catalog
+        run: pnpm db:seed
+      - name: Production build
+        run: pnpm --filter @appolo/web build
+      - name: Start the server
+        run: |
+          nohup pnpm --filter @appolo/web start > /tmp/web.log 2>&1 &
+          echo $! > /tmp/web.pid
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/api/health > /dev/null; then
+              echo "App ready after ${attempt}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "App did not become ready; server log follows:"
+          cat /tmp/web.log
+          exit 1
+      - name: E2E suite
+        run: pnpm e2e
+      - name: Server log and diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostics
+          path: /tmp/web.log
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Stop the server
+        if: always()
+        working-directory: .
+        run: |
+          if [ -f /tmp/web.pid ]; then
+            pkill -P "$(cat /tmp/web.pid)" 2>/dev/null || true
+            kill "$(cat /tmp/web.pid)" 2>/dev/null || true
+          fi
+
+  visual:
+    name: Visual regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    needs: [static]
+    services:
+      postgres: *postgres-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: appolo/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Create the non-superuser app role
+        working-directory: .
+        run: |
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          begin
+            if not exists (select 1 from pg_roles where rolname = 'appolo_app') then
+              create role appolo_app login password 'appolo_dev_password' nosuperuser nobypassrls;
+            end if;
+          end $$;
+          SQL
+      - run: pnpm db:migrate
+      - name: Seed with the demo account
+        env:
+          SEED_DEMO: "1"
+          SEED_EMAIL: owner@appolo.test
+          SEED_PASSWORD: appolo-demo-9f3c2a7e
+        run: pnpm db:seed
+      - name: Install the browser shell
+        run: pnpm exec playwright install --with-deps chromium --only-shell
+      - run: pnpm --filter @appolo/web build
+      - name: Start the server
+        run: |
+          nohup pnpm --filter @appolo/web start > /tmp/web.log 2>&1 &
+          echo $! > /tmp/web.pid
+          for attempt in $(seq 1 60); do
+            curl -fsS http://localhost:3000/api/health > /dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/web.log
+          exit 1
+      - name: Visual checks (pixel baselines committed from this runner)
+        run: pnpm visual
+      - name: Upload screenshots and diffs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-output
+          path: appolo/scripts/visual-output
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Stop the server
+        if: always()
+        working-directory: .
+        run: |
+          if [ -f /tmp/web.pid ]; then
+            pkill -P "$(cat /tmp/web.pid)" 2>/dev/null || true
+            kill "$(cat /tmp/web.pid)" 2>/dev/null || true
+          fi
+
+  a11y:
+    name: Accessibility audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres: *postgres-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: appolo/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Create the non-superuser app role
+        working-directory: .
+        run: |
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          begin
+            if not exists (select 1 from pg_roles where rolname = 'appolo_app') then
+              create role appolo_app login password 'appolo_dev_password' nosuperuser nobypassrls;
+            end if;
+          end $$;
+          SQL
+      - run: pnpm db:migrate
+      - name: Seed with the demo account
+        env:
+          SEED_DEMO: "1"
+          SEED_EMAIL: owner@appolo.test
+          SEED_PASSWORD: appolo-demo-9f3c2a7e
+        run: pnpm db:seed
+      - name: Install the browser shell
+        run: pnpm exec playwright install --with-deps chromium --only-shell
+      - run: pnpm --filter @appolo/web build
+      - name: Start the server
+        run: |
+          nohup pnpm --filter @appolo/web start > /tmp/web.log 2>&1 &
+          echo $! > /tmp/web.pid
+          for attempt in $(seq 1 60); do
+            curl -fsS http://localhost:3000/api/health > /dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/web.log
+          exit 1
+      # axe-core is fetched from a pinned CDN build; if the CDN is unreachable
+      # the script exits 2 rather than reporting a pass.
+      - name: axe-core audit (serious and critical only)
+        run: pnpm a11y
+      - name: Stop the server
+        if: always()
+        working-directory: .
+        run: |
+          if [ -f /tmp/web.pid ]; then
+            pkill -P "$(cat /tmp/web.pid)" 2>/dev/null || true
+            kill "$(cat /tmp/web.pid)" 2>/dev/null || true
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Maintenance: regenerate the committed pixel baselines ON THE UBUNTU RUNNER.
+  # Dispatched by hand only. Copy the uploaded screenshots into
+  # appolo/scripts/visual-baselines/ and commit them (docs/CI.md).
+  # ---------------------------------------------------------------------------
+  visual-baselines:
+    name: Regenerate visual baselines
+    if: github.event_name == 'workflow_dispatch' && inputs.update_visual_baselines
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres: *postgres-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: appolo/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Create the non-superuser app role
+        working-directory: .
+        run: |
+          psql "$MIGRATE_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          begin
+            if not exists (select 1 from pg_roles where rolname = 'appolo_app') then
+              create role appolo_app login password 'appolo_dev_password' nosuperuser nobypassrls;
+            end if;
+          end $$;
+          SQL
+      - run: pnpm db:migrate
+      - name: Seed with the demo account
+        env:
+          SEED_DEMO: "1"
+          SEED_EMAIL: owner@appolo.test
+          SEED_PASSWORD: appolo-demo-9f3c2a7e
+        run: pnpm db:seed
+      - name: Install the browser shell
+        run: pnpm exec playwright install --with-deps chromium --only-shell
+      - run: pnpm --filter @appolo/web build
+      - name: Start the server
+        run: |
+          nohup pnpm --filter @appolo/web start > /tmp/web.log 2>&1 &
+          echo $! > /tmp/web.pid
+          for attempt in $(seq 1 60); do
+            curl -fsS http://localhost:3000/api/health > /dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/web.log
+          exit 1
+      - name: Render and accept every screen as the new baseline
+        env:
+          VISUAL_UPDATE: "1"
+        run: pnpm visual
+      - name: Upload the new baselines
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines-ubuntu
+          path: appolo/scripts/visual-output
+          retention-days: 14
+      - name: Stop the server
+        if: always()
+        working-directory: .
+        run: |
+          if [ -f /tmp/web.pid ]; then
+            pkill -P "$(cat /tmp/web.pid)" 2>/dev/null || true
+            kill "$(cat /tmp/web.pid)" 2>/dev/null || true
+          fi

@@ -55,7 +55,6 @@ export default async function ReviewLandingPage({
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-4 py-12">
       <div className="mb-6 text-center">
         {landing.branding.logoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={landing.branding.logoUrl}
             alt={`${landing.businessName} logo`}

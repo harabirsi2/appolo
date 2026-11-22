@@ -41,14 +41,22 @@
     "visual:local": "node scripts/visual.mjs --local",
     "visual:local:accept": "node scripts/visual.mjs --local --update",
     "media-art": "node scripts/media-art.mjs",
-    "verify": "pnpm preflight && pnpm db:role-guard && pnpm media-art && pnpm typecheck && pnpm test && pnpm test:imports && pnpm test:moderation && pnpm test:ranking && pnpm test:undo && pnpm visual && pnpm e2e && pnpm gap-audit",
+    "verify": "pnpm preflight && pnpm db:role-guard && pnpm media-art && pnpm typecheck && pnpm lint && pnpm test && pnpm test:imports && pnpm test:moderation && pnpm test:ranking && pnpm test:undo && pnpm test:concurrency && pnpm visual && pnpm e2e && pnpm gap-audit",
     "ci": "powershell -ExecutionPolicy Bypass -File scripts/ci.ps1",
-    "a11y": "node scripts/a11y.mjs"
+    "a11y": "node scripts/a11y.mjs",
+    "lint": "eslint .",
+    "test:concurrency": "pnpm --filter @appolo/db exec tsx --tsconfig ../../apps/web/tsconfig.json --test --test-force-exit ../../apps/web/lib/services/rankings-concurrency.test.ts"
   },
   "devDependencies": {
+    "@eslint/js": "9",
+    "eslint": "9",
+    "eslint-plugin-jsx-a11y": "6",
+    "eslint-plugin-react-hooks": "5",
+    "globals": "15",
     "pixelmatch": "6.0.0",
     "playwright": "1.65.1",
     "pngjs": "7.0.0",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "typescript-eslint": "8"
   }
 }

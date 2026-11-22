@@ -53,11 +53,16 @@ export function TrailerModal({
           aria-modal="true"
           aria-label={`${title} trailer`}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) setOpen(false);
-          }}
         >
-          <div className="w-full max-w-3xl">
+          {/* Backdrop dismissal is a real button, not a div with a handler:
+              focusable, announced, and it cannot swallow the panel's clicks. */}
+          <button
+            type="button"
+            aria-label="Close trailer"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setOpen(false)}
+          />
+          <div className="relative w-full max-w-3xl">
             <div className="mb-2 flex items-center justify-between">
               <p className="truncate pr-3 text-[13px] font-semibold text-white">{title} — trailer</p>
               <button

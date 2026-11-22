@@ -27,6 +27,8 @@ const {
   reviews,
   reviewPlatforms,
   socialNotifications,
+  itemMatchups,
+  rankingModels,
 } = schema;
 
 let pass = 0;
@@ -59,17 +61,30 @@ async function main(): Promise<void> {
   const B = randomUUID();
   const stamp = randomUUID().slice(0, 8);
   const itemId = randomUUID();
+  // A second title so the matchup fixture can be a real pair (item <> opponent).
+  const opponentId = randomUUID();
   let bPrivatePodId = "";
   let bPublicPodId = "";
+  let bMatchupId = "";
+  let bModelId = "";
 
   try {
-    await admin.insert(catalogItems).values({
-      id: itemId,
-      kind: "movie",
-      title: `Isolation fixture ${stamp}`,
-      subtitle: "rls-test",
-      year: 2020,
-    });
+    await admin.insert(catalogItems).values([
+      {
+        id: itemId,
+        kind: "movie",
+        title: `Isolation fixture ${stamp}`,
+        subtitle: "rls-test",
+        year: 2020,
+      },
+      {
+        id: opponentId,
+        kind: "movie",
+        title: `Isolation fixture opponent ${stamp}`,
+        subtitle: "rls-test",
+        year: 2021,
+      },
+    ]);
     await withOrg(A, async (tx) => {
       await tx.insert(orgs).values({ id: A, name: `Org A ${stamp}`, slug: `org-a-${stamp}` });
       await tx.insert(locations).values({ orgId: A, name: "A Main", timezone: "UTC" });
@@ -132,6 +147,29 @@ async function main(): Promise<void> {
         body: "Org B private review",
         reviewedAt: new Date(),
       });
+      // The comparison log and the fitted model are the ranking pipeline's own
+      // tables and were never probed: reading either across tenants would leak
+      // who someone compared and how strongly the model believes it.
+      const [bMatchup] = await tx
+        .insert(itemMatchups)
+        .values({
+          orgId: B,
+          itemId,
+          opponentId,
+          result: "win",
+          outcome: "a",
+          itemEloBefore: 1500,
+          itemEloAfter: 1516,
+          opponentEloBefore: 1500,
+          opponentEloAfter: 1484,
+        })
+        .returning();
+      bMatchupId = bMatchup!.id;
+      const [bModel] = await tx
+        .insert(rankingModels)
+        .values({ orgId: B, kind: "movie", state: { items: [] }, comparisons: 1 })
+        .returning();
+      bModelId = bModel!.id;
     });
 
     const aLocations = await withOrg(A, (tx) => tx.select().from(locations));
@@ -190,6 +228,43 @@ async function main(): Promise<void> {
     check("org A cannot read org B's notifications", crossTenant.notifications.length === 0);
     check("org A cannot read org B's reviews", crossTenant.reviews.length === 0);
 
+    // --- the two ranking-pipeline tables, cross-tenant ---
+    const crossRanking = await withOrg(A, async (tx) => ({
+      matchups: await tx.select().from(itemMatchups).where(eq(itemMatchups.orgId, B)),
+      models: await tx.select().from(rankingModels).where(eq(rankingModels.orgId, B)),
+    }));
+    check("org A cannot read org B's comparison log", crossRanking.matchups.length === 0);
+    check("org A cannot read org B's fitted ranking model", crossRanking.models.length === 0);
+
+    const matchupById = await withOrg(A, (tx) =>
+      tx.select().from(itemMatchups).where(eq(itemMatchups.id, bMatchupId)),
+    );
+    check("cross-org matchup read by id returns nothing", matchupById.length === 0);
+    const modelById = await withOrg(A, (tx) =>
+      tx.select().from(rankingModels).where(eq(rankingModels.id, bModelId)),
+    );
+    check("cross-org ranking model read by id returns nothing", modelById.length === 0);
+
+    // RLS must also refuse a write that names another tenant, not just hide reads.
+    let crossWriteBlocked = false;
+    try {
+      await withOrg(A, (tx) =>
+        tx.insert(rankingModels).values({ orgId: B, kind: "tv", state: { items: [] }, comparisons: 0 }),
+      );
+    } catch {
+      crossWriteBlocked = true;
+    }
+    check("org A cannot write a ranking model for org B", crossWriteBlocked);
+
+    const ownRanking = await withOrg(B, async (tx) => ({
+      matchups: await tx.select().from(itemMatchups).where(eq(itemMatchups.orgId, B)),
+      models: await tx.select().from(rankingModels).where(eq(rankingModels.orgId, B)),
+    }));
+    check(
+      "org B still reads its own comparison log and model",
+      ownRanking.matchups.length === 1 && ownRanking.models.length === 1,
+    );
+
     const ownTenant = await withOrg(B, async (tx) => ({
       ratings: await tx.select().from(itemRatings).where(eq(itemRatings.orgId, B)),
       pods: await tx.select().from(pods).where(eq(pods.orgId, B)),
@@ -210,7 +285,7 @@ async function main(): Promise<void> {
     check("cross-org rating read by id returns nothing", crossByRatingId.length === 0);
   } finally {
     await admin.delete(orgs).where(inArray(orgs.id, [A, B]));
-    await admin.delete(catalogItems).where(eq(catalogItems.id, itemId));
+    await admin.delete(catalogItems).where(inArray(catalogItems.id, [itemId, opponentId]));
   }
 
   console.log("---");

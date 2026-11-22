@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { Badge, Button, Card, CardTitle, Field, Input, Select, Textarea } from "@appolo/ui";
 import { capabilitiesFor, can } from "@appolo/core";
@@ -129,6 +130,22 @@ export default async function SettingsPage({
         </p>
       </Card>
 
+      {session.user.isModerator ? (
+        <Card>
+          <CardTitle action={<Badge tone="brand">Moderator</Badge>}>Trust &amp; safety</CardTitle>
+          <p className="text-sm text-muted">
+            Review abuse reports for public reviews, profiles, and comments. Hiding keeps the content in
+            place but removes it from public feeds; removing is the stronger action.
+          </p>
+          <Link
+            href="/app/moderation"
+            className="mt-3 inline-flex h-9 items-center rounded-lg border border-border bg-surface-2 px-3 text-sm text-ink hover:border-border-strong"
+          >
+            Open moderation queue
+          </Link>
+        </Card>
+      ) : null}
+
       <Card>
         <CardTitle
           action={<Badge>{savedReplies.length} saved</Badge>}
@@ -193,6 +210,10 @@ export default async function SettingsPage({
               returning visitor keeps their thread.
             </p>
             <pre
+              // Focusable so the snippet can be scrolled with the keyboard; it is
+              // not an interactive control, but tabindex is the only way to make a
+              // scroll container reachable.
+              // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
               tabIndex={0}
               aria-label="Web chat embed code"
               className="mt-3 overflow-x-auto rounded-lg border border-border bg-surface-2 p-3 text-xs text-muted"

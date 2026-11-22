@@ -208,6 +208,42 @@ await check("catalog returns at least four movie titles", () => {
   assert.ok(items.length >= 4, `only ${items.length} items`);
 });
 
+// A brand-new account has every title at the same Elo, so nothing about the
+// data distinguishes one opponent from another: the only thing that could pick
+// a suggestion is the order rows happen to arrive in. The old fallback took
+// pool[0] after sorting by id, which made every fresh account face the
+// lexicographically smallest UUID — a selection bug that is invisible in unit
+// tests and obvious in the product.
+await check("a fresh account is not offered the smallest-uuid opponent", async () => {
+  const fresh = await signup("opponent");
+  try {
+    const page = await call("/api/catalog?kind=tv&limit=8", { cookie: fresh.cookie });
+    assert.equal(page.status, 200, `catalog returned ${page.status}`);
+    const ids = (page.json?.items ?? []).map((item) => item.id).sort();
+    assert.ok(ids.length >= 4, `need four tv titles, got ${ids.length}`);
+
+    const picks = [];
+    for (const target of ids.slice(0, 3)) {
+      const matchup = await call(`/api/rankings/${target}/matchup`, { cookie: fresh.cookie });
+      assert.equal(matchup.status, 200, `matchup returned ${matchup.status}: ${matchup.text.slice(0, 120)}`);
+      const opponent = matchup.json?.opponent?.id;
+      assert.ok(opponent, "no opponent was suggested");
+      assert.notEqual(opponent, target, "an item cannot be compared with itself");
+      assert.match(opponent, /^[0-9a-f-]{36}$/, "the opponent must be a catalog id");
+      picks.push({ target, opponent });
+    }
+
+    // Following id order would produce exactly this pattern for the first two
+    // targets. Jitter breaks it; three targets in a row is not a coincidence.
+    assert.ok(
+      picks[0].opponent !== ids[1] || picks[1].opponent !== ids[0] || picks[2].opponent !== ids[2],
+      `selection followed uuid order: ${JSON.stringify(picks)} vs ${JSON.stringify(ids)}`,
+    );
+  } finally {
+    await deleteAccount(fresh.cookie);
+  }
+});
+
 // Both accounts are still unrated here. "Her" gives the search fixture an
 // exact title, title prefixes (Hero, Heroes), subtitle prefixes (Hermann
 // Hesse) and fuzzy matches (Werner Herzog), so this checks the real ordering

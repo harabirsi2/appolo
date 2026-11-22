@@ -77,7 +77,6 @@ const beta = await signup("beta");
 const catalog = await call("/api/catalog?kind=movie&limit=6", { cookie: alpha.cookie });
 const items = catalog.json.items.slice(0, 6);
 const scores = [9.5, 9, 8.5, 7.5, 7, 6.5];
-const ratings = [];
 for (let i = 0; i < items.length; i += 1) {
   const r = await call(`/api/rankings/${items[i].id}/manual`, { method: "POST", body: { score: scores[i] }, cookie: alpha.cookie });
   assert.equal(r.status, 200, `alpha rate failed: ${r.text.slice(0, 120)}`);
@@ -90,7 +89,6 @@ const alphaRankings = await call("/api/rankings?kind=movie", { cookie: alpha.coo
 const betaRankings0 = await call("/api/rankings?kind=movie", { cookie: beta.cookie });
 
 /* ------------------------------ watchlist ------------------------------ */
-let watching = null;
 await check("watchlist toggles on and lists the item", async () => {
   const on = await call("/api/watchlist", { method: "POST", body: { itemId: items[0].id }, cookie: alpha.cookie });
   assert.equal(on.status, 200, on.text.slice(0, 120));
@@ -98,7 +96,6 @@ await check("watchlist toggles on and lists the item", async () => {
   const list = await call("/api/watchlist", { cookie: alpha.cookie });
   assert.equal(list.status, 200);
   assert.ok(list.json.items.some((i) => i.id === items[0].id), "watchlist missing item");
-  watching = list.json.items.length;
 });
 await check("watchlist rejects a non-uuid item", async () => {
   const bad = await call("/api/watchlist", { method: "POST", body: { itemId: "nope" }, cookie: alpha.cookie });
@@ -292,7 +289,6 @@ await check("set podium order for ranked titles", async () => {
   assert.deepEqual(result.json.profile.podiumOrder?.movie, ids);
 });
 await check("podium drops unranked titles", async () => {
-  const unrated = items[5].id; // not rated by alpha? items[5] IS rated. use a random uuid
   const random = "00000000-0000-4000-8000-000000000000";
   const result = await call("/api/profile/podium", { method: "POST", body: { kind: "movie", itemIds: [random, items[0].id] }, cookie: alpha.cookie });
   assert.equal(result.status, 200);
