@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { catalogLeaderboard, catalogCount, catalogKindCounts, rankedRatings, weeklyMovers, type LeaderboardSort } from "@/lib/services/rankings";
 import { followingOrgIds, tasteTwins } from "@/lib/services/social";
 import { MediaArt } from "@/components/media-art";
+import { DataAttributionSummary } from "@/components/data-attribution";
 import { Avatar } from "@/components/podiums";
 import { KindIcon } from "@/components/kind-icon";
 import { FollowButton } from "@/components/follow-button";
@@ -194,6 +195,10 @@ export default async function BrowsePage({
           ) : null}
         </>
       )}
+
+      {/* Credit for the provider-backed rows above; providers that are not in
+          this page's data are not credited. */}
+      <DataAttributionSummary sources={items.map((item) => item.source)} className="mt-5 text-center" />
 
       {movers.length > 0 ? (
         <section className="mt-9">

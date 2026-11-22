@@ -150,9 +150,12 @@ duplicate detection and link-spam scoring — with `flag` as the default action 
 
 ## 4. Provider terms
 
-See [PROVIDER-TERMS.md](./PROVIDER-TERMS.md). TMDB attribution is now rendered on
-every item page sourced from a provider (`components/data-attribution.tsx`); the
-remaining clauses are a checklist with a decision per provider.
+See [PROVIDER-TERMS.md](./PROVIDER-TERMS.md). Provider credit is rendered on every
+surface that shows provider data — item pages via `DataAttribution`, search
+results and browse via `DataAttributionSummary` — and every provider request
+identifies the client through `CATALOG_USER_AGENT`. The remaining clauses (cache
+TTL, iTunes request spacing, RAWG commercial use) are a checklist with a decision
+and an hour estimate each.
 
 ---
 

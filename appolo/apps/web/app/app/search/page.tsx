@@ -14,6 +14,7 @@ import {
   suggestedProfiles,
 } from "@/lib/services/social";
 import { MediaArt } from "@/components/media-art";
+import { DataAttributionSummary } from "@/components/data-attribution";
 import { Avatar, CategoryTile, Icon, ScoreText } from "@/components/podiums";
 import { KindIcon } from "@/components/kind-icon";
 import { FollowButton } from "@/components/follow-button";
@@ -231,6 +232,8 @@ export default async function SearchPage({
                 </Link>
               </div>
             ) : null}
+            {/* Provider terms require the credit wherever their data is shown. */}
+            <DataAttributionSummary sources={items.map((item) => item.source)} className="mt-4" />
           </section>
         </div>
       ) : (

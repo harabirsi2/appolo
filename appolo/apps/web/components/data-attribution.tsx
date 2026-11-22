@@ -47,6 +47,44 @@ function isProvider(value: string | null | undefined): value is Provider {
   return value === "tmdb" || value === "itunes" || value === "openlibrary" || value === "rawg";
 }
 
+/**
+ * Credit for a list of items drawn from several providers at once (search
+ * results, browse rails). Renders each provider that actually appears in the
+ * page's data, in a stable order, so the page does not credit a source it did
+ * not show.
+ */
+export function DataAttributionSummary({
+  sources,
+  className = "",
+}: {
+  sources: Array<string | null | undefined>;
+  className?: string;
+}) {
+  const present = (Object.keys(PROVIDERS) as Provider[]).filter((provider) =>
+    sources.some((source) => source === provider),
+  );
+  if (present.length === 0) return null;
+
+  return (
+    <p className={`text-[11px] leading-relaxed text-muted-2 ${className}`.trim()}>
+      {present.map((provider, index) => (
+        <span key={provider}>
+          {index > 0 ? " " : ""}
+          {PROVIDERS[provider].note}{" "}
+          <a
+            href={PROVIDERS[provider].href}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline decoration-white/25 underline-offset-2 hover:text-ink"
+          >
+            {PROVIDERS[provider].label}
+          </a>
+        </span>
+      ))}
+    </p>
+  );
+}
+
 export function DataAttribution({ source, className = "" }: { source: string | null; className?: string }) {
   // Manually entered items carry no third-party data, so they need no credit.
   if (!isProvider(source)) return null;

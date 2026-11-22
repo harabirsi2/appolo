@@ -92,12 +92,25 @@ function allowRequest(): boolean {
   return true;
 }
 
+/**
+ * User-Agent for every provider call.
+ *
+ * Open Library's API etiquette asks clients to identify themselves with a
+ * contactable UA rather than a library default, and the same string is polite
+ * to TMDB and Apple. Set CATALOG_USER_AGENT to add a real contact URL before
+ * enabling providers in production; the fallback stays identifiable.
+ */
+function catalogUserAgent(): string {
+  const configured = process.env.CATALOG_USER_AGENT?.trim();
+  return configured && configured.length > 0 ? configured : "Appolo/0.1 (catalog search; +https://appolo.app)";
+}
+
 async function getJson(url: string, headers: Record<string, string> = {}): Promise<Json | null> {
   if (!allowRequest()) return null;
   try {
     const response = await fetch(url, {
       signal: AbortSignal.timeout(TIMEOUT_MS),
-      headers: { accept: "application/json", "user-agent": "Appolo/0.1 (catalog search)", ...headers },
+      headers: { accept: "application/json", "user-agent": catalogUserAgent(), ...headers },
     });
     if (!response.ok) return null;
     return (await response.json()) as Json;
