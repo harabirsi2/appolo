@@ -53,7 +53,7 @@ const MIN_SCREENSHOT_BYTES = 20_000;
 const MAX_DIFF_RATIO = 0.001;
 
 const SCREENS = [
-  { name: "landing", path: "/", title: "Appolo", heading: "anything", public: true },
+  { name: "landing", path: "/", title: "Appolo", heading: "Which is better", public: true },
   { name: "login", path: "/login", title: "Sign in", heading: "Welcome back", public: true },
   { name: "home", path: "/app", title: "Home", heading: "Hey, Demo" },
   { name: "rankings", path: "/app/rankings?kind=movie", title: "Rankings", heading: "Rankings" },
