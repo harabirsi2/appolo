@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { withRequestLog } from "@/lib/observability";
 import { catalogQuerySchema, firstIssue } from "@appolo/core";
 import { getSession } from "@/lib/session";
 import { apiError, jsonError } from "@/lib/api";
@@ -6,7 +7,7 @@ import { listCatalog, ratedItemIds } from "@/lib/services/rankings";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest): Promise<NextResponse> {
+async function handleGET(request: NextRequest): Promise<NextResponse> {
   try {
     const session = await getSession();
     if (!session) return jsonError("Not authenticated", 401, "UNAUTHENTICATED");
@@ -32,3 +33,5 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return apiError(error);
   }
 }
+
+export const GET = withRequestLog("catalog", handleGET);

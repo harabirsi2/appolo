@@ -19,8 +19,12 @@ Every request gets one id, and that id is on every line about the request.
   keys `ts / level / event`, plus event-specific fields. Secret-looking keys are
   renamed to `*_redacted` before they can be written.
 - `withRequestLog(name, handler)` wraps a route and logs exactly one completion
-  line with `status` and `durationMs`. Wired into `vote`, `undo`, `review` and
-  `health`; the pattern is one line at the bottom of a route file:
+  line with `status` and `durationMs`. Wired into every user-facing API route:
+  `vote`, `undo`, `review`, `health`, `search`, `catalog`, `reports`,
+  `report-abuse`, `review-requests-list`, `review-requests-send` and
+  `review-requests-bulk`. `browse` has no API route — it is rendered on the
+  server — so its requests are covered by the middleware start line only. The
+  pattern is one line at the bottom of a route file:
 
   ```ts
   async function handle(request: NextRequest, { params }: Params) { /* … */ }

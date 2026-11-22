@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { withRequestLog } from "@/lib/observability";
 import { apiError, jsonError, rateLimited } from "@/lib/api";
 import { getSession } from "@/lib/session";
 import { consumeAction, REPORT_WINDOW } from "@/lib/services/action-rate-limit";
@@ -6,7 +7,7 @@ import { reportContent, reportContentSchema } from "@/lib/services/moderation";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+async function handlePOST(request: NextRequest): Promise<NextResponse> {
   try {
     const session = await getSession();
     if (!session) return jsonError("Not authenticated", 401, "UNAUTHENTICATED");
@@ -29,3 +30,5 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return apiError(error);
   }
 }
+
+export const POST = withRequestLog("report-abuse", handlePOST);

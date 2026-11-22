@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { withRequestLog } from "@/lib/observability";
 import { can, bulkReviewRequestSchema, firstIssue } from "@appolo/core";
 import { getSession } from "@/lib/session";
 import { apiError, jsonError } from "@/lib/api";
@@ -6,7 +7,7 @@ import { sendBulkReviewRequests } from "@/lib/services/reviews";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+async function handlePOST(request: NextRequest): Promise<NextResponse> {
   try {
     const session = await getSession();
     if (!session) return jsonError("Not authenticated", 401, "UNAUTHENTICATED");
@@ -30,3 +31,5 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return apiError(error);
   }
 }
+
+export const POST = withRequestLog("review-requests-bulk", handlePOST);

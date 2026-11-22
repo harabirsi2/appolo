@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { withRequestLog } from "@/lib/observability";
 import { can } from "@appolo/core";
 import { getSession } from "@/lib/session";
 import { apiError, jsonError } from "@/lib/api";
@@ -6,7 +7,7 @@ import { reviewReport } from "@/lib/services/reports";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest): Promise<NextResponse> {
+async function handleGET(request: NextRequest): Promise<NextResponse> {
   try {
     const session = await getSession();
     if (!session) return jsonError("Not authenticated", 401, "UNAUTHENTICATED");
@@ -20,3 +21,5 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return apiError(error);
   }
 }
+
+export const GET = withRequestLog("reports", handleGET);

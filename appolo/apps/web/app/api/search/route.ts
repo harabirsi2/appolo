@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { withRequestLog } from "@/lib/observability";
 import { isSearchCategory } from "@appolo/core";
 import { getSession } from "@/lib/session";
 import { apiError, jsonError } from "@/lib/api";
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
  * new is upserted into the shared catalog. `category` accepts the search
  * lens values (movie, tv, anime, music, podcast, book, game).
  */
-export async function GET(request: NextRequest): Promise<NextResponse> {
+async function handleGET(request: NextRequest): Promise<NextResponse> {
   try {
     const session = await getSession();
     if (!session) return jsonError("Not authenticated", 401, "UNAUTHENTICATED");
@@ -40,3 +41,5 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return apiError(error);
   }
 }
+
+export const GET = withRequestLog("search", handleGET);
