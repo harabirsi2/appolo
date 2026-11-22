@@ -33,8 +33,9 @@ single rating.
  ┌────────────────────────────────────┐
  │ processor: claim row (atomic       │
  │ update … returning), load provider │
- │ details, download + hash the cover,│
- │ update the item                    │
+ │ details, cache the cover, then for │
+ │ TV: episodes for ≤N seasons (one   │
+ │ request each), then entity rows    │
  └────────────────┬───────────────────┘
         success   │   failure
         ┌─────────┴──────────┐
@@ -63,6 +64,11 @@ file, no repeated downloads, no hotlink rot.
 | Request path | `CATALOG_PROVIDER_REQ_PER_MIN` | 60 | shared per instance, stays under every provider plan |
 | Worker | `CATALOG_WORKER_REQ_PER_MIN` | 60 | BullMQ rolling-window `limiter` |
 | Attempts | `CATALOG_MAX_ATTEMPTS` | 6 | 30s → 60 → 120 → … capped at 1h |
+| Episodes | `CATALOG_SEASON_FETCH_LIMIT` | 10 | per-season episode requests per TV item; `0` disables episodes |
+
+The limiter counts *jobs*, not provider calls, and one TV job may spend
+`1 + CATALOG_SEASON_FETCH_LIMIT` calls (details + one per season). Budget for
+that when raising `CATALOG_WORKER_REQ_PER_MIN`, or lower the season limit.
 
 Raising the request-path cap is a single env change; it is separate from the
 worker cap on purpose, because the two run in different processes and each has
@@ -91,6 +97,19 @@ first (title, image, year, kind = music/tv) and then the subtype row that
 points back at it, in one transaction. Nothing in the ranking model, the Elo
 maths or the snapshots needed to change.
 
+Source of each entity, per provider:
+
+| Entity | Comes from | Cost |
+| --- | --- | --- |
+| Artist | `details().credits` (cast, director, author, developer) | free, embedded |
+| Season | `details().metadata.seasonList`, falling back to `number_of_seasons` shells | free, embedded |
+| Episode | `seasonEpisodes(candidate, seasonNumber)` (`/tv/{id}/season/{n}`) | one request per season, capped |
+
+Episodes are the only entity that needs its own call, so the worker asks for at
+most `CATALOG_SEASON_FETCH_LIMIT` seasons per item and a failed season is
+skipped rather than failing the item. `materializeEntities` is idempotent, so a
+later run fills in seasons the cap skipped once the limit is raised.
+
 ## 4. Games provider: RAWG
 
 Chosen over IGDB for a solo dev:
@@ -110,7 +129,7 @@ film.
 
 ## 5. Duplicates
 
-Detection (`apps/web/lib/services/catalog-dedupe.ts` → `findDuplicates`) buckets
+Detection (`apps/web/lib/services/catalog-merge.ts` → `findDuplicates`) buckets
 rows by `kind + titleKey(title)` and scores each pair:
 
 1. same `external_ref` → duplicate (score 1)
@@ -145,7 +164,7 @@ ratings, but the source row itself is gone.
 Nothing. Proof: `packages/db/src/catalog-merge-test.ts` (13 assertions, all
 passing — run `pnpm --filter @appolo/db merge-test`).
 
-The migration is additive (`00025`):
+The migration is additive (`0025`):
 
 - no existing column is dropped or retyped; `catalog_items` gains `entity_type`,
   `enrichment_status`, `canonical_item_id`, `normalized_title`, all with

@@ -4,6 +4,7 @@ import type {
   MetadataConfig,
   MetadataCredit,
   MetadataDetails,
+  MetadataEpisode,
   SearchCategory,
 } from "./types";
 import { httpsOnly, list, requestJson, slugifyPerson, text, yearOf, type Json } from "./shared";
@@ -210,12 +211,47 @@ async function details(candidate: MetadataCandidate, config: MetadataConfig): Pr
   };
 }
 
+/**
+ * Episodes for one season. `/tv/{id}` embeds the season list but not its
+ * episodes, so this is the one entity that costs a request per season; the
+ * worker caps how many seasons it asks for.
+ */
+async function seasonEpisodes(
+  candidate: MetadataCandidate,
+  seasonNumber: number,
+  config: MetadataConfig,
+): Promise<MetadataEpisode[]> {
+  const key = apiKey(config);
+  if (!key || candidate.source !== "tmdb" || candidate.kind !== "tv") return [];
+  if (!Number.isInteger(seasonNumber) || seasonNumber <= 0) return [];
+  const data = await requestJson(
+    endpoint(`/tv/${candidate.externalId}/season/${seasonNumber}`, key),
+    { fetchImpl: config.fetchImpl, timeoutMs: config.timeoutMs, headers: headers(key) },
+  );
+  if (!data) return [];
+  const out: MetadataEpisode[] = [];
+  for (const row of list(data.episodes)) {
+    const episodeNumber = typeof row.episode_number === "number" ? row.episode_number : 0;
+    // Episode 0 is how TMDB reports specials, which are not rateable episodes.
+    if (episodeNumber <= 0) continue;
+    out.push({
+      seasonNumber: typeof row.season_number === "number" ? row.season_number : seasonNumber,
+      episodeNumber,
+      title: text(row.name, 200) || null,
+      airDate: text(row.air_date, 20) || null,
+      runtime: typeof row.runtime === "number" ? row.runtime : null,
+    });
+  }
+  return out;
+}
+
 export function createTmdbAdapter(config: MetadataConfig = {}): MetadataAdapter {
   return {
     source: "tmdb",
     supports: (category) => category === "movie" || category === "tv" || category === "anime",
     search: (category, query, limit) => searchTmdb(category, query, limit, config),
     details: (candidate) => details(candidate, config),
+    seasonEpisodes: (candidate, seasonNumber) => seasonEpisodes(candidate, seasonNumber, config),
   };
 }
 

@@ -6,7 +6,13 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { Queue, Worker, type Job } from "bullmq";
 import type IORedis from "ioredis";
 import { schema, type Db } from "@appolo/db";
-import { loadMetadataDetails, type MetadataCandidate, type MetadataSource } from "@appolo/core";
+import {
+  loadMetadataDetails,
+  loadSeasonEpisodes,
+  type MetadataCandidate,
+  type MetadataEpisode,
+  type MetadataSource,
+} from "@appolo/core";
 import { materializeEntities } from "../../web/lib/services/catalog-entities";
 
 /**
@@ -32,6 +38,9 @@ const CACHE_DIR = process.env.CATALOG_CACHE_DIR?.trim() || path.resolve(process.
 const CACHE_PUBLIC_PATH = (process.env.CATALOG_CACHE_PUBLIC_PATH?.trim() || "/cache/covers").replace(/\/$/, "");
 const SWEEP_MS = 30_000;
 const STUCK_MS = 15 * 60_000;
+// Episodes are the only entity that costs a request per season, so one TV job
+// may spend at most 1 + this many provider calls. Set it to 0 to skip episodes.
+const SEASON_FETCH_LIMIT = clampInt(process.env.CATALOG_SEASON_FETCH_LIMIT, 10, 0, 60);
 
 function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
   const value = Number(raw ?? "");
@@ -100,6 +109,26 @@ async function cacheCover(url: string | null | undefined): Promise<string | null
 
 function backoffSeconds(attempts: number): number {
   return Math.min(3_600, 30 * 2 ** Math.max(0, attempts));
+}
+
+/**
+ * Seasons worth asking for episodes, newest first out of the provider's list
+ * when the show has more seasons than the cap. Season 0 (specials) is skipped.
+ */
+function seasonNumbers(metadata: Record<string, unknown>, limit: number): number[] {
+  if (limit <= 0) return [];
+  const listed = Array.isArray(metadata.seasonList) ? metadata.seasonList : [];
+  const numbers: number[] = [];
+  for (const entry of listed) {
+    if (!entry || typeof entry !== "object") continue;
+    const value = (entry as Record<string, unknown>).seasonNumber;
+    if (typeof value === "number" && Number.isInteger(value) && value > 0) numbers.push(value);
+  }
+  if (numbers.length === 0) {
+    const count = typeof metadata.seasons === "number" ? metadata.seasons : 0;
+    for (let n = 1; n <= count; n += 1) numbers.push(n);
+  }
+  return [...new Set(numbers)].sort((a, b) => a - b).slice(0, limit);
 }
 
 /** Mark the row done, or schedule a retry with exponential backoff. */
@@ -186,6 +215,17 @@ async function processOne(sql: postgres.Sql, db: Db, queueId: string): Promise<"
              enrichment_status = 'ready'
        where id = ${item.id}`;
 
+    // Episodes need one provider call per season (the season list in `details`
+    // carries no episode rows). The fan-out is capped and a season that fails
+    // is skipped, so a flaky endpoint cannot fail an otherwise good item.
+    const episodes: MetadataEpisode[] = [];
+    if (row.kind === "tv") {
+      const config = metadataConfig();
+      for (const seasonNumber of seasonNumbers(details.metadata ?? {}, SEASON_FETCH_LIMIT)) {
+        episodes.push(...(await loadSeasonEpisodes(details, seasonNumber, config)));
+      }
+    }
+
     // Artists, seasons and episodes are rateable rows, created in one
     // transaction. A failure here must not lose the metadata we just wrote, so
     // it is logged and the queue row still completes.
@@ -196,6 +236,7 @@ async function processOne(sql: postgres.Sql, db: Db, queueId: string): Promise<"
       year: item.year,
       source: row.source,
       details,
+      episodes,
     }).catch((error: unknown) => {
       console.error(`[worker] entity sync failed for ${row.external_ref}:`, (error as Error).message);
       return null;

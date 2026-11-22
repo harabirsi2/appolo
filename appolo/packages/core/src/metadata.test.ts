@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { bayesianScore, eloForScore, scoreForElo, scoreStepBounds } from "./ranking.ts";
-import { createItunesAdapter, createOpenLibraryAdapter, createRawgAdapter } from "./metadata/index.ts";
+import { createItunesAdapter, createOpenLibraryAdapter, createRawgAdapter, createTmdbAdapter } from "./metadata/index.ts";
 import { isSearchCategory, mediaKindForCategory } from "./metadata/types.ts";
 import { tmdbInternals } from "./metadata/tmdb.ts";
 
@@ -53,6 +53,65 @@ test("TMDB candidates store provider ids and absolute artwork URLs", () => {
   assert.ok(candidate.coverUrl?.startsWith("https://image.tmdb.org/t/p/w500/"));
   assert.deepEqual(candidate.genres, ["Action", "Sci-Fi"]);
   assert.equal(candidate.year, 1999);
+});
+
+test("TMDB maps a season's episodes and skips specials", async () => {
+  const urls: string[] = [];
+  const adapter = createTmdbAdapter({
+    tmdbApiKey: "test-key",
+    fetchImpl: (async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return new Response(
+        JSON.stringify({
+          episodes: [
+            { season_number: 2, episode_number: 1, name: "Pilot", air_date: "2021-01-02", runtime: 48 },
+            { season_number: 2, episode_number: 0, name: "Special" },
+            { season_number: 2, episode_number: 2, name: "Second", air_date: null, runtime: null },
+          ],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch,
+  });
+
+  const candidate = tmdbInternals.candidateFor("tv", "tv", {
+    id: 1399,
+    name: "Game of Thrones",
+    first_air_date: "2011-04-17",
+  });
+  assert.ok(candidate);
+  const episodes = await adapter.seasonEpisodes!(candidate, 2);
+
+  assert.equal(episodes.length, 2, "episode 0 (specials) is not rateable");
+  assert.deepEqual(episodes[0], {
+    seasonNumber: 2,
+    episodeNumber: 1,
+    title: "Pilot",
+    airDate: "2021-01-02",
+    runtime: 48,
+  });
+  assert.equal(episodes[1]!.airDate, null, "a missing air date stays null");
+  assert.ok(urls[0]!.includes("/tv/1399/season/2"), urls[0]);
+  assert.ok(urls[0]!.includes("api_key=test-key"), "the key is sent as a query param");
+});
+
+test("TMDB season episodes stay offline without a key or for a non-TV item", async () => {
+  let calls = 0;
+  const adapter = createTmdbAdapter({
+    tmdbApiKey: "test-key",
+    fetchImpl: (async () => {
+      calls += 1;
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch,
+  });
+  const movie = tmdbInternals.candidateFor("movie", "movie", { id: 603, title: "The Matrix" });
+  assert.ok(movie);
+  assert.deepEqual(await adapter.seasonEpisodes!(movie, 1), []);
+
+  const tv = tmdbInternals.candidateFor("tv", "tv", { id: 1399, name: "Game of Thrones" });
+  assert.ok(tv);
+  assert.deepEqual(await createTmdbAdapter({}).seasonEpisodes!(tv, 1), []);
+  assert.equal(calls, 0, "no request is made when the item or the key cannot answer");
 });
 
 test("iTunes adapter maps 600px artwork and album ids", async () => {

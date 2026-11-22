@@ -46,9 +46,10 @@ export interface EntitySyncInput {
   source: string;
   details: MetadataDetails & { metadata?: Record<string, unknown>; episodes?: EpisodeInput[] };
   /**
-   * Optional episode payload, either here or on `details.episodes`. The worker
-   * passes none today: TMDB embeds seasons on the series but needs one request
-   * per season for episodes, which the enrichment step does not spend.
+   * Optional episode payload, either here or on `details.episodes`. Episodes
+   * are the one entity no provider embeds: TMDB needs one request per season,
+   * so the worker fetches at most `CATALOG_SEASON_FETCH_LIMIT` seasons and
+   * passes the rows in here.
    */
   episodes?: EpisodeInput[];
 }

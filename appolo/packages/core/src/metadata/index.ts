@@ -1,4 +1,11 @@
-import type { MetadataAdapter, MetadataCandidate, MetadataConfig, MetadataSource, SearchCategory } from "./types";
+import type {
+  MetadataAdapter,
+  MetadataCandidate,
+  MetadataConfig,
+  MetadataEpisode,
+  MetadataSource,
+  SearchCategory,
+} from "./types";
 import { createItunesAdapter } from "./itunes";
 import { createOpenLibraryAdapter } from "./openlibrary";
 import { createRawgAdapter } from "./rawg";
@@ -70,4 +77,20 @@ export async function loadMetadataDetails(
     trailerUrl: details.trailerUrl ?? candidate.trailerUrl,
     metadata: { ...candidate.metadata, ...details.metadata, credits: details.credits ?? [] },
   };
+}
+
+/**
+ * Episode list for one TV season. Returns [] when no adapter can answer, so a
+ * caller never has to branch on provider capability.
+ */
+export async function loadSeasonEpisodes(
+  candidate: MetadataCandidate,
+  seasonNumber: number,
+  config: MetadataConfig = {},
+): Promise<MetadataEpisode[]> {
+  const adapter = buildMetadataAdapters(config).find(
+    (entry) => entry.source === candidate.source && entry.seasonEpisodes,
+  );
+  if (!adapter?.seasonEpisodes) return [];
+  return adapter.seasonEpisodes(candidate, seasonNumber).catch(() => []);
 }

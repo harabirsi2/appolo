@@ -69,11 +69,26 @@ export interface MetadataDetails {
   credits?: MetadataCredit[];
 }
 
+/** One episode, as reported by a provider's per-season endpoint. */
+export interface MetadataEpisode {
+  seasonNumber: number;
+  episodeNumber: number;
+  title: string | null;
+  airDate: string | null;
+  runtime: number | null;
+}
+
 export interface MetadataAdapter {
   source: MetadataSource;
   supports(category: SearchCategory): boolean;
   search(category: SearchCategory, query: string, limit: number): Promise<MetadataCandidate[]>;
   details?(candidate: MetadataCandidate): Promise<MetadataDetails | null>;
+  /**
+   * Episode list for one season. Optional because it costs one request per
+   * season, unlike the season list that `details()` already embeds; the worker
+   * calls it with a cap so a long-running show cannot drain the quota.
+   */
+  seasonEpisodes?(candidate: MetadataCandidate, seasonNumber: number): Promise<MetadataEpisode[]>;
 }
 
 export interface MetadataConfig {
