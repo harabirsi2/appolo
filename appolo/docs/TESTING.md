@@ -6,6 +6,9 @@ What runs, how to run it, and what is not covered.
 
 - PostgreSQL reachable through `DATABASE_URL` (see `docker-compose.yml` or a
   local instance; `pnpm db:migrate && pnpm db:seed` for a fresh database).
+- `pnpm visual` and `pnpm a11y` sign in as the demo account, so seed with
+  `SEED_DEMO=1 pnpm db:seed`. A plain `pnpm db:seed` deliberately creates no
+  account — only the shared catalog and the public tour profile (`/demo`).
 - The app running at `http://localhost:3000` for the browser suites:
   `pnpm dev:web` or `pnpm build && pnpm --filter @appolo/web start`.
 - Chromium for Playwright once per machine:

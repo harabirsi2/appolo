@@ -5,7 +5,15 @@ import path from "node:path";
 import sharp from "sharp";
 import { fileURLToPath } from "node:url";
 import { eq, and, sql } from "drizzle-orm";
-import { hashPassword, sha256, DEFAULT_REVIEW_TEMPLATES, START_ELO, nextElo } from "@appolo/core";
+import {
+  hashPassword,
+  sha256,
+  DEFAULT_REVIEW_TEMPLATES,
+  START_ELO,
+  nextElo,
+  TOUR_POD_SLUG,
+  TOUR_PROFILE_USERNAME,
+} from "@appolo/core";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pkgRoot = path.resolve(here, "..");
@@ -66,6 +74,12 @@ const {
 const db = getAdminDb();
 
 const SEED_SLUG = "demo";
+/**
+ * The demo account is opt-in. Without `SEED_DEMO=1` the seed still creates the
+ * shared catalog and the public tour profiles (so `/demo` and the public pages
+ * have real content), but it creates no user and no password at all.
+ */
+const DEMO_SEED = process.env.SEED_DEMO === "1";
 const email = (process.env.SEED_EMAIL ?? "owner@appolo.test").trim().toLowerCase();
 const password = process.env.SEED_PASSWORD ?? "appolo-demo-9f3c2a7e";
 
@@ -995,7 +1009,7 @@ async function seedMatchupHistory(orgId: string, idByKey: Map<string, string>): 
 }
 
 /** Seed the shared catalog and, on first run, a demo org's taste profile. */
-async function seedMedia(orgId: string): Promise<void> {
+async function seedMedia(orgId: string | null): Promise<void> {
   await db
     .insert(catalogItems)
     .values(
@@ -1057,6 +1071,10 @@ async function seedMedia(orgId: string): Promise<void> {
         .onConflictDoNothing();
     }
   }
+
+  // Without an owner org there is no demo taste profile to fill; the shared
+  // catalog above is already complete.
+  if (!orgId) return;
 
   await withOrgAdmin(orgId, async (tx) => {
     for (const item of MEDIA_CATALOG) {
@@ -1131,12 +1149,12 @@ const COMMUNITY: CommunityMember[] = [
   },
 ];
 
-async function seedCommunity(ownerOrgId: string, ownerName: string): Promise<void> {
-  const catalogRows = await db
-    .select({ id: catalogItems.id, title: catalogItems.title })
-    .from(catalogItems);
-  const idByTitle = new Map(catalogRows.map((row) => [row.title, row.id]));
-
+/** The login-able owner profile and its public pod; demo-mode only. */
+async function seedDemoOwner(
+  ownerOrgId: string,
+  ownerName: string,
+  idByTitle: Map<string, string>,
+): Promise<void> {
   await db
     .insert(profiles)
     .values({ orgId: ownerOrgId, username: "demo", displayName: ownerName, bio: "Building my podium.", avatarHue: 250 })
@@ -1177,6 +1195,17 @@ async function seedCommunity(ownerOrgId: string, ownerName: string): Promise<voi
       .values({ podId: demoPodRow.id, itemId, position: index })
       .onConflictDoNothing();
   }
+}
+
+async function seedCommunity(ownerOrgId: string | null, ownerName: string): Promise<void> {
+  const catalogRows = await db
+    .select({ id: catalogItems.id, title: catalogItems.title })
+    .from(catalogItems);
+  const idByTitle = new Map(catalogRows.map((row) => [row.title, row.id]));
+
+  // The owner profile belongs to the demo login, so it is demo-mode only. The
+  // community profiles below are the public tour: they are seeded always.
+  if (ownerOrgId) await seedDemoOwner(ownerOrgId, ownerName, idByTitle);
 
   for (const member of COMMUNITY) {
     let orgRow = (await db.select().from(orgs).where(eq(orgs.slug, member.username)).limit(1))[0];
@@ -1255,11 +1284,13 @@ async function seedCommunity(ownerOrgId: string, ownerName: string): Promise<voi
     }
 
     // The demo profile follows the seeded community so the home feed is alive.
-    await db
-      .insert(follows)
-      .values({ followerOrgId: ownerOrgId, followeeOrgId: memberOrgId })
-      .onConflictDoNothing();
-    if (member.username === "cart") {
+    if (ownerOrgId) {
+      await db
+        .insert(follows)
+        .values({ followerOrgId: ownerOrgId, followeeOrgId: memberOrgId })
+        .onConflictDoNothing();
+    }
+    if (member.username === "cart" && ownerOrgId) {
       await db
         .insert(follows)
         .values({ followerOrgId: memberOrgId, followeeOrgId: ownerOrgId })
@@ -1269,6 +1300,21 @@ async function seedCommunity(ownerOrgId: string, ownerName: string): Promise<voi
 }
 
 async function main(): Promise<void> {
+  if (!DEMO_SEED) {
+    // Shared catalog + the public tour profile. No account, no password, no
+    // demo-only business data: a deployment that never runs SEED_DEMO has
+    // nothing to log into and nothing to leak.
+    await seedMedia(null);
+    await seedCommunity(null, "Demo Profile");
+    console.log("");
+    console.log("  seed complete (no demo account: SEED_DEMO is not 1)");
+    console.log("  ----------------------------------------");
+    console.log(`  tour profile : /${TOUR_PROFILE_USERNAME}`);
+    console.log(`  tour pod     : /${TOUR_PROFILE_USERNAME}/${TOUR_POD_SLUG}`);
+    console.log("");
+    return;
+  }
+
   let rows = await db.select().from(orgs).where(eq(orgs.slug, SEED_SLUG)).limit(1);
   let org = rows[0];
   if (!org) {
@@ -2060,6 +2106,8 @@ async function main(): Promise<void> {
   console.log(`  email    : ${email}`);
   console.log(`  password : ${password}`);
   console.log(`  org      : ${org.name} (${SEED_SLUG})`);
+  console.log("  note     : demo account created (SEED_DEMO=1). Never enable this in production.");
+  console.log(`  tour     : /${TOUR_PROFILE_USERNAME} and /${TOUR_PROFILE_USERNAME}/${TOUR_POD_SLUG}`);
   console.log("");
 }
 

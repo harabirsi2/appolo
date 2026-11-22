@@ -4,6 +4,7 @@ import { firstIssue } from "@appolo/core";
 import { apiError, jsonError } from "@/lib/api";
 import { getSession } from "@/lib/session";
 import { reviewInputSchema, saveReview } from "@/lib/services/social";
+import { tasteStats } from "@/lib/services/rankings";
 import { revalidatePublicProfile, revalidatePublicReview, revalidatePublicSitemap } from "@/lib/revalidate-public";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,9 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     if (!parsed.success) return jsonError(firstIssue(parsed.error), 400, "INVALID_REVIEW");
 
     const rating = await saveReview(session.org.id, itemId, parsed.data);
+    // The client uses this to decide whether to show the first-rating nudge
+    // instead of jumping straight to the item page.
+    const stats = await tasteStats(session.org.id).catch(() => null);
     // A review creates or refreshes the item rating row, which changes the
     // community count, the seven-day popular rail and the review text shown
     // beside the score.
@@ -36,7 +40,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     revalidatePublicReview(rating.ratingId);
     revalidatePublicProfile();
     revalidatePublicSitemap();
-    return NextResponse.json({ rating });
+    return NextResponse.json({ rating, ratedCount: stats?.rated ?? null });
   } catch (error) {
     return apiError(error);
   }

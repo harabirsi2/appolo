@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray, or, sql } from "drizzle-orm";
 import { START_ELO, clamp, selectOpponent, withPositions, pairKey, selectInformativeOpponent, MatchResult, MediaKind } from "@appolo/core";
 import { getCatalogItem, mapCatalogItem, toScore, type CatalogItem } from "./catalog-item";
 import { getRankingModel, outcomeForResult, scheduleRankingRefresh } from "./ranking-math";
@@ -260,6 +260,43 @@ async function getOrInitRatings(
  * Pick the next head-to-head opponent for an item. Contenders are the other
  * catalog items of the same kind; recently faced opponents are deprioritised.
  */
+/**
+ * The next title worth rating for someone who has only a few ratings: a
+ * catalog item (never an artist/season/episode row) they have not rated, with
+ * artwork preferred so the nudge card looks like the duel screen.
+ */
+export async function nextUnratedItem(orgId: string): Promise<{
+  id: string;
+  title: string;
+  kind: MediaKind;
+  year: number | null;
+  imageUrl: string | null;
+} | null> {
+  return withOrg(orgId, async (tx) => {
+    const rated = await tx
+      .select({ itemId: itemRatings.itemId })
+      .from(itemRatings)
+      .where(eq(itemRatings.orgId, orgId));
+    const ratedIds = rated.map((row) => row.itemId);
+    const filters = [eq(catalogItems.entityType, "item")];
+    if (ratedIds.length > 0) filters.push(notInArray(catalogItems.id, ratedIds));
+
+    const [row] = await tx
+      .select({
+        id: catalogItems.id,
+        title: catalogItems.title,
+        kind: catalogItems.kind,
+        year: catalogItems.year,
+        imageUrl: catalogItems.imageUrl,
+      })
+      .from(catalogItems)
+      .where(and(...filters))
+      .orderBy(sql`${catalogItems.imageUrl} is not null desc`, desc(catalogItems.year))
+      .limit(1);
+    return row ?? null;
+  });
+}
+
 export async function nextMatchup(orgId: string, itemId: string): Promise<MatchupView> {
   const item = await getCatalogItem(itemId);
   if (!item) throw new DomainError("ITEM_NOT_FOUND", "That item is not in the catalog.", 404);

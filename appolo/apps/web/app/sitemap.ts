@@ -31,6 +31,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "daily" as const,
       priority: 1,
     },
+    {
+      // The public tour: real seeded content, no login required.
+      url: absoluteUrl("/demo"),
+      lastModified: now,
+      changeFrequency: "weekly" as const,
+      priority: 0.7,
+    },
     ...profiles.map((path) => ({
       url: absoluteUrl(path),
       lastModified: now,

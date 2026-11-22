@@ -7,4 +7,9 @@ export const NAV_ITEMS = [
   { href: "/app/profile", label: "Profile" },
 ] as const;
 
-export const DEMO_HINT = "owner@appolo.test / appolo-demo-9f3c2a7e";
+/**
+ * The public profile and pod the `/demo` tour opens. Both are seeded on every
+ * deployment (see `packages/core/src/tour.ts`), so the tour never depends on a
+ * published login.
+ */
+export { TOUR_POD_SLUG, TOUR_PROFILE_USERNAME } from "@appolo/core";

@@ -53,7 +53,11 @@ export default async function LoginPage({
       </Card>
 
       <p className="mt-6 text-center text-xs text-muted-2">
-        Demo: owner@appolo.test · appolo-demo-9f3c2a7e
+        Just looking?{" "}
+        <Link href="/demo" className="text-brand-soft hover:underline">
+          Tour a real profile
+        </Link>{" "}
+        — no login needed.
       </p>
     </main>
   );

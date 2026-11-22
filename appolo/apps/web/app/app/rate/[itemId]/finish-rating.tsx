@@ -223,7 +223,13 @@ export function FinishRating({
         const body = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? "Could not save your rating.");
       }
-      router.push(`/app/item/${item.id}`);
+      const saved = (await response.json().catch(() => ({}))) as { ratedCount?: number | null };
+      // Early accounts get the "one down, three to go" nudge instead of landing
+      // on an item page with nothing to do next. The nudge page re-checks the
+      // count and forwards anyone past the threshold.
+      const rated = typeof saved.ratedCount === "number" ? saved.ratedCount : null;
+      if (rated !== null && rated > 0 && rated < 4) router.push(`/app/first-rating?item=${item.id}`);
+      else router.push(`/app/item/${item.id}`);
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Something went wrong.");
