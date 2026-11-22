@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ReportButton } from "./report-button";
 
 const EMOJIS = ["🔥", "❤️", "👏", "😂", "😮", "😢"];
 
@@ -32,10 +33,12 @@ interface Reaction {
 
 export function ReviewEngagement({
   ratingId,
+  viewerOrgId = null,
   initialReactions,
   initialCommentCount,
 }: {
   ratingId: string;
+  viewerOrgId?: string | null;
   initialReactions: Reaction[];
   initialCommentCount: number;
 }) {
@@ -125,7 +128,12 @@ export function ReviewEngagement({
         <div className="space-y-2">
           {comments.map((c) => (
             <div key={c.id} className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-2.5">
-              <p className="text-[11px] font-medium text-ink">{c.displayName} <span className="text-muted-2">@{c.username}</span></p>
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-[11px] font-medium text-ink">{c.displayName} <span className="text-muted-2">@{c.username}</span></p>
+                {viewerOrgId && viewerOrgId !== c.orgId ? (
+                  <ReportButton contentType="comment" contentId={c.id} label="Report comment" />
+                ) : null}
+              </div>
               <p className="mt-0.5 text-[12px] text-muted">{c.body}</p>
             </div>
           ))}

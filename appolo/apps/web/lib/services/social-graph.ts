@@ -24,6 +24,10 @@ export interface ProfileSummary {
   manualMode: boolean;
   /** Derived from the OAuth-written timestamp, not an editable flag. */
   spotifyConnected: boolean;
+  /** Apple Music link state, as stored on the profile. */
+  appleMusicConnected: boolean;
+  /** Interface language code (e.g. "en"). */
+  language: string;
   profileLayout: "list" | "grid";
   /** Hand-curated top-five order per medium, when the profile set one. */
   podiumOrder: Partial<Record<MediaKind, string[]>>;
@@ -54,6 +58,8 @@ function toProfileSummary(
     pinnedRatingId: row.pinnedRatingId ?? null,
     manualMode: row.manualMode,
     spotifyConnected: Boolean(row.spotifyConnectedAt),
+    appleMusicConnected: row.appleMusicConnected,
+    language: row.language,
     profileLayout: row.profileLayout === "grid" ? "grid" : "list",
     podiumOrder: parsePodiumOrder(row.podiumOrder),
   };

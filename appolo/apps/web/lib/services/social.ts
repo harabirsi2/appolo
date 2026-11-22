@@ -125,7 +125,12 @@ export async function engagementFor(
     db
       .select({ ratingId: ratingComments.ratingId, count: sql<number>`count(*)::int` })
       .from(ratingComments)
-      .where(inArray(ratingComments.ratingId, ratingIds))
+      .where(
+        and(
+          inArray(ratingComments.ratingId, ratingIds),
+          eq(ratingComments.moderationStatus, "visible"),
+        ),
+      )
       .groupBy(ratingComments.ratingId),
   ]);
 
@@ -182,7 +187,13 @@ export async function itemCommunity(
     .select({ elo: itemRatings.elo })
     .from(itemRatings)
     .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
-    .where(and(eq(itemRatings.itemId, itemId), eq(itemRatings.moderationStatus, "visible"), eq(profiles.moderationStatus, "visible")));
+    .where(
+      and(
+        eq(itemRatings.itemId, itemId),
+        eq(itemRatings.moderationStatus, "visible"),
+        eq(profiles.moderationStatus, "visible"),
+      ),
+    );
 
   const distribution = new Array<number>(10).fill(0);
   for (const rating of ratings) {
@@ -200,7 +211,13 @@ export async function itemCommunity(
     .from(itemRatings)
     .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
     .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
-    .where(and(eq(itemRatings.itemId, itemId), eq(itemRatings.moderationStatus, "visible"), eq(profiles.moderationStatus, "visible")))
+    .where(
+      and(
+        eq(itemRatings.itemId, itemId),
+        eq(itemRatings.moderationStatus, "visible"),
+        eq(profiles.moderationStatus, "visible"),
+      ),
+    )
     .orderBy(desc(itemRatings.updatedAt))
     .limit(40);
 
@@ -228,7 +245,13 @@ export async function followFeed(orgId: string, limit = 12): Promise<ReviewView[
     .from(itemRatings)
     .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
     .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
-    .where(and(inArray(itemRatings.orgId, ids), eq(itemRatings.moderationStatus, "visible"), eq(profiles.moderationStatus, "visible")))
+    .where(
+      and(
+        inArray(itemRatings.orgId, ids),
+        eq(itemRatings.moderationStatus, "visible"),
+        eq(profiles.moderationStatus, "visible"),
+      ),
+    )
     .orderBy(desc(itemRatings.updatedAt))
     .limit(48);
 
@@ -281,10 +304,10 @@ export async function saveReview(
     };
     await tx
       .insert(itemRatings)
-      .values({ orgId, itemId, ...values })
+      .values({ orgId, itemId, ...values, source: "user" })
       .onConflictDoUpdate({
         target: [itemRatings.orgId, itemRatings.itemId],
-        set: { ...values, updatedAt: new Date() },
+        set: { ...values, source: "user", updatedAt: new Date() },
       });
 
     await tx.insert(ratingEvents).values({
@@ -351,13 +374,21 @@ export async function commentsFor(
   limit = 20,
   offset = 0,
 ): Promise<CommentPage> {
+  const owner = await ratingOwner(ratingId);
+  if (!owner) throw new DomainError("RATING_NOT_FOUND", "That review does not exist.", 404);
   const db = getDb();
   const [rows, total] = await Promise.all([
     db
       .select({ comment: ratingComments, profile: profiles })
       .from(ratingComments)
       .innerJoin(profiles, eq(profiles.orgId, ratingComments.orgId))
-      .where(and(eq(ratingComments.ratingId, ratingId), eq(ratingComments.moderationStatus, "visible")))
+      .where(
+        and(
+          eq(ratingComments.ratingId, ratingId),
+          eq(ratingComments.moderationStatus, "visible"),
+          eq(profiles.moderationStatus, "visible"),
+        ),
+      )
       .orderBy(ratingComments.createdAt)
       .limit(limit)
       .offset(offset),
@@ -501,7 +532,13 @@ export async function feedForYou(orgId: string, limit = 12): Promise<ReviewView[
           .from(itemRatings)
           .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
           .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
-          .where(inArray(itemRatings.orgId, followedIds))
+          .where(
+            and(
+              inArray(itemRatings.orgId, followedIds),
+              eq(itemRatings.moderationStatus, "visible"),
+              eq(profiles.moderationStatus, "visible"),
+            ),
+          )
           .orderBy(desc(itemRatings.updatedAt))
           .limit(48),
     db
@@ -509,7 +546,13 @@ export async function feedForYou(orgId: string, limit = 12): Promise<ReviewView[
       .from(itemRatings)
       .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
       .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
-      .where(ne(itemRatings.orgId, orgId))
+      .where(
+        and(
+          ne(itemRatings.orgId, orgId),
+          eq(itemRatings.moderationStatus, "visible"),
+          eq(profiles.moderationStatus, "visible"),
+        ),
+      )
       .orderBy(desc(itemRatings.updatedAt))
       .limit(60),
   ]);
@@ -578,7 +621,13 @@ export async function feedFollowing(orgId: string, limit = 12): Promise<ReviewVi
     .from(itemRatings)
     .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
     .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
-    .where(and(inArray(itemRatings.orgId, followed.map((row) => row.orgId)), eq(itemRatings.moderationStatus, "visible"), eq(profiles.moderationStatus, "visible")))
+    .where(
+      and(
+        inArray(itemRatings.orgId, followed.map((row) => row.orgId)),
+        eq(itemRatings.moderationStatus, "visible"),
+        eq(profiles.moderationStatus, "visible"),
+      ),
+    )
     .orderBy(desc(itemRatings.updatedAt))
     .limit(Math.max(limit * 3, limit));
 
@@ -641,7 +690,13 @@ export async function reviewById(ratingId: string, viewerOrgId: string | null = 
     .from(itemRatings)
     .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
     .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
-    .where(and(eq(itemRatings.id, ratingId), eq(itemRatings.moderationStatus, "visible"), eq(profiles.moderationStatus, "visible")))
+    .where(
+      and(
+        eq(itemRatings.id, ratingId),
+        eq(itemRatings.moderationStatus, "visible"),
+        eq(profiles.moderationStatus, "visible"),
+      ),
+    )
     .limit(1);
   const row = rows[0];
   if (!row) return null;

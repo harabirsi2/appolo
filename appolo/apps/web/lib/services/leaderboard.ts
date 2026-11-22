@@ -5,7 +5,7 @@ import { COMMUNITY_TAGS } from "@/lib/cache";
 import { getCatalogItem, mapCatalogItem, toScore, type CatalogItem } from "./catalog-item";
 import { getDb, withOrg, schema } from "@/lib/db";
 import { hasGenre } from "./genre-filter";
-const { catalogItems, itemRatings, itemMatchups, catalogCredits } = schema;
+const { catalogItems, itemRatings, itemMatchups, catalogCredits, profiles } = schema;
 
 export interface PopularItem extends CatalogItem {
   average: number;
@@ -23,7 +23,14 @@ async function popularThisWeekUncached(limit: number): Promise<PopularItem[]> {
     })
     .from(itemRatings)
     .innerJoin(catalogItems, eq(catalogItems.id, itemRatings.itemId))
-    .where(sql`${itemRatings.updatedAt} > now() - interval '7 days'`)
+    .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
+    .where(
+      and(
+        sql`${itemRatings.updatedAt} > now() - interval '7 days'`,
+        eq(itemRatings.moderationStatus, "visible"),
+        eq(profiles.moderationStatus, "visible"),
+      ),
+    )
     .groupBy(catalogItems.id)
     // Tie-break deterministically so the rail does not reshuffle between runs.
     .orderBy(sql`count(*) desc`, catalogItems.id)
@@ -132,22 +139,29 @@ export async function catalogLeaderboard(options: LeaderboardOptions = {}): Prom
   if (options.kind) filters.push(eq(catalogItems.kind, options.kind));
   if (options.genre) filters.push(hasGenre(catalogItems.genres, options.genre));
 
-  const ratings = sql<number>`count(${itemRatings.id})::int`;
-  const avgElo = sql<number>`coalesce(avg(${itemRatings.elo}), ${START_ELO})::float`;
+  const ratings = sql<number>`count(${profiles.id})::int`;
+  const avgElo = sql<number>`coalesce(avg(${itemRatings.elo}) filter (where ${profiles.id} is not null), ${START_ELO})::float`;
 
   const rows = await db
     .select({ item: catalogItems, ratings, avgElo })
     .from(catalogItems)
-    .leftJoin(itemRatings, eq(itemRatings.itemId, catalogItems.id))
+    .leftJoin(
+      itemRatings,
+      and(eq(itemRatings.itemId, catalogItems.id), eq(itemRatings.moderationStatus, "visible")),
+    )
+    .leftJoin(
+      profiles,
+      and(eq(profiles.orgId, itemRatings.orgId), eq(profiles.moderationStatus, "visible")),
+    )
     .where(filters.length ? and(...filters) : undefined)
     .groupBy(catalogItems.id)
-    .having(sort === "rated" ? sql`count(${itemRatings.id}) > 0` : undefined)
+    .having(sort === "rated" ? sql`count(${profiles.id}) > 0` : undefined)
     .orderBy(
       sort === "rated"
-        ? desc(sql`count(${itemRatings.id})`)
+        ? desc(sql`count(${profiles.id})`)
         : sort === "new"
           ? desc(catalogItems.createdAt)
-          : desc(sql`coalesce(avg(${itemRatings.elo}), 0)`),
+          : desc(sql`coalesce(avg(${itemRatings.elo}) filter (where ${profiles.id} is not null), 0)`),
       // Stable tie-break across reseeds: UUID primary keys change when the
       // demo is rebuilt, so order by the visible title first.
       catalogItems.title,
@@ -164,7 +178,14 @@ export async function catalogLeaderboard(options: LeaderboardOptions = {}): Prom
       ? await db
           .select({ orgId: itemRatings.orgId, itemId: itemRatings.itemId, elo: itemRatings.elo })
           .from(itemRatings)
-          .where(inArray(itemRatings.itemId, itemIds))
+          .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
+          .where(
+            and(
+              inArray(itemRatings.itemId, itemIds),
+              eq(itemRatings.moderationStatus, "visible"),
+              eq(profiles.moderationStatus, "visible"),
+            ),
+          )
       : [];
   const coordination = detectCoordinatedVoting(
     votes.map((vote) => ({ reviewerId: vote.orgId, itemId: vote.itemId, score: toScore(vote.elo) })),
@@ -205,10 +226,17 @@ export async function catalogCount(options: {
   const groups = await db
     .select({ id: catalogItems.id })
     .from(catalogItems)
-    .leftJoin(itemRatings, eq(itemRatings.itemId, catalogItems.id))
+    .leftJoin(
+      itemRatings,
+      and(eq(itemRatings.itemId, catalogItems.id), eq(itemRatings.moderationStatus, "visible")),
+    )
+    .leftJoin(
+      profiles,
+      and(eq(profiles.orgId, itemRatings.orgId), eq(profiles.moderationStatus, "visible")),
+    )
     .where(filters.length ? and(...filters) : undefined)
     .groupBy(catalogItems.id)
-    .having(sort === "rated" ? sql`count(${itemRatings.id}) > 0` : undefined);
+    .having(sort === "rated" ? sql`count(${profiles.id}) > 0` : undefined);
   return groups.length;
 }
 /**
@@ -228,11 +256,18 @@ export async function similarItems(itemId: string, limit = 8): Promise<SimilarIt
   const rows = await db
     .select({
       item: catalogItems,
-      ratings: sql<number>`count(${itemRatings.id})::int`,
-      avgElo: sql<number>`coalesce(avg(${itemRatings.elo}), ${START_ELO})::float`,
+      ratings: sql<number>`count(${profiles.id})::int`,
+      avgElo: sql<number>`coalesce(avg(${itemRatings.elo}) filter (where ${profiles.id} is not null), ${START_ELO})::float`,
     })
     .from(catalogItems)
-    .leftJoin(itemRatings, eq(itemRatings.itemId, catalogItems.id))
+    .leftJoin(
+      itemRatings,
+      and(eq(itemRatings.itemId, catalogItems.id), eq(itemRatings.moderationStatus, "visible")),
+    )
+    .leftJoin(
+      profiles,
+      and(eq(profiles.orgId, itemRatings.orgId), eq(profiles.moderationStatus, "visible")),
+    )
     .where(and(eq(catalogItems.kind, item.kind), sql`${catalogItems.id} <> ${itemId}`))
     .groupBy(catalogItems.id)
     .limit(120);
