@@ -1679,6 +1679,17 @@ export const voteReceipts = pgTable(
   }),
 );
 
+/**
+ * Liveness row for a background service (the worker). Not tenant-scoped: it
+ * holds a service name, a timestamp and process detail, never user data. See
+ * sql/0028_service_heartbeats.sql.
+ */
+export const serviceHeartbeats = pgTable("service_heartbeats", {
+  name: text("name").primaryKey(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  detail: jsonb("detail").notNull().default(emptyJson()),
+});
+
 /** One row per browser/device push endpoint; the endpoint URL is unique. */
 export const pushSubscriptions = pgTable(
   "push_subscriptions",

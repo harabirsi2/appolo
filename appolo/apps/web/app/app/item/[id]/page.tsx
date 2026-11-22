@@ -17,6 +17,7 @@ import { AddToPod } from "@/components/add-to-pod";
 import { KindIcon, isAnime } from "@/components/kind-icon";
 import { BackButton } from "@/components/back-button";
 import { ReviewBody } from "@/components/review-body";
+import { DataAttribution } from "@/components/data-attribution";
 import { TrailerModal } from "@/components/trailer-modal";
 
 export const dynamic = "force-dynamic";
@@ -263,6 +264,8 @@ export default async function ItemPage({ params }: Params) {
               </a>
             ) : null}
           </div>
+          {/* Provider terms require this credit alongside the data itself. */}
+          <DataAttribution source={item.source} className="mt-4" />
         </section>
 
         {credits.length > 0 ? (

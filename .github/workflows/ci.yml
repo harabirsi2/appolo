@@ -86,6 +86,10 @@ jobs:
       # coordination, messaging safety, metadata and normalisation.
       - name: Core test suite
         run: pnpm test
+      # Pure functions, no database: link-spam scoring, duplicate detection and
+      # the triage decision that turns them into an action.
+      - name: Moderation signals
+        run: pnpm test:signals
 
   # ---------------------------------------------------------------------------
   # Database integration: every DB-backed suite runs here, in one job, because

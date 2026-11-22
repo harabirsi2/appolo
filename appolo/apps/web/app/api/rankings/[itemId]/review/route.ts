@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { withRequestLog } from "@/lib/observability";
 import { invalidateCommunity } from "@/lib/cache";
 import { firstIssue } from "@appolo/core";
 import { apiError, jsonError } from "@/lib/api";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ itemId: string }> };
 
-export async function POST(request: NextRequest, { params }: Params): Promise<NextResponse> {
+async function handle(request: NextRequest, { params }: Params): Promise<NextResponse> {
   try {
     const session = await getSession();
     if (!session) return jsonError("Not authenticated", 401, "UNAUTHENTICATED");
@@ -45,3 +46,5 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     return apiError(error);
   }
 }
+
+export const POST = withRequestLog("review", handle);

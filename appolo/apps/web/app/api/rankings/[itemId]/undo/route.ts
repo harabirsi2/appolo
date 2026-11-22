@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { withRequestLog } from "@/lib/observability";
 import { invalidateCommunity } from "@/lib/cache";
 import { getSession } from "@/lib/session";
 import { apiError, jsonError } from "@/lib/api";
@@ -13,7 +14,7 @@ type Params = { params: Promise<{ itemId: string }> };
  * POST /api/rankings/:itemId/undo
  * Undo the latest comparison involving this item and rebuild the model.
  */
-export async function POST(_request: NextRequest, { params }: Params): Promise<NextResponse> {
+async function handle(_request: NextRequest, { params }: Params): Promise<NextResponse> {
   try {
     const session = await getSession();
     if (!session) return jsonError("Not authenticated", 401, "UNAUTHENTICATED");
@@ -30,3 +31,5 @@ export async function POST(_request: NextRequest, { params }: Params): Promise<N
     return apiError(error);
   }
 }
+
+export const POST = withRequestLog("undo", handle);

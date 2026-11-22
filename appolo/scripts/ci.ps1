@@ -34,7 +34,7 @@ Step "webhook idempotency"     { pnpm db:idempotency-test }
 Step "vote races"              { pnpm test:concurrency }
 Step "undo restoration"        { pnpm test:undo }
 Step "ranking model"           { pnpm test:ranking }
-Step "importers + moderation"  { pnpm test:imports; if ($LASTEXITCODE -eq 0) { pnpm test:moderation } }
+Step "importers + moderation"  { pnpm test:imports; if ($LASTEXITCODE -eq 0) { pnpm test:moderation; if ($LASTEXITCODE -eq 0) { pnpm test:signals } } }
 Step "build"                   { pnpm build }
 
 Write-Host ""

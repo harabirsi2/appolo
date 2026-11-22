@@ -41,11 +41,12 @@
     "visual:local": "node scripts/visual.mjs --local",
     "visual:local:accept": "node scripts/visual.mjs --local --update",
     "media-art": "node scripts/media-art.mjs",
-    "verify": "pnpm preflight && pnpm db:role-guard && pnpm media-art && pnpm typecheck && pnpm lint && pnpm test && pnpm test:imports && pnpm test:moderation && pnpm test:ranking && pnpm test:undo && pnpm test:concurrency && pnpm visual && pnpm e2e && pnpm gap-audit",
+    "verify": "pnpm preflight && pnpm db:role-guard && pnpm media-art && pnpm typecheck && pnpm lint && pnpm test && pnpm test:imports && pnpm test:moderation && pnpm test:signals && pnpm test:ranking && pnpm test:undo && pnpm test:concurrency && pnpm visual && pnpm e2e && pnpm gap-audit",
     "ci": "powershell -ExecutionPolicy Bypass -File scripts/ci.ps1",
     "a11y": "node scripts/a11y.mjs",
     "lint": "eslint .",
-    "test:concurrency": "pnpm --filter @appolo/db exec tsx --tsconfig ../../apps/web/tsconfig.json --test --test-force-exit ../../apps/web/lib/services/rankings-concurrency.test.ts"
+    "test:concurrency": "pnpm --filter @appolo/db exec tsx --tsconfig ../../apps/web/tsconfig.json --test --test-force-exit ../../apps/web/lib/services/rankings-concurrency.test.ts",
+    "test:signals": "pnpm --filter @appolo/db exec tsx --tsconfig ../../apps/web/tsconfig.json --test --test-force-exit ../../apps/web/lib/services/moderation-signals.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "9",

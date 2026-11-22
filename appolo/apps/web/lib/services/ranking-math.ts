@@ -129,9 +129,29 @@ export async function refreshRankingModel(
  * rapid voting into a single fit, and callers never pay the fit latency.
  */
 export function scheduleRankingRefresh(orgId: string, kind: MediaKind): void {
-  modelRefresh.schedule(refreshKey(orgId, kind), async () => {
+  const key = refreshKey(orgId, kind);
+  scheduledKeys.add(key);
+  modelRefresh.schedule(key, async () => {
     await refreshRankingModel(orgId, kind);
   });
+}
+
+/**
+ * Keys with a queued or running rebuild, so shutdown can finish them.
+ *
+ * A redeployed process loses the 750 ms timer, and the queued fit with it. That
+ * is recoverable — `getRankingModel` rebuilds whenever the stored row's
+ * comparison count disagrees with the durable log — but flushing on SIGTERM
+ * means the next request does not pay that rebuild.
+ */
+const scheduledKeys = new Set<string>();
+
+/** Resolve once every queued model rebuild has run. Called during shutdown. */
+export async function flushRankingRefreshes(): Promise<number> {
+  const keys = [...scheduledKeys];
+  scheduledKeys.clear();
+  await Promise.allSettled(keys.map((key) => modelRefresh.flush(key)));
+  return keys.length;
 }
 
 /** Drop a coalesced rebuild, e.g. when an explicit rebuild supersedes it. */

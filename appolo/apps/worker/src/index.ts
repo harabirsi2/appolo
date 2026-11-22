@@ -5,6 +5,7 @@ import IORedis from "ioredis";
 import { Queue, Worker, type Job } from "bullmq";
 import { startCatalogPipeline, type CatalogPipeline } from "./catalog";
 import { createPushSender, pushConfigured, type PushSender } from "./push";
+import { startHeartbeat } from "./heartbeat";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..", "..", "..");
@@ -25,6 +26,13 @@ interface HeartbeatResult {
 }
 
 async function main(): Promise<void> {
+  // Start the heartbeat before anything can exit early: a worker with no queue
+  // is still a process that should be visible in /api/health, and a worker that
+  // dies during startup is exactly the failure the heartbeat exists to show.
+  const stopHeartbeat = DATABASE_URL
+    ? startHeartbeat(DATABASE_URL, { redis: Boolean(REDIS_URL) })
+    : null;
+
   if (!REDIS_URL) {
     console.log("[worker] REDIS_URL is empty — queue processing is disabled.");
     console.log("[worker] Catalog enrichment falls back to the durable table; nothing is lost.");
@@ -101,10 +109,14 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`[worker] ${signal} — draining`);
+    // Order matters: stop accepting new work, finish in-flight jobs, then close
+    // the things the finished jobs used. The heartbeat goes last so the process
+    // is visible until it is actually gone.
+    await worker.close();
     await catalog?.stop();
     await push?.close();
-    await worker.close();
     await queue.close();
+    stopHeartbeat?.();
     connection.disconnect();
     process.exit(0);
   };
