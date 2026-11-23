@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { Button } from "@appolo/ui";
 
+// Keep the not-found document dynamic so its scripts receive the CSP nonce.
+export const dynamic = "force-dynamic";
+
 export default function NotFound() {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-[560px] flex-col items-center justify-center border-x border-white/[0.04] px-6 text-center">
