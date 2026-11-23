@@ -54,7 +54,7 @@ Legend: **Shipped** · **Partial** · **Not built**
 | Pros/cons fields | Not built | |
 | Helpfulness voting | Not built | |
 | Edit history | Not built | Only the current revision is stored |
-| Moderation queue / spam detection | Partial | User reports exist; no automated duplicate or spam detection |
+| Moderation queue / spam detection | Partial | Reports and the moderator queue are shipped; automated duplicate/spam detection is not built |
 
 ## 4. Discovery
 
@@ -80,9 +80,9 @@ Legend: **Shipped** · **Partial** · **Not built**
 | Follow / unfollow | Shipped | Follow graph, feed integration, notifications |
 | Pods (collections) | Shipped | Ranked lists with notes, public share pages, add/remove/reorder |
 | Notifications | Shipped | Follow, reaction and comment notifications, unread count, mark read |
-| Reports | Shipped | Report a review/profile for moderation |
+| Reports and moderation | Shipped | Report a review, profile or comment; moderator queue with dismiss/hide/remove and public-query filtering |
 | Private accounts | Not built | |
-| Block / mute | Not built | Reports exist but blocking is not enforced across queries |
+| Block / mute | Not built | Reporting/moderation exists, but blocking is not enforced across queries |
 | Private lists | Not built | Pods are public |
 | Notification preferences | Not built | |
 
@@ -107,7 +107,7 @@ Legend: **Shipped** · **Partial** · **Not built**
 | Data export | Shipped | `/api/account/export` (profile, ratings, reviews, matchups, order) |
 | Account deletion | Shipped | Password-confirmed, cascades, demo account protected |
 | Rate limiting | Shipped | Sign-in/sign-up and interactive endpoints, `Retry-After` |
-| Audit log | Shipped | Sensitive actions recorded in `audit_log` |
+| Audit log | Shipped | Sensitive actions recorded in `audit_logs` |
 | Theme switch | Not built | Single dark editorial theme by design |
 | Native apps | Not built | Responsive web only |
 

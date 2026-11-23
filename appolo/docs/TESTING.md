@@ -24,7 +24,7 @@ What runs, how to run it, and what is not covered.
 | `pnpm audit` | Production dependency audit; any reported vulnerability, including low severity, fails | **0 vulnerabilities** |
 | `pnpm preflight` | App reachable and database answering (`select 1`) | pass |
 | `pnpm typecheck` | All workspaces | pass |
-| `pnpm e2e` | 40 HTTP checks: health, auth guards, signup, search relevance, literal wildcards and unrated labeling, rating, tie, undo, model rebuild, matchup-count consistency, follow, feed explanations, library/collections/activity destinations, taste comparison, moderation, media export, contact export (formula neutralization + rate limit), Spotify state acceptance/rejection and connect cookie, shared import quota, provider-search quota, deletion | **40/40** |
+| `pnpm e2e` | 46 HTTP checks: health, auth guards, signup, search relevance, literal wildcards and unrated labeling, rating, tie, undo, model rebuild, matchup-count consistency, follow, feed explanations, library/collections/activity destinations, taste comparison, moderation, media export, contact export (formula neutralization + rate limit), Spotify state acceptance/rejection and connect cookie, shared import quota, provider-search quota, deletion | **46/46** |
 | `pnpm visual` | 8 screens; structural checks everywhere, pixel comparison against CI-runner baselines in CI (0.1% tolerance) | **8/8** |
 | `pnpm visual:local` | 8 screens; structural checks plus pixel comparison against this machine's accepted baselines | **8/8, 0 px** |
 | `pnpm a11y` | axe-core on 9 screens (including account settings); fails on serious/critical violations, a non-200 status or an unexpected redirect | **0 violations** |

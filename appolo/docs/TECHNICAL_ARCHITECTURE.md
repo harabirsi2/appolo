@@ -26,7 +26,7 @@ Rules that follow from this:
 - Public/social reads that must be world-readable explicitly run without tenant scope
   (`getDb()`), as `profiles`, `pods` and `reviews` do.
 - New tenant tables must get an RLS policy and a grant; see
-  `packages/db/sql/0012_ranking_model.sql`.
+  `packages/db/sql/0021_abuse_moderation.sql` and `docs/DATABASE.md`.
 
 ## 3. Packages
 
@@ -122,7 +122,8 @@ GET /api/rankings/model?kind=movie
   sign-up allows 20 per client IP per hour. Both answer `429` with `Retry-After`.
   The table is identity-plane (outside RLS) and prunes itself opportunistically.
 - Uploads/metadata URLs are strings today; file upload validation is not implemented.
-- Account deletion/export for the media layer remains an open item.
+- Same-origin middleware rejects cross-origin mutating requests; CSP/security headers are applied by the web app.
+- Account deletion/export for the media layer is implemented (`/api/account/*`).
 - No secrets are read from or written to client bundles; provider keys stay server-side.
 
 ## 7. Ranking integration details
@@ -168,30 +169,30 @@ Two directories are applied by `packages/db/src/migrate.ts`, in order: `drizzle/
 
 Important: the Drizzle meta snapshot is **stale** relative to the schema (many media
 tables were added through hand-written SQL). Running `drizzle-kit generate` currently
-proposes re-creating tables that already exist. The new ranking changes are therefore
-a hand-written idempotent migration, `sql/0012_ranking_model.sql`:
-
-- `item_matchups.outcome text`
-- `item_ratings.ties integer not null default 0`
-- `ranking_models` table + unique index + RLS policy + grant
-
-Fix the snapshot separately (regenerate baselines from a clean database) before
-relying on `db:generate` again.
+proposes re-creating tables that already exist. Media/social changes are therefore
+hand-written idempotent migrations; the latest is
+`sql/0022_moderation_aggregates.sql` (moderation state on
+reviews/profiles/comments, `abuse_reports`, RLS, grants, and community
+aggregates limited to visible ratings by visible profiles). See `docs/DATABASE.md` for the table map,
+key constraints and migration procedure. Fix the snapshot separately (regenerate
+baselines from a clean database) before relying on `db:generate` again.
 
 ## 9. Verification commands
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm typecheck
-pnpm test                 # packages/core unit tests (56)
+pnpm test                 # packages/core unit tests (70)
+pnpm test:imports         # database-backed import integrity (5)
+pnpm test:moderation       # reports, queue and public-feed enforcement (2)
 pnpm --filter @appolo/web build
 # with a PostgreSQL instance:
 pnpm db:migrate && pnpm db:seed && pnpm db:rls-test
 pnpm preflight            # health + database check
-pnpm e2e                  # HTTP e2e against a running server (creates test accounts)
+pnpm e2e                  # HTTP e2e against a running server (46 checks, creates test accounts)
 pnpm exec playwright install chromium   # once, before visual or verify
 pnpm visual               # Playwright screens + pixel-diff baselines
-pnpm verify               # preflight + typecheck + e2e + visual
+pnpm verify               # preflight + role guard + typecheck + unit/import/moderation tests + visual + e2e
 pnpm smoke                # PowerShell, needs a running server
 ```
 

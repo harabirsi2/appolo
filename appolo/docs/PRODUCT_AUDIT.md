@@ -1,6 +1,7 @@
 # Appolo product audit
 
 Audited 2026-11-09 against the repository at branch `freebuff/11d050abed6c50feae713aa9`.
+Test and moderation sections refreshed 2026-11-16 against the current working tree.
 
 This document describes what exists. It is not a wish list; unimplemented items are
 marked as gaps.
@@ -40,6 +41,10 @@ Verified by reading the code, typechecking and building (see §6):
   K-factor, opponent selection by Elo distance.
 - **Reviews:** text, tags, spoilers, photo/video URLs, favorite character/tracks,
   reactions, comments, pinning, public review pages and tokens.
+- **Moderation:** authenticated reports for reviews, profiles and comments, a
+  moderator-only queue at `/app/moderation`, dismiss/hide/remove actions, and
+  public-query filtering of non-visible content. Automated duplicate/spam
+  detection remains open.
 - **Social:** profiles with username/display name/bio/avatar hue, follows, followers
   and following, feed, notifications, taste comparison screen, taste DNA page.
 - **Collections ("pods"):** create/edit, add items, ordering, visibility, public pod
@@ -47,8 +52,8 @@ Verified by reading the code, typechecking and building (see §6):
 - **Discovery:** search with catalog providers, browse by kind/genre, popular this
   week, weekly movers, similar items, leaderboards, person (cast/crew) pages,
   watchlist, rating history, search history.
-- **Onboarding/UX:** signup, profile creation/edit, onboarding-ish interests are not
-  implemented yet (see gaps).
+- **Onboarding/UX:** signup, profile creation/edit, and a post-signup genre
+  interest picker (`/app/onboarding`, `profile_interests`) that acts as a feed prior.
 - **Custom UI:** black/mint editorial design with a bottom navigation FAB, kind SVG
   icons (`apps/web/components/kind-icon.tsx`), podium display, scrollable category
   pills, Elo win-rate badge on `MediaArt`.
@@ -88,17 +93,28 @@ confident-looking percentage; no confidence label or explanation.
 | Priority | Gap | Status after this pass |
 |---|---|---|
 | P0 | No statistical ranking model, ties, confidence | **Implemented** (BT + Davidson, persisted, API) |
-| P0 | No ranking tests | **Implemented** (18 unit tests) |
+| P0 | No ranking tests | **Implemented** (ranking and taste tests; core suite 70/70) |
 | P1 | Taste match ignores rank order/evidence | **Implemented** (Kendall tau-b + coverage) |
 | P1 | Comparison selection not information-driven | **Implemented** (entropy × uncertainty × exposure) |
 | P1 | No tie/undecided UI | **Implemented** in the rating flow |
 | P2 | No community-ranking shrinkage | **Implemented** (fixed prior shrinkage + confidence) |
-| P2 | Robust aggregation / coordinated-vote detection | Open |
-| P2 | No manual drag reordering UI (data exists via `manualMode`/podium order) | Partially open |
-| P2 | Onboarding interests/genre selection | Open |
-| P3 | Moderation/reporting depth, account deletion/export | Partially present (reports route, settings) |
-| P3 | Recommendation/feed hybrid scoring | Existing feed is simple; open |
+| P2 | Robust aggregation / coordinated-vote detection | **Implemented** (`coordination.ts`; half-weight for flagged pairs) |
+| P2 | No manual drag reordering UI (data exists via `manualMode`/podium order) | **Implemented** (`ranking_order` + reorder mode; no fake matchups) |
+| P2 | Onboarding interests/genre selection | **Implemented** (`/app/onboarding`, `profile_interests`) |
+| P3 | Moderation/reporting depth, account deletion/export | **Implemented** for review/profile/comment reports, moderator queue and hide/remove enforcement; automated spam detection remains open. Account deletion/export is shipped. |
+| P3 | Recommendation/feed hybrid scoring | **Implemented** (`feed-rank.ts`: freshness, affinity, relevance, engagement, exploration, explanations) |
 | P3 | Share-card image generation | Existing share buttons/tokens; no generated images |
+
+## 5a. Competitive position
+
+Appolo is closest to Podiums: both use pairwise comparison instead of a direct
+star score and organise taste across media kinds. Appolo supports six kinds
+including games, exposes the ranking model and confidence, and provides
+explainable feed reasons and side-by-side taste comparison. Letterboxd,
+Goodreads, Backloggd and Serializd remain stronger on catalogue depth, mature
+logging workflows (diary, shelves, play sessions, episodes), native mobile
+distribution and existing network density. The full sourced comparison and its
+strategic implications are in [`COMPETITIVE_ANALYSIS.md`](./COMPETITIVE_ANALYSIS.md).
 
 ## 6. Baseline verification performed in this environment
 
@@ -106,13 +122,20 @@ confident-looking percentage; no confidence label or explanation.
 |---|---|
 | `pnpm install --frozen-lockfile` | Pass |
 | `pnpm typecheck` (6 packages) | Pass |
-| `pnpm test` (new) | Pass — 23/23 |
-| `pnpm --filter @appolo/web build` | Pass || `pnpm db:migrate` (18 migrations) | **Pass** on PostgreSQL 16.2 (portable binaries, port 55432) |
+| `pnpm test` | Pass — **70/70** core tests |
+| `pnpm test:imports` | Pass — **5/5** database-backed import checks |
+| `pnpm test:moderation` | Pass — **2/2** reporting/moderation checks |
+| `pnpm --filter @appolo/web build` | Pass |
+| `pnpm db:migrate` (23 hand-written + 6 framed migrations) | **Pass** on PostgreSQL 16.2 (portable binaries, port 55432); latest is `sql/0022_moderation_aggregates.sql` |
 | `pnpm db:seed` | **Pass** |
-| `pnpm db:rls-test` | **Pass** — 7/7 isolation checks |
-| `pnpm run ci` / `pnpm smoke` | Scripts are PowerShell, so not executed here. Every `ci` step (install, typecheck, migrate, seed, RLS, build) was run individually and passed; smoke's core flows were exercised with curl/node instead |
+| `pnpm db:rls-test` | **Pass** — **16/16** isolation checks |
+| `pnpm audit` | **0 vulnerabilities** (`--prod --audit-level=low`) |
+| `pnpm e2e` | **46/46** checks in CI (2 skipped without provider settings) |
+| `pnpm visual` | **8/8** screens in the latest recorded run |
+| `pnpm a11y` | **0** serious/critical violations on 9 screens in the latest recorded run |
+| `pnpm run ci` / `pnpm smoke` | Scripts are PowerShell, so not executed here. Every applicable `ci` step was run individually; smoke's core flows were exercised with curl/node instead |
 | End-to-end API checks | **Pass** — login, tie vote, model rebuild, undo, signup, manual ratings, taste compare (19% for opposite taste), 401 for anonymous, login redirect |
-| Drizzle snapshot vs hand-written SQL | **Drift exists** (pre-existing): `drizzle-kit generate` wants to re-create tables already created by `sql/0007_podium_parity.sql`. New migration was therefore written by hand as `packages/db/sql/0012_ranking_model.sql` |
+| Drizzle snapshot vs hand-written SQL | **Drift exists** (pre-existing): `drizzle-kit generate` wants to re-create media tables already created by `sql/0007_podium_parity.sql`. New migrations are therefore hand-written; the latest is `packages/db/sql/0022_moderation_aggregates.sql` |
 
 ## 7. Honest summary
 

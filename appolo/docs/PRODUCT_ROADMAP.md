@@ -7,7 +7,8 @@ Status legend: **Done**, **Partial**, **Open**.
 
 ## Phase 0 — Audit (Done)
 
-- `docs/PRODUCT_AUDIT.md`, `docs/TECHNICAL_ARCHITECTURE.md`,
+- `docs/PRODUCT_AUDIT.md`, `docs/COMPETITIVE_ANALYSIS.md`,
+  `docs/DATABASE.md`, `docs/TECHNICAL_ARCHITECTURE.md`,
   `docs/RANKING_SYSTEM.md`, `docs/DESIGN_SYSTEM.md`, this file.
 - Baseline: typecheck, build and new unit tests pass in this environment; DB/smoke CI
   could not run here (no Postgres/Docker/root) and is reported as a limitation.
@@ -139,11 +140,12 @@ Done in this pass:
 
 ## Phase 6 — Integrations and sharing (Partial)
 
-Existing: Spotify/Apple flags on profiles, catalog providers, public review/pod pages,
-share buttons, OG metadata on public routes, embed widgets.
+Existing: Spotify OAuth top-track import (saved as unrated watchlist items),
+catalog providers, public review/pod pages, share buttons, OG metadata on public
+routes, embed widgets.
 
 Open:
-- Real OAuth connection/disconnect/import flows and token refresh.
+- Spotify disconnect and token refresh. Apple Music integration when it exists.
 - Generated share cards (image rendering rather than screenshots).
 - Deep-link coverage for every shareable object.
 

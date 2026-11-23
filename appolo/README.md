@@ -21,6 +21,8 @@ Reviews, shared inbox, AI employee, contacts, reporting — **no payments.**
 | [`docs/RANKING_SYSTEM.md`](./docs/RANKING_SYSTEM.md) | Bradley–Terry + Davidson model, ties, uncertainty, selection, tests |
 | [`docs/DESIGN_SYSTEM.md`](./docs/DESIGN_SYSTEM.md) | Implemented tokens, typography, components, motion, gaps |
 | [`docs/TECHNICAL_ARCHITECTURE.md`](./docs/TECHNICAL_ARCHITECTURE.md) | Request flows, data model, security, migrations |
+| [`docs/DATABASE.md`](./docs/DATABASE.md) | Table map, moderation schema, RLS, migration reference |
+| [`docs/COMPETITIVE_ANALYSIS.md`](./docs/COMPETITIVE_ANALYSIS.md) | Podiums, Letterboxd, Goodreads, Backloggd and Serializd comparison |
 
 ## Quick start (Windows, no Docker)
 
@@ -234,7 +236,9 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
 | `pnpm dev` | web + worker together |
 | `pnpm dev:web` | Next.js only |
 | `pnpm typecheck` | TypeScript across all packages |
-| `pnpm test` | core ranking, taste and community unit tests |
+| `pnpm test` | core ranking, taste and community unit tests (70) |
+| `pnpm test:imports` | database-backed import integrity (5) |
+| `pnpm test:moderation` | reports, moderator queue and public-feed enforcement (2) |
 | `pnpm build` | production build |
 | `pnpm db:up` / `db:down` | local Postgres cluster on :55432 |
 | `pnpm db:migrate` | apply migrations (`drizzle/` then `sql/`) |
@@ -247,7 +251,7 @@ pnpm db:migrate && pnpm db:seed && pnpm dev
 | `pnpm visual` | Playwright visual checks against Linux baselines (server must be running) |
 | `pnpm a11y` | axe accessibility check on 9 screens (server must be running) |
 | `pnpm media-art` | guard that every MediaArt call passes the catalog cover |
-| `pnpm verify` | preflight → role guard → media-art → typecheck → test → visual → e2e → gap audit (server must be running) |
+| `pnpm verify` | preflight → role guard → media-art → typecheck → unit/import/moderation tests → visual → e2e → gap audit (server must be running) |
 | `pnpm smoke` | HTTP end-to-end test (server must be running) |
 | `pnpm run ci` | install → typecheck → unit tests → media-art → migrate → seed → RLS test → build |
 

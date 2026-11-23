@@ -45,7 +45,12 @@ docs              architecture, ranking, performance, security, testing, roadmap
 - `ranking_order` — optional manual order per org and kind.
 - `rating_events`, `watchlist`, `search_history`, `feed_dismissals`.
 - `follows`, `pods`, `pod_items`, `rating_reactions`, `rating_comments`,
-  `social_notifications`, `profile_interests`, `reports`.
+  `social_notifications`, `profile_interests`, `abuse_reports`.
+
+`abuse_reports` targets a review (`item_ratings.id`), profile (`profiles.org_id`)
+or comment (`rating_comments.id`). The target itself carries
+`moderation_status` (`visible`, `hidden`, `removed`), which public queries
+enforce. See `docs/DATABASE.md` for the full table map.
 
 Every tenant row carries `org_id`. Migrations live in `packages/db/sql` (hand-
 written, forward-only) and `packages/db/drizzle` (generated metadata).

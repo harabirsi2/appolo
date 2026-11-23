@@ -5,10 +5,11 @@ actually in this repository. Status is evidence-based, not aspirational.
 
 Legend: **Done** · **Partial** · **Open**
 
-Last verification: `pnpm verify` → preflight OK, typecheck clean, e2e **40/40**
-(2 skipped without provider keys), visual **8/8**; core unit tests **70/70**;
-`pnpm a11y` **0 violations on 9 screens** (including settings). Image measurement:
-Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
+Latest recorded verification (2026-11-16): typecheck and `pnpm --filter @appolo/web build`
+clean; core unit tests **70/70**; imports **5/5**; moderation **4/4**; RLS **16/16**;
+e2e **46/46** in CI (2 skipped without provider settings); visual **8/8**; `pnpm a11y` **0 serious/critical
+violations** on 9 screens (including settings); `pnpm audit --prod --audit-level=low`
+**0 vulnerabilities**. Image measurement: Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 
 ---
 
@@ -18,7 +19,7 @@ Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 |---|---|---|
 | Repository audited (architecture, schema, services, components) | Done | `docs/PRODUCT_AUDIT.md`, `docs/TECHNICAL_ARCHITECTURE.md`, `docs/CODE_REVIEW.md` |
 | Existing behaviour run before edits | Done | `scripts/preflight.mjs`, `scripts/e2e.mjs`, `scripts/visual.mjs` |
-| Baseline established (perf, reliability, tests) | Done | page timings and `EXPLAIN ANALYZE` in `docs/PERFORMANCE.md`; 39 e2e + 8 visual checks |
+| Baseline established (perf, reliability, tests) | Done | page timings and `EXPLAIN ANALYZE` in `docs/PERFORMANCE.md`; 46 e2e + 8 visual checks |
 | No wholesale rewrite; stack preserved | Done | Next 15 App Router, Postgres + Drizzle, `packages/core` kept |
 
 ## 2. Product and competitive analysis
@@ -27,7 +28,8 @@ Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 |---|---|---|
 | Product feature inventory | Done | `FEATURE_MAP.md` — rewritten to the shipped rating product (catalog, ranking, reviews, discovery, social, account) |
 | Gap analysis against the mandate | Done | `docs/PRODUCT_AUDIT.md` §5 |
-| Onboarding, profile, review, discovery, retention analysis | Partial | evidenced by roadmap phases; no standalone UX teardown of Podium's rating product |
+| Competitive analysis and positioning | Done | `docs/COMPETITIVE_ANALYSIS.md` — Podiums, Letterboxd, Goodreads, Backloggd and Serializd comparison |
+| Onboarding, profile, review, discovery, retention analysis | Done | `docs/COMPETITIVE_ANALYSIS.md` and the phase evidence in `docs/PRODUCT_ROADMAP.md` |
 | Own identity, no competitor branding copied | Done | `docs/DESIGN_SYSTEM.md` (editorial dark theme, Fraunces + mint accent) |
 
 ## 3. Ranking engine
@@ -43,7 +45,7 @@ Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 | Explainable comparison selection | Done | entropy × uncertainty × exposure; `scoreInformativeOpponents` |
 | Manipulation resistance | Done | Bayesian shrinkage plus coordinated-vote detection and half-weight down-weighting (`packages/core/src/coordination.ts`) |
 | Personalized / sub-category ranking | Open | per-user `ν`/`λ`, genre-level models, ranking-history ("why A > B") |
-| Engine tests | Done | 11 ranking tests + 7 taste tests; `packages/core` total 42 |
+| Engine tests | Done | 11 ranking tests + 7 taste tests; `packages/core` total 70 |
 
 ## 4. Review system
 
@@ -53,7 +55,7 @@ Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 | Structured extras (pros/cons, favourite character/tracks) | Partial | favourite character/tracks shipped; pros/cons not implemented |
 | Reactions and threaded comments | Done | `review-engagement.tsx`, paginated comments (20/page) |
 | Review sorting and helpfulness | Partial | newest-edit ordering in feeds; no helpfulness score |
-| Editing history, moderation queue, duplicate/spam detection | Open | reports exist; no edit history or spam pipeline |
+| Editing history, moderation queue, duplicate/spam detection | Partial | review/profile/comment reporting and the moderator queue are shipped; edit history and automated duplicate/spam detection remain open |
 | Contextual rating explanation | Done | score bands and review prompts in the rating flow |
 
 ## 5. Discovery and recommendations
@@ -77,7 +79,7 @@ Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 | Comments, reactions, notifications | Done | `review-engagement.tsx`, notification counts |
 | Shared collections (pods), pinned review | Done | `pod-screen.tsx`, `pods` tables |
 | Public/private lists | Partial | pods are public; no private lists |
-| Blocking, reporting, privacy controls | Partial | reports route shipped; block/mute not enforced across queries |
+| Blocking, reporting, privacy controls | Partial | reports + moderator queue shipped for reviews/profiles/comments; block/mute and private accounts are not enforced across every query |
 | Notification preferences / grouping / dedupe | Open | queued in roadmap Phase 4 |
 
 ## 7. UI/UX excellence
@@ -124,9 +126,9 @@ Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 | Session auth + authorization boundaries | Done | active-membership checks, `requireSession` |
 | Rate limiting (auth + interactive endpoints) | Done | `auth_rate_limits`, matchup/vote/reaction limiter with `Retry-After` |
 | Input validation, SQL injection, XSS | Done | Zod, parameterised Drizzle queries, escaped `ILIKE` wildcards |
-| CSRF / same-origin enforcement | Partial | mutating routes are session-bound; no explicit token scheme documented |
+| CSRF / same-origin enforcement | Done | `apps/web/middleware.ts` rejects cross-origin mutating requests and unmatched `Sec-Fetch-Site` |
 | Secrets management | Done | env-based, no secrets committed |
-| Dependency vulnerability audit | Open | `pnpm audit` not part of `verify` |
+| Dependency vulnerability audit | Done | `pnpm audit --prod --audit-level=low` in CI; latest **0 vulnerabilities** |
 | Remaining risks register | Done | `docs/CODE_REVIEW.md` “Remaining risks” |
 
 ## 11. Testing and QA
@@ -134,10 +136,12 @@ Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 | Check | Status | Evidence |
 |---|---|---|
 | Unit tests (ranking, taste, community) | Done | 70 tests, `pnpm test` |
-| End-to-end workflows over HTTP | Done | `scripts/e2e.mjs`, 39 checks, cleans up its accounts |
+| Database-backed integrity tests | Done | imports **5/5**, moderation **4/4**, RLS **16/16** |
+| End-to-end workflows over HTTP | Done | `scripts/e2e.mjs`, 46 checks (2 skipped without provider settings), cleans up its accounts |
 | Visual regression | Done | `scripts/visual.mjs`, 8 screens |
+| Accessibility tests | Done | `scripts/a11y.mjs`, axe-core on 9 screens: 0 serious/critical violations |
 | Readiness / health check | Done | `scripts/preflight.mjs` (queries the DB) |
-| Aggregated gate | Done | `pnpm verify` |
+| Aggregated gate | Done | `pnpm verify`, including unit, import and moderation tests |
 | API contract tests, load tests | Open | no dedicated API-contract or load suite |
 | Accessibility tests | Done | `pnpm a11y` runs axe-core on 9 screens and fails on serious/critical violations |
 
@@ -157,14 +161,14 @@ Browse 1,646 KB → 332 KB, Home 264 KB → 72 KB.
 | Phase | Status | Evidence |
 |---|---|---|
 | 1 Audit and architecture docs | Done | `PRODUCT_AUDIT`, `TECHNICAL_ARCHITECTURE`, `RANKING_SYSTEM`, `DESIGN_SYSTEM`, `ROADMAP` |
-| 2 Product/competitor analysis | Partial | see §2 |
+| 2 Product/competitor analysis | Done | see §2 and `docs/COMPETITIVE_ANALYSIS.md` |
 | 3 Technical debt and foundations | Done | `CODE_REVIEW.md` |
 | 4 Ranking and review engine | Partial | ranking done as a slice; review depth partial |
 | 5 Discovery and recommendations | Partial | taste + feed done; CF open |
 | 6 Social functionality | Partial | core social done; privacy/blocking open |
 | 7 UI/UX refinement | Mostly done | design system, responsive checks, visual baselines |
-| 8 Performance and security optimisation | Partial | images/db/indexes done; caching + dependency audit open |
-| 9 Comprehensive testing | Partial | strong e2e/visual/unit; no a11y/load/API-contract |
+| 8 Performance and security optimisation | Partial | images/db/indexes, CSRF/CSP and dependency audit done; worker/caching depth remains |
+| 9 Comprehensive testing | Partial | unit, import, moderation, RLS, e2e, visual and a11y green; load/API-contract remain |
 | 10 Production-readiness assessment | Partial | build + verify green; worker stub, no cache, no lint |
 
 ## 14. Execution rules — self-audit
@@ -184,10 +188,10 @@ what changed.
 |---|---|---|
 | Architecture documentation | Done | `docs/TECHNICAL_ARCHITECTURE.md`, `ARCHITECTURE.md` |
 | Product feature inventory | Done | `FEATURE_MAP.md` |
-| Competitive analysis | Partial | `docs/PRODUCT_AUDIT.md` §5 |
+| Competitive analysis | Done | `docs/COMPETITIVE_ANALYSIS.md` |
 | Technical debt register | Done | `docs/CODE_REVIEW.md` risks, `docs/PERFORMANCE.md` §6, `docs/SECURITY.md` known risks |
 | Implementation roadmap | Done | `docs/PRODUCT_ROADMAP.md` |
-| Database documentation | Partial | schema and data model sections; no dedicated schema reference |
+| Database documentation | Done | `docs/DATABASE.md` — 74-table map, moderation schema, RLS and migration reference |
 | Ranking algorithm documentation | Done | `docs/RANKING_SYSTEM.md` |
 | Testing report | Done | `docs/TESTING.md` |
 | Performance report | Done | `docs/PERFORMANCE.md` |
@@ -199,6 +203,6 @@ what changed.
 ## Highest-impact remaining tasks
 
 1. Enforce block/mute and private accounts at the query layer.
-2. Add a CSRF/origin guard for mutating route handlers.
+2. Add private lists and stronger notification/privacy controls.
 3. Manual keyboard and screen-reader pass on the comparison flow.
-4. Add load testing and API contract tests; wire `pnpm audit` into the gate.
+4. Add load testing and API contract tests; add automated duplicate/spam detection for reports.
