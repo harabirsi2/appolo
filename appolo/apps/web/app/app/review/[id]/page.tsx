@@ -19,7 +19,7 @@ export default async function AppReviewPage({ params }: Params) {
       <div className="px-5 pt-4">
         <BackButton fallback={`/app/item/${review.itemId}`} />
       </div>
-      <ReviewScreen review={review} />
+      <ReviewScreen review={review} viewerOrgId={session.org.id} />
     </div>
   );
 }

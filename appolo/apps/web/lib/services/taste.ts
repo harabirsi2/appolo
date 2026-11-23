@@ -1,10 +1,10 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { MEDIA_KINDS, genreKey, scoreForElo, type MediaKind } from "@appolo/core";
 import { getDb, withOrg, schema } from "@/lib/db";
 import { rankedRatings, type CatalogItem } from "./rankings";
 import { ratingStreak, type Streak } from "./streaks";
 
-const { itemRatings, itemMatchups } = schema;
+const { itemRatings, itemMatchups, profiles } = schema;
 
 /** Capitalise each word so a stored "sci-fi" reads as "Sci-Fi" in the UI. */
 function displayGenre(value: string): string {
@@ -108,7 +108,14 @@ export async function tasteDna(orgId: string): Promise<TasteDna> {
         others: sql<number>`count(*)::int`,
       })
       .from(itemRatings)
-      .where(inArray(itemRatings.itemId, ratings.map((rating) => rating.id)))
+      .innerJoin(profiles, eq(profiles.orgId, itemRatings.orgId))
+      .where(
+        and(
+          inArray(itemRatings.itemId, ratings.map((rating) => rating.id)),
+          eq(itemRatings.moderationStatus, "visible"),
+          eq(profiles.moderationStatus, "visible"),
+        ),
+      )
       .groupBy(itemRatings.itemId);
 
     const byItem = new Map(rows.map((row) => [row.itemId, row]));

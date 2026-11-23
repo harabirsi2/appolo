@@ -191,7 +191,13 @@ async function memberScoresByItem(
         tx
           .select({ itemId: itemRatings.itemId, elo: itemRatings.elo, manualScore: itemRatings.manualScore })
           .from(itemRatings)
-          .where(and(eq(itemRatings.orgId, memberOrgId), inArray(itemRatings.itemId, [...itemIds]))),
+          .where(
+            and(
+              eq(itemRatings.orgId, memberOrgId),
+              eq(itemRatings.moderationStatus, "visible"),
+              inArray(itemRatings.itemId, [...itemIds]),
+            ),
+          ),
       ).catch(() => []),
     ),
   );
@@ -239,7 +245,7 @@ async function podDetail(
       : [];
   const contributorByOrg = new Map(contributorRows.map((row) => [row.orgId, row.username]));
 
-  const ratings = await rankedRatings(pod.orgId);
+  const ratings = await rankedRatings(pod.orgId, { publicOnly: true });
   const scoreById = new Map(ratings.map((rating) => [rating.id, rating.score]));
 
   const members = pod.isCollaborative ? await podMembersFor(pod.id, pod.orgId) : [];

@@ -8,6 +8,7 @@ import { KindIcon } from "./kind-icon";
 import { Avatar, PodRow, ScoreText } from "./podiums";
 import { FollowButton } from "./follow-button";
 import { ShareButton } from "./share-button";
+import { ReportButton } from "./report-button";
 import { PodiumOrderEditor } from "./podium-order-editor";
 
 const RANKS = ["1", "2", "3", "4", "5"];
@@ -117,6 +118,9 @@ export function ProfileScreen({
             path={profileHref}
             imagePath={`/api/og/podium/${profile.username}`}
           />
+          {viewerOrgId && !isSelf ? (
+            <ReportButton contentType="profile" contentId={profile.orgId} />
+          ) : null}
           {footer}
         </div>
       </header>
