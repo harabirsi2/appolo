@@ -9,6 +9,7 @@ interface Stats {
   skipped: number;
   created: number;
   updated: number;
+  unrated: number;
 }
 
 async function upload(endpoint: string, file: File): Promise<Stats> {
@@ -25,7 +26,8 @@ async function upload(endpoint: string, file: File): Promise<Stats> {
 function StatsLine({ stats }: { stats: Stats }) {
   return (
     <p className="text-[12px] text-muted">
-      Imported {stats.imported} · created {stats.created} · updated {stats.updated} · skipped {stats.skipped}
+      Imported {stats.imported} · rated {stats.created + stats.updated} · unrated {stats.unrated} ·
+      skipped {stats.skipped}
     </p>
   );
 }
@@ -58,7 +60,8 @@ export default function ImportPage() {
       </div>
 
       <p className="mt-3 text-[13px] text-muted">
-        Bring your history in. Ratings are converted to the Appolo 0–10 scale.
+        Bring your history in. Explicit ratings are converted to the Appolo 0–10 scale; Spotify
+        listening history is imported unrated.
       </p>
 
       {error ? <p className="mt-3 text-[12px] text-danger">{error}</p> : null}
@@ -98,7 +101,7 @@ export default function ImportPage() {
       <section className="mt-4 space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4">
         <h2 className="text-[14px] font-semibold text-ink">Spotify</h2>
         <p className="text-[12px] text-muted-2">
-          Import your top tracks as rated music items.
+          Import your top tracks to your watchlist. They stay unrated until you score them.
         </p>
         <a href="/api/spotify/connect">
           <Button type="button" className="w-full" size="lg">

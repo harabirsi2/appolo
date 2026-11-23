@@ -7,6 +7,7 @@ import {
   isValidSpotifyState,
 } from "@/lib/spotify-oauth";
 import { importSpotifyTopTracks } from "@/lib/services/importers";
+import { recordSpotifyConnection } from "@/lib/services/social-graph";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,8 @@ function profileRedirect(request: NextRequest, status: SpotifyOutcome): NextResp
 
 /**
  * Spotify OAuth callback. Exchanges the code for a token, fetches the user's
- * top tracks, and imports them into the catalog as rated music items.
+ * top tracks, imports them as unrated watchlist entries, and records that the
+ * OAuth connection completed.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
@@ -89,6 +91,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
 
     await importSpotifyTopTracks(session.org.id, token.access_token);
+    await recordSpotifyConnection(session.org.id);
     return profileRedirect(request, "imported");
   } catch (error) {
     // The callback should land back on the profile with a clear outcome, and a
